@@ -1,0 +1,99 @@
+#include "game/item.h"
+#include "render/texture_atlas.h"
+#include "world/block.h"
+
+#include <stddef.h>
+
+/* Fallback entry for unknown IDs (aliases NONE). */
+static const ItemInfo ITEM_INVALID = {
+    ITEM_NONE, "none", 64, 0, TOOL_NONE, TOOL_TIER_NONE, 3, 0.0f, 0.0f, 0.0f, 0, 0,
+};
+
+/* Static registry. Block items mirror BlockType values (frozen); tools and
+ * materials use explicit standalone IDs. Ordered for readability only —
+ * lookup is by explicit ID match, never by position.
+ *
+ * Durability values are original TerraCraft tuning (uses per tool): wood 64,
+ * stone 160. Food values are hunger points restored on a completed eat.
+ */
+static const ItemInfo ITEM_TABLE[] = {
+    {3, "Grass Block", 64, 3, TOOL_NONE, TOOL_TIER_NONE, TILE_GRASS_SIDE, 0.20f, 0.80f, 0.20f, 0, 0, 1, 0.4f},
+    {2, "Dirt", 64, 2, TOOL_NONE, TOOL_TIER_NONE, TILE_DIRT, 0.50f, 0.30f, 0.10f, 0, 0, 1, 0.4f},
+    {1, "Stone", 64, 1, TOOL_NONE, TOOL_TIER_NONE, TILE_STONE, 0.50f, 0.50f, 0.50f, 0, 0, 1, 0.4f},
+    {8, "Sand", 64, 8, TOOL_NONE, TOOL_TIER_NONE, TILE_SAND, 0.85f, 0.75f, 0.50f, 0, 0, 1, 0.4f},
+    {6, "Wood", 64, 6, TOOL_NONE, TOOL_TIER_NONE, TILE_WOOD, 0.45f, 0.30f, 0.15f, 0, 0, 1, 0.4f},
+    {7, "Leaves", 64, 7, TOOL_NONE, TOOL_TIER_NONE, TILE_LEAVES, 0.20f, 0.55f, 0.20f, 0, 0, 1, 0.4f},
+    {9, "Glass", 64, 9, TOOL_NONE, TOOL_TIER_NONE, TILE_GLASS, 0.75f, 0.88f, 0.95f, 0, 0, 1, 0.4f},
+    {5, "Bedrock", 64, 5, TOOL_NONE, TOOL_TIER_NONE, TILE_BEDROCK, 0.10f, 0.10f, 0.10f, 0, 0, 1, 0.4f},
+    {10, "Coal Ore", 64, 10, TOOL_NONE, TOOL_TIER_NONE, TILE_COAL_ORE, 0.35f, 0.35f, 0.35f, 0, 0, 1, 0.4f},
+    {11, "Iron Ore", 64, 11, TOOL_NONE, TOOL_TIER_NONE, TILE_IRON_ORE, 0.62f, 0.50f, 0.42f, 0, 0, 1, 0.4f},
+    {12, "Gold Ore", 64, 12, TOOL_NONE, TOOL_TIER_NONE, TILE_GOLD_ORE, 0.70f, 0.62f, 0.40f, 0, 0, 1, 0.4f},
+    {13, "Diamond Ore", 64, 13, TOOL_NONE, TOOL_TIER_NONE, TILE_DIAMOND_ORE, 0.50f, 0.68f, 0.68f, 0, 0, 1, 0.4f},
+    {14, "Snow", 64, 14, TOOL_NONE, TOOL_TIER_NONE, TILE_SNOW, 0.94f, 0.96f, 0.98f, 0, 0, 1, 0.4f},
+    {15, "Grass Plant", 64, 15, TOOL_NONE, TOOL_TIER_NONE, TILE_PLANT, 0.35f, 0.70f, 0.25f, 0, 0, 1, 0.4f},
+    {16, "Flower", 64, 16, TOOL_NONE, TOOL_TIER_NONE, TILE_FLOWER, 0.90f, 0.25f, 0.30f, 0, 0, 1, 0.4f},
+    {17, "Torch", 64, 17, TOOL_NONE, TOOL_TIER_NONE, TILE_TORCH, 0.95f, 0.75f, 0.30f, 0, 0, 1, 0.4f},
+    {18, "Workbench", 64, 18, TOOL_NONE, TOOL_TIER_NONE, TILE_WORKBENCH, 0.55f, 0.40f, 0.22f, 0, 0, 1, 0.4f},
+    {19, "Planks", 64, 19, TOOL_NONE, TOOL_TIER_NONE, TILE_PLANKS, 0.62f, 0.47f, 0.26f, 0, 0, 1, 0.4f},
+    {ITEM_COAL, "Coal", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_COAL, 0.15f, 0.15f, 0.15f, 0, 0, 1, 0.4f},
+    {ITEM_APPLE, "Apple", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_APPLE, 0.85f, 0.15f, 0.15f, 0, 4},
+    {ITEM_STICK, "Stick", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_STICK, 0.55f, 0.42f, 0.25f, 0, 0, 1, 0.4f},
+    {ITEM_ARROW, "Arrow", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_ARROW, 0.80f, 0.75f, 0.60f, 0, 0, 1,
+     0.4f},
+    {ITEM_BONE, "Bone", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_BONE, 0.85f, 0.83f, 0.75f, 0, 0, 1,
+     0.4f},
+    {ITEM_RAW_BEEF, "Raw Beef", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_BEEF, 0.72f, 0.35f, 0.25f, 0,
+     3, 1, 0.4f},
+    {ITEM_LEATHER, "Leather", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_LEATHER, 0.65f, 0.42f, 0.25f,
+     0, 0, 1, 0.4f},
+    {ITEM_WOOD_PICKAXE, "Wood Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_WOOD, TILE_WOOD_PICKAXE, 0.55f, 0.42f,
+     0.25f, 64, 0, 3, 0.5f},
+    {ITEM_STONE_PICKAXE, "Stone Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_STONE, TILE_STONE_PICKAXE, 0.55f, 0.55f,
+     0.58f, 160, 0, 3, 0.5f},
+    {ITEM_WOOD_AXE, "Wood Axe", 1, 0, TOOL_AXE, TOOL_TIER_WOOD, TILE_WOOD_AXE, 0.55f, 0.42f, 0.25f, 64, 0, 4, 0.8f},
+    {ITEM_STONE_AXE, "Stone Axe", 1, 0, TOOL_AXE, TOOL_TIER_STONE, TILE_STONE_AXE, 0.55f, 0.55f, 0.58f, 160,
+     0, 4, 0.8f},
+    {ITEM_WOOD_SHOVEL, "Wood Shovel", 1, 0, TOOL_SHOVEL, TOOL_TIER_WOOD, TILE_WOOD_SHOVEL, 0.55f, 0.42f,
+     0.25f, 64, 0, 2, 0.5f},
+    {ITEM_STONE_SHOVEL, "Stone Shovel", 1, 0, TOOL_SHOVEL, TOOL_TIER_STONE, TILE_STONE_SHOVEL, 0.55f, 0.55f,
+     0.58f, 160, 0, 2, 0.5f},
+    /* Bow (M9 ranged weapon): unstackable, 128 shots per bow, mines at
+     * hand speed (no block prefers TOOL_BOW), melees as fists. */
+    {ITEM_BOW, "Bow", 1, 0, TOOL_BOW, TOOL_TIER_NONE, TILE_BOW, 0.55f, 0.42f, 0.25f, 128, 0, 0, 0.0f},
+};
+#define ITEM_TABLE_COUNT (sizeof(ITEM_TABLE) / sizeof(ITEM_TABLE[0]))
+
+/* Look up an item definition. */
+const ItemInfo *item_get_info(ItemId id)
+{
+    for (size_t i = 0; i < ITEM_TABLE_COUNT; ++i) {
+        if (ITEM_TABLE[i].id == id) {
+            return &ITEM_TABLE[i];
+        }
+    }
+    return &ITEM_INVALID;
+}
+
+/* Check whether an ID names a real item. */
+bool item_is_valid(ItemId id)
+{
+    return item_get_info(id)->id != ITEM_NONE;
+}
+
+/* Check whether an item places a block. */
+bool item_is_block(ItemId id)
+{
+    return item_get_info(id)->place_block != 0;
+}
+
+/* Block placed by an item (0 when not placeable). */
+uint16_t item_to_block(ItemId id)
+{
+    return item_get_info(id)->place_block;
+}
+
+/* Check whether an item can be eaten. */
+bool item_is_edible(ItemId id)
+{
+    return item_get_info(id)->food > 0;
+}

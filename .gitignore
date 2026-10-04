@@ -1,0 +1,62 @@
+# Build output
+build/
+out/
+cmake-build-*/
+
+# Compiled objects / binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+terracraft
+terracraft_tests
+terracraft_bench
+terracraft_bench_mobs
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.vcxproj.user
+.DS_Store
+Thumbs.db
+*~
+
+# vcpkg (if vendored locally)
+vcpkg_installed/
+
+# M5 runtime data (user-local, never commit)
+saves/
+config/
+resourcepacks/
+
+# Local assistant context is private workspace data and must never be pushed.
+*AI_MEMORY*
+*ai_memory*
+
+# Owner-supplied Mojang client assets + generated conversions (user-local,
+# never commit: 14k files under the owner's own license claim; the repo
+# itself ships zero third-party assets and builds fully without them).
+mcassets/
+
+# Test scratch dirs/files (removed by the tests themselves, but a crash
+# mid-suite can leave them behind)
+test_tmp_*
+test_tmp_m5_settings*.cfg

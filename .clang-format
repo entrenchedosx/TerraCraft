@@ -1,0 +1,25 @@
+# C style matching src/ (verified against src/game/inventory.c,
+# src/core/app.c, src/world/world_meta.c):
+# 4-space indent, 120 columns, Allman braces for functions only
+# (control statements keep `if (...) {` on one line), `Type *p`
+# right-aligned pointers, no cast space (`(unsigned)x`), cases not
+# indented extra, include order untouched (never re-sorted).
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterUnion: false
+  AfterExternBlock: false
+  SplitEmptyFunction: true
+PointerAlignment: Right
+DerivePointerAlignment: false
+SortIncludes: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+IndentCaseLabels: false
+SpaceAfterCStyleCast: false
