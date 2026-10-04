@@ -16,16 +16,22 @@ alone.
 - **Reproduction:** Open the inventory or Creative catalogue and inspect the
   affected item. Also drop it in the world. The affected item names, active
   resource pack, and a screenshot will make the report reproducible.
-- **Root cause:** Not confirmed. Static inspection found the current
-  `ItemInfo.tile` mappings, 46-entry file table, atlas UV calculation, BMP
-  row conversion, and UI/world draw paths consistent. Sampled local BMP art
-  files were nonempty. This does not verify the rendered result.
-- **Fix:** Added a complete registry-to-tile and procedural-pixel test. A
-  rendered-only fix remains pending reproduction evidence.
-- **Test added:** `test_item_texture_mapping` checks all 32 registered items,
-  expected tile IDs, file stems, and visible fallback pixels.
-- **Human verified?:** No; a screenshot or identified item/path is still
-  needed.
+- **Root cause:** A confirmed custom-pack path bug passed one buffer as both
+  the destination and an input to `path_join()`. Since `path_join()` clears
+  its destination first, the generated path became just `tiles/`; pack
+  discovery and tile overrides therefore failed. Changing packs in Settings
+  also did not reload the live atlas. No equivalent atlas UV or item-ID
+  mismatch was found for `Default`.
+- **Fix:** Pack paths now use a separate intermediate buffer, discovery uses
+  the same checked path helper, and changing the selected pack reloads the
+  atlas immediately. The static mapping and BMP checks remain intact.
+- **Tests added:** `test_atlas_resource_pack_paths` verifies the pack path,
+  discovery, and application of a tile with an item icon index. The existing
+  `test_item_texture_mapping` covers all 32 registered items and fallback
+  pixels.
+- **Human verified?:** No. The custom-pack cause is fixed, but the user's
+  affected item, screen path, and active pack are still unknown; visual
+  confirmation is needed before closing the report.
 
 ## Manual playtest checklist
 
@@ -91,19 +97,22 @@ the affected behavior has been reproduced and checked in a running build.
   block.
 - **Human verified?:** No.
 
-## TC-FID-004 — Gameplay does not use a 20 TPS simulation (open)
+## TC-FID-004 — Gameplay lacks position interpolation (open)
 
 - **Subsystem:** Simulation timing and input.
-- **Observed TerraCraft behavior:** Most gameplay updates run once per
-  rendered frame; player physics uses 1/60-second substeps.
-- **Expected Java-like behavior:** Authoritative gameplay advances at 20 TPS,
-  with input edges retained and presentation interpolated between ticks.
-- **Reproduction:** Record player movement and item/day timers at 30, 60, 144,
-  and 240 render FPS for equal simulated durations.
-- **Root cause:** Gameplay updates are split across a render-frame app loop
-  and a player-only fixed substep.
+- **Observed TerraCraft behavior:** The app now advances world systems at 20
+  TPS with latched input edges, but draws the latest authoritative positions
+  directly after each render frame.
+- **Expected Java-like behavior:** Rendered positions interpolate between
+  adjacent simulation ticks without changing collision, raycast, or save
+  state.
+- **Reproduction:** Observe the player, dropped items, mobs, and projectiles
+  at high render rates while the simulation runs at 20 TPS.
+- **Root cause:** Position snapshots and interpolation have not been added
+  to the rendering boundary.
 - **Fix:** None yet.
-- **Test added:** No frame-rate-independence test yet.
+- **Test added:** Clock tests cover tick counts at 30/60/144/240 Hz and
+  catch-up accounting; interpolation tests remain to be added.
 - **Human verified?:** No.
 
 ## TC-FID-005 — Movement lacks acceleration, poses, and edge-safe sneak (open)
@@ -124,21 +133,22 @@ the affected behavior has been reproduced and checked in a running build.
   added.
 - **Human verified?:** No.
 
-## TC-FID-006 — Inventory and workbench freeze the world (open)
+## TC-FID-006 — Inventory and workbench world-tick behavior (implemented; playtest open)
 
 - **Subsystem:** GUI pause semantics.
-- **Observed TerraCraft behavior:** Inventory and crafting states stop world
-  simulation.
+- **Observed TerraCraft behavior:** Inventory and crafting now advance the
+  world; player movement and actions are disabled while those screens are
+  open.
 - **Expected Java-like behavior:** Inventory/workbench keep single-player
   simulation running; the pause menu stops it.
 - **Reproduction:** Leave a dropped item or mob active, open E or a workbench,
   wait, then compare item age, world time, and mob position. Repeat with the
   pause menu.
-- **Root cause:** `game_state_is_live()` currently returns true only for
-  `PLAYING` and `LOADING`.
-- **Fix:** None yet.
-- **Test added:** State tests cover current pause behavior, but not elapsed
-  world time and entity aging through inventory.
+- **Root cause:** Resolved in this round by adding an explicit world-tick
+  state policy and routing fixed ticks through inventory and crafting.
+- **Fix:** Implemented in `game_state_ticks_world()` and the app update loop.
+- **Test added:** State tests cover which states tick; live world-time and
+  entity-aging integration tests remain to be added.
 - **Human verified?:** No.
 
 ## TC-FID-007 — Survival state omits saturation and sprint gating (open)

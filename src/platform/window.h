@@ -114,6 +114,12 @@ void window_get_relative_motion(int *out_dx, int *out_dy);
  */
 bool window_is_key_down(int scancode);
 
+/* Consume one key-down edge latched while SDL events were drained. Key-up
+ * before a simulation tick does not erase the press. Returns false for an
+ * invalid scancode or when there was no pending edge.
+ */
+bool window_take_key_pressed(Window *win, int scancode);
+
 /* Mouse buttons for window_is_mouse_down (match SDL_BUTTON_* values). */
 #define MINEC_MOUSE_LEFT 1
 #define MINEC_MOUSE_MIDDLE 2
@@ -127,6 +133,15 @@ bool window_is_key_down(int scancode);
  * Returns: true if held (false on bad args).
  */
 bool window_is_mouse_down(int button);
+
+/* Consume one mouse-button-down edge latched while SDL events were drained.
+ */
+bool window_take_mouse_pressed(Window *win, int button);
+
+/* Clear queued key and mouse press edges on focus/state transitions so UI
+ * or resumed gameplay cannot consume a stale action.
+ */
+void window_clear_input_edges(Window *win);
 
 /* Take the accumulated mouse-wheel motion since the last call (consumes it).
  * Positive y = wheel up. Updated from SDL_MOUSEWHEEL events drained by

@@ -99,16 +99,24 @@ void app_enter_state(AppContext *app, GameState to)
     LOG_INFO("state: %s -> %s", game_state_name(app->state), game_state_name(to));
     GameState from = app->state;
     app->state = to;
+    window_clear_input_edges(app->window);
+    if (!game_state_ticks_world(from) && game_state_ticks_world(to)) {
+        app->discard_next_simulation_elapsed = true;
+    }
+    if (game_state_ticks_world(from) != game_state_ticks_world(to) || to == GAME_STATE_PLAYING) {
+        simulation_clock_reset_phase(&app->simulation);
+    }
     bool capture = (to == GAME_STATE_PLAYING);
     window_set_relative_mouse(app->window, capture);
     window_text_input(to == GAME_STATE_CREATE_WORLD);
-    if (from == GAME_STATE_PLAYING && to != GAME_STATE_PLAYING) {
+    if (game_state_ticks_world(from) && to != GAME_STATE_PLAYING) {
         /* Eating and bow draws never survive a state change (interrupted
          * uses consume nothing): pause, inventory, death, and quit all
          * cancel them. */
         app->player.eat_active = false;
         app->player.eat_t = 0.0f;
         survival_bow_reset(&app->player);
+        survival_mine_reset(&app->player);
     }
     if (to == GAME_STATE_PLAYING) {
         /* Re-entering play (resume/respawn/inventory-close): the menu click
@@ -197,6 +205,8 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->fps_smooth = 0.0f;
     app->show_debug = false;
     app->autosave_timer = 0.0;
+    simulation_clock_init(&app->simulation);
+    app->discard_next_simulation_elapsed = false;
     app->load_done = 0;
     app->load_total = 0;
     app->state = GAME_STATE_MAIN_MENU;
@@ -343,8 +353,8 @@ static void app_poll_move_input(PlayerInput *in)
 
 /* Handle discrete in-game actions: fly/F3 toggles, hotbar keys/wheel,
  * E inventory toggle, F6/F8 dev helpers, creative instant break/place.
- * Survival mining runs held (see app_tick_mining). PLAYING only; call
- * after the event drain.
+ * Survival mining consumes buffered press edges and held state on sim ticks
+ * (see app_tick_mining). PLAYING only; call after the event drain.
  *
  * Args:
  *   app: context.
@@ -359,7 +369,8 @@ static void app_poll_discrete_input(AppContext *app)
 
     /* Fly toggle on F press (creative only; survival has no flight). */
     bool f_down = window_is_key_down(SDL_SCANCODE_F);
-    if (f_down && !app->prev_fly_key && creative) {
+    bool f_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F);
+    if (f_pressed && creative) {
         app->player.flying = !app->player.flying;
         app->player.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
         LOG_INFO("Game mode: %s", app->player.flying ? "Creative (fly/no-clip)" : "Survival (gravity/collision)");
@@ -368,7 +379,8 @@ static void app_poll_discrete_input(AppContext *app)
 
     /* F3 debug overlay toggle. */
     bool f3_down = window_is_key_down(SDL_SCANCODE_F3);
-    if (f3_down && !app->prev_f3_key) {
+    bool f3_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F3);
+    if (f3_pressed) {
         app->show_debug = !app->show_debug;
         LOG_INFO("Debug overlay: %s", app->show_debug ? "on" : "off");
     }
@@ -376,7 +388,8 @@ static void app_poll_discrete_input(AppContext *app)
 
     /* E toggles the inventory (pauses sim; cursor resolved on close). */
     bool e_down = window_is_key_down(SDL_SCANCODE_E);
-    if (e_down && !app->prev_e_key) {
+    bool e_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_E);
+    if (e_pressed) {
         survival_mine_reset(&app->player);
         app_enter_state(app, GAME_STATE_INVENTORY);
     }
@@ -390,7 +403,8 @@ static void app_poll_discrete_input(AppContext *app)
      * F7 hurts the aimed mob; F9/F10/F11 spawn cow/gloomstalker/
      * skeleton; F12 clears all arrows (shift+F6 gives bow + arrows). */
     bool f6_down = window_is_key_down(SDL_SCANCODE_F6);
-    if (f6_down && !app->prev_f6_key) {
+    bool f6_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F6);
+    if (f6_pressed) {
         bool shift = window_is_key_down(SDL_SCANCODE_LSHIFT) || window_is_key_down(SDL_SCANCODE_RSHIFT);
         if (shift) {
             /* Shift+F6: ranged kit (bow + full arrow stack). */
@@ -417,14 +431,16 @@ static void app_poll_discrete_input(AppContext *app)
     }
     app->prev_f6_key = f6_down;
     bool f8_down = window_is_key_down(SDL_SCANCODE_F8);
-    if (f8_down && !app->prev_f8_key && !creative) {
+    bool f8_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F8);
+    if (f8_pressed && !creative) {
         survival_damage_player(&app->player, 5.0f);
         audio_play(&app->audio, AUDIO_PLAYER_HURT);
         LOG_INFO("Dev hurt: 5 damage (HP %.1f)", (double)app->player.health);
     }
     app->prev_f8_key = f8_down;
     bool f7_down = window_is_key_down(SDL_SCANCODE_F7);
-    if (f7_down && !app->prev_f7_key) {
+    bool f7_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F7);
+    if (f7_pressed) {
         EntityId eid = ENTITY_ID_NULL;
         if (app_aim_mob(app, &eid)) {
             app_strike_mob(app, eid, 5.0f, 5.0f);
@@ -435,22 +451,26 @@ static void app_poll_discrete_input(AppContext *app)
     }
     app->prev_f7_key = f7_down;
     bool f9_down = window_is_key_down(SDL_SCANCODE_F9);
-    if (f9_down && !app->prev_f9_key) {
+    bool f9_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F9);
+    if (f9_pressed) {
         app_debug_spawn_mob(app, ENTITY_COW);
     }
     app->prev_f9_key = f9_down;
     bool f10_down = window_is_key_down(SDL_SCANCODE_F10);
-    if (f10_down && !app->prev_f10_key) {
+    bool f10_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F10);
+    if (f10_pressed) {
         app_debug_spawn_mob(app, ENTITY_GLOOMSTALKER);
     }
     app->prev_f10_key = f10_down;
     bool f11_down = window_is_key_down(SDL_SCANCODE_F11);
-    if (f11_down && !app->prev_f11_key) {
+    bool f11_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F11);
+    if (f11_pressed) {
         app_debug_spawn_mob(app, ENTITY_SKELETON);
     }
     app->prev_f11_key = f11_down;
     bool f12_down = window_is_key_down(SDL_SCANCODE_F12);
-    if (f12_down && !app->prev_f12_key) {
+    bool f12_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F12);
+    if (f12_pressed) {
         int n = projectile_active_count(&app->projectiles);
         projectile_pool_clear(&app->projectiles);
         LOG_INFO("Dev projectiles cleared: %d arrow(s)", n);
@@ -462,7 +482,7 @@ static void app_poll_discrete_input(AppContext *app)
      * cancel bow draws (never fires, never consumes). */
     for (int i = 0; i < 9; ++i) {
         bool down = window_is_key_down(SDL_SCANCODE_1 + i);
-        if (down && !app->prev_digit[i]) {
+        if (window_take_key_pressed(app->window, SDL_SCANCODE_1 + i)) {
             app->player.hotbar_sel = i;
             survival_mine_reset(&app->player);
             survival_bow_reset(&app->player);
@@ -487,39 +507,34 @@ static void app_poll_discrete_input(AppContext *app)
         LOG_INFO("Hotbar: slot %d (%s)", sel + 1, info ? info->name : "?");
     }
 
-    if (creative) {
-        /* Creative: instant break on edge (no drops), place without consume. */
-        bool left = window_is_mouse_down(MINEC_MOUSE_LEFT);
-        bool right = window_is_mouse_down(MINEC_MOUSE_RIGHT);
-        if ((left && !app->prev_mouse_l) || (right && !app->prev_mouse_r)) {
-            Vec3 eye = player_eye_pos(&app->player);
-            HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world,
-                                             survival_reach(true));
-            if (left && !app->prev_mouse_l) {
-                if (!app_try_attack(app)) {
-                    int broken = interaction_break(app->world, &hit);
-                    if (broken >= 0) {
-                        audio_play_block(&app->audio, AUDIO_BLOCK_BREAK, (uint16_t)broken);
-                        particle_burst_block(&app->particles, (uint16_t)broken, hit.block[0], hit.block[1],
-                                             hit.block[2], 16);
-                        LOG_DEBUG("break ok: id %d", broken);
-                    }
-                }
-            }
-            if (right && !app->prev_mouse_r) {
-                ItemId sel = app->player.inv.slots[app->player.hotbar_sel].item;
-                if (interaction_place(app->world, &app->player, &hit, item_to_block(sel), NULL)) {
-                    audio_play_block(&app->audio, AUDIO_BLOCK_PLACE, item_to_block(sel));
-                }
-            }
+    /* Mouse actions are consumed by the fixed world tick so a press between
+     * ticks remains queued until gameplay can act on it. */
+}
+
+/* Creative block actions are instantaneous, but still run on a world tick. */
+static void app_tick_creative_actions(AppContext *app)
+{
+    bool left_pressed = window_take_mouse_pressed(app->window, MINEC_MOUSE_LEFT);
+    bool right_pressed = window_take_mouse_pressed(app->window, MINEC_MOUSE_RIGHT);
+    if (!left_pressed && !right_pressed) {
+        return;
+    }
+    Vec3 eye = player_eye_pos(&app->player);
+    HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world,
+                                     survival_reach(true));
+    if (left_pressed && !app_try_attack(app)) {
+        int broken = interaction_break(app->world, &hit);
+        if (broken >= 0) {
+            audio_play_block(&app->audio, AUDIO_BLOCK_BREAK, (uint16_t)broken);
+            particle_burst_block(&app->particles, (uint16_t)broken, hit.block[0], hit.block[1], hit.block[2], 16);
+            LOG_DEBUG("break ok: id %d", broken);
         }
-        app->prev_mouse_l = left;
-        app->prev_mouse_r = right;
-    } else {
-        /* Survival owns no edges here: app_tick_mining tracks prev_mouse_l
-         * (held state) and app_tick_place consumes the prev_mouse_r edge
-         * itself later this tick. Touching them here would swallow the
-         * right-button press before placement ever sees it. */
+    }
+    if (right_pressed) {
+        ItemId sel = app->player.inv.slots[app->player.hotbar_sel].item;
+        if (interaction_place(app->world, &app->player, &hit, item_to_block(sel), NULL)) {
+            audio_play_block(&app->audio, AUDIO_BLOCK_PLACE, item_to_block(sel));
+        }
     }
 }
 
@@ -648,8 +663,9 @@ static void app_debug_spawn_mob(AppContext *app, EntityType type)
     LOG_INFO("debug spawn: no ground near crosshair");
 }
 
-/* Survival held-button mining: raycast each frame, advance progress on a
- * stable target, break + spawn a drop entity on completion. Any target,
+/* Survival held-button mining: raycast on each simulation tick, advance
+ * progress on a stable target, break + spawn a drop entity on completion. Any
+ * target,
  * held-item, reach, or button change resets progress.
  *
  * Args:
@@ -657,20 +673,19 @@ static void app_debug_spawn_mob(AppContext *app, EntityType type)
  */
 static void app_tick_mining(AppContext *app, float dt)
 {
+    bool pressed = window_take_mouse_pressed(app->window, MINEC_MOUSE_LEFT);
     bool held = window_is_mouse_down(MINEC_MOUSE_LEFT);
+    if (pressed && app_try_attack(app)) {
+        survival_mine_reset(&app->player);
+        app->prev_mouse_l = held;
+        return;
+    }
     if (!held) {
         survival_mine_reset(&app->player);
         app->prev_mouse_l = false;
         return;
     }
-    bool pressed = !app->prev_mouse_l;
     app->prev_mouse_l = true;
-    /* Melee wins the press edge (entity nearer than block): the swing
-     * consumes this edge and mining starts on hold from the next frame. */
-    if (pressed && app_try_attack(app)) {
-        survival_mine_reset(&app->player);
-        return;
-    }
     Vec3 eye = player_eye_pos(&app->player);
     HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world,
                                      survival_reach(false));
@@ -784,7 +799,7 @@ static AudioEvent app_footstep_event(uint16_t below)
  *
  * Args:
  *   app: context with an open world.
- *   dt: clamped frame time.
+ *   dt: fixed simulation time step.
  */
 static void app_tick_eat(AppContext *app, float dt)
 {
@@ -886,12 +901,9 @@ static void app_tick_bow(AppContext *app, float dt)
  */
 static void app_tick_place(AppContext *app)
 {
-    bool right = window_is_mouse_down(MINEC_MOUSE_RIGHT);
-    if (!right || app->prev_mouse_r) {
-        app->prev_mouse_r = right;
+    if (!window_take_mouse_pressed(app->window, MINEC_MOUSE_RIGHT)) {
         return;
     }
-    app->prev_mouse_r = true;
     Vec3 eye = player_eye_pos(&app->player);
     HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world,
                                      survival_reach(false));
@@ -1082,8 +1094,7 @@ void app_resolve_cursor(AppContext *app)
     }
 }
 /* Assemble the menu UiFrame for this frame: drains NO events itself (the
- * caller drains), but samples mouse/wheel/keys. Key edges use app prev
- * state updated here. Right-click edges use prev_menu_rclick.
+ * caller drains), but consumes latched press edges and samples held state.
  *
  * Args:
  *   app: context.
@@ -1099,11 +1110,15 @@ static void app_build_uiframe(AppContext *app, UiFrame *ui, const char *text)
     ui->key_escape = esc;
     window_get_mouse_pos(&ui->mouse_x, &ui->mouse_y);
     ui->mouse_down = window_is_mouse_down(MINEC_MOUSE_LEFT);
-    ui->mouse_clicked = ui->mouse_down && !app->prev_menu_click;
+    ui->mouse_clicked = app->state == GAME_STATE_PLAYING
+                            ? false
+                            : window_take_mouse_pressed(app->window, MINEC_MOUSE_LEFT);
     app->prev_menu_click = ui->mouse_down;
     bool rdown = window_is_mouse_down(MINEC_MOUSE_RIGHT);
     ui->mouse_rdown = rdown;
-    ui->mouse_rclicked = rdown && !app->prev_menu_rclick;
+    ui->mouse_rclicked = app->state == GAME_STATE_PLAYING
+                             ? false
+                             : window_take_mouse_pressed(app->window, MINEC_MOUSE_RIGHT);
     app->prev_menu_rclick = rdown;
     ui->wheel = window_take_wheel_delta(app->window);
     if (text != NULL) {
@@ -1119,11 +1134,12 @@ static void app_build_uiframe(AppContext *app, UiFrame *ui, const char *text)
     bool up = window_is_key_down(SDL_SCANCODE_UP);
     bool down = window_is_key_down(SDL_SCANCODE_DOWN);
     bool del = window_is_key_down(SDL_SCANCODE_DELETE);
-    ui->key_return = ret && !app->prev_return;
-    ui->key_backspace = bs && !app->prev_backspace;
-    ui->key_up = up && !app->prev_up;
-    ui->key_down = down && !app->prev_down;
-    ui->key_delete = del && !app->prev_delete;
+    ui->key_return = window_take_key_pressed(app->window, SDL_SCANCODE_RETURN) ||
+                     window_take_key_pressed(app->window, SDL_SCANCODE_KP_ENTER);
+    ui->key_backspace = window_take_key_pressed(app->window, SDL_SCANCODE_BACKSPACE);
+    ui->key_up = window_take_key_pressed(app->window, SDL_SCANCODE_UP);
+    ui->key_down = window_take_key_pressed(app->window, SDL_SCANCODE_DOWN);
+    ui->key_delete = window_take_key_pressed(app->window, SDL_SCANCODE_DELETE);
     app->prev_return = ret;
     app->prev_backspace = bs;
     app->prev_up = up;
@@ -1156,9 +1172,8 @@ static void app_tick_loading(AppContext *app)
     app_enter_state(app, GAME_STATE_PLAYING);
 }
 
-/* PLAYING tick (M6 order): look/input, UI-state edges, player sim,
- * mining/interactions, entities, pickup, health/hunger, streaming,
- * render (world, entities, overlay, HUD, debug), autosave.
+/* One authoritative world tick. Rendering and chunk refresh happen once per
+ * outer frame in app_render_playing(), after all scheduled ticks.
  *
  * Args:
  *   app: context.
@@ -1166,20 +1181,21 @@ static void app_tick_loading(AppContext *app)
  */
 static void app_tick_playing(AppContext *app, float dt)
 {
-    if (app->state != GAME_STATE_PLAYING) {
-        return; /* Discrete poll already moved us out (E/ESC/death). */
+    if (!game_state_ticks_world(app->state) || !app->world_open) {
+        return;
     }
-    int mdx = 0;
-    int mdy = 0;
-    window_get_relative_motion(&mdx, &mdy);
-    if (mdx != 0 || mdy != 0) {
-        player_add_look(&app->player, (float)mdx, (float)mdy, app->sensitivity);
-    }
+    bool controllable = app->state == GAME_STATE_PLAYING;
 
     time_system_update(&app->clock, dt);
 
     PlayerInput in;
-    app_poll_move_input(&in);
+    if (controllable) {
+        app_poll_move_input(&in);
+        /* Preserve a quick jump tap until one simulation tick can consume it. */
+        in.jump = in.jump || window_take_key_pressed(app->window, SDL_SCANCODE_SPACE);
+    } else {
+        memset(&in, 0, sizeof(in));
+    }
     bool was_grounded = app->player.grounded;
     /* Drawing a bow slows movement (both modes, MC-feel anchor): scale
      * the tuned speeds around the update, then restore them. */
@@ -1201,7 +1217,7 @@ static void app_tick_playing(AppContext *app, float dt)
 
     /* Activity strain (survival only): sprinting while moving and jump
      * takeoffs accumulate exhaustion (burned into hunger by the policy). */
-    if (!creative) {
+    if (!creative && controllable) {
         if (in.sprint && (in.fwd != 0.0f || in.strafe != 0.0f)) {
             survival_add_exhaustion(&app->player, SURVIVAL_EXHAUST_SPRINT * dt);
         }
@@ -1209,7 +1225,7 @@ static void app_tick_playing(AppContext *app, float dt)
             survival_add_exhaustion(&app->player, SURVIVAL_EXHAUST_JUMP);
         }
     }
-    app->prev_jump = in.jump;
+    app->prev_jump = controllable && in.jump;
 
     /* Melee + mob-damage cooldowns decay on the play tick. */
     if (app->player.hurt_t > 0.0f) {
@@ -1227,7 +1243,7 @@ static void app_tick_playing(AppContext *app, float dt)
 
     /* Footsteps: distance cadence on ground (either mode, never flying,
      * never sneaking — Minecraft stays silent while sneaking). */
-    if (app->player.grounded && !app->player.flying && !app->player.sneaking &&
+    if (controllable && app->player.grounded && !app->player.flying && !app->player.sneaking &&
         (in.fwd != 0.0f || in.strafe != 0.0f)) {
         float hspeed = sqrtf(app->player.vel.x * app->player.vel.x + app->player.vel.z * app->player.vel.z);
         app->step_dist += hspeed * dt;
@@ -1239,9 +1255,6 @@ static void app_tick_playing(AppContext *app, float dt)
     } else {
         app->step_dist = 0.0f;
     }
-
-    camera_set_position(app->camera, player_eye_pos(&app->player));
-    camera_set_yaw_pitch(app->camera, app->player.yaw, app->player.pitch);
 
     /* Fall damage (survival, non-flying): consume the landing report. */
     if (!survival_is_creative(&app->player) && !app->player.flying && app->player.last_fall >= 0.0f) {
@@ -1264,16 +1277,20 @@ static void app_tick_playing(AppContext *app, float dt)
      * owns RMB in both modes whenever a bow is held (bows are neither
      * edible nor placeable, so no path collides).
      * Creative uses instant break/place inside discrete input instead. */
-    if (!survival_is_creative(&app->player)) {
+    if (controllable && !survival_is_creative(&app->player)) {
         app_tick_eat(app, dt);
         app_tick_bow(app, dt);
         app_tick_mining(app, dt);
         app_tick_place(app);
-    } else {
+    } else if (controllable) {
         app_tick_bow(app, dt);
+        app_tick_creative_actions(app);
+    } else {
+        survival_mine_reset(&app->player);
+        survival_bow_reset(&app->player);
     }
 
-    /* Living mobs simulate (both modes; frozen off-PLAYING). Mob strikes
+    /* Living mobs simulate (both modes; frozen by pause/death). Mob strikes
      * apply through the hurt-window gate (creative players immune).
      * Requested skeleton shots fire through the shared pool right here,
      * before projectiles simulate — same-tick arrows fly immediately. */
@@ -1373,7 +1390,7 @@ static void app_tick_playing(AppContext *app, float dt)
         app->mine_fx_t = 0.0f;
     }
 
-    /* Hunger/regen/starve (survival only; timers freeze off-PLAYING). */
+    /* Hunger/regen/starve (survival only; timers freeze while paused/dead). */
     if (!survival_is_creative(&app->player)) {
         survival_hunger_update(&app->player, dt);
     }
@@ -1399,9 +1416,22 @@ static void app_tick_playing(AppContext *app, float dt)
         return;
     }
 
-    streamer_update(&app->streamer, app->player.pos, MINEC_STREAM_BUDGET);
-    renderer_prune_world(app->renderer, app->world);
-    renderer_refresh_world(app->renderer, app->world);
+    app->autosave_timer += (double)dt;
+    if (app->autosave_timer >= MINEC_AUTOSAVE_SECONDS) {
+        app->autosave_timer -= MINEC_AUTOSAVE_SECONDS;
+        session_save_now(app);
+    }
+}
+
+static void app_prepare_world_render(AppContext *app);
+
+/* Refresh streamed geometry once and draw the current play presentation. */
+static void app_render_playing(AppContext *app)
+{
+    if (app == NULL || !app->world_open) {
+        return;
+    }
+    app_prepare_world_render(app);
 
     float aspect = app->height > 0 ? (float)app->width / (float)app->height : 16.0f / 9.0f;
     renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
@@ -1424,20 +1454,28 @@ static void app_tick_playing(AppContext *app, float dt)
     }
     bool vitals = !survival_is_creative(&app->player);
     float eat_frac = app->player.eat_active ? app->player.eat_t / SURVIVAL_EAT_TIME : -1.0f;
-    float bow_frac =
-        app->player.bow_drawing ? survival_bow_charge(app->player.bow_t) : -1.0f;
+    float bow_frac = app->player.bow_drawing ? survival_bow_charge(app->player.bow_t) : -1.0f;
     renderer_draw_hud(app->renderer, app->width, app->height, app->player.inv.slots, app->player.hotbar_sel,
                       app->player.health, app->player.max_health, app->player.hunger, app->player.max_hunger,
                       vitals, eat_frac, bow_frac, app->hurt_flash);
     if (app->show_debug) {
         screens_draw_debug(app);
     }
+}
 
-    app->autosave_timer += (double)dt;
-    if (app->autosave_timer >= MINEC_AUTOSAVE_SECONDS) {
-        app->autosave_timer = 0.0;
-        session_save_now(app);
+/* Refresh streaming and camera state once before rendering any live world
+ * view, including inventory and crafting overlays.
+ */
+static void app_prepare_world_render(AppContext *app)
+{
+    if (app == NULL || !app->world_open) {
+        return;
     }
+    camera_set_position(app->camera, player_eye_pos(&app->player));
+    camera_set_yaw_pitch(app->camera, app->player.yaw, app->player.pitch);
+    streamer_update(&app->streamer, app->player.pos, MINEC_STREAM_BUDGET);
+    renderer_prune_world(app->renderer, app->world);
+    renderer_refresh_world(app->renderer, app->world);
 }
 
 /* Enter the main loop: state machine over menus, loading, and play.
@@ -1460,13 +1498,10 @@ int app_run(AppContext *app)
 
     while (app->running) {
         double frame_start = time_now_seconds();
-        float dt = (float)(frame_start - app->last_frame_time);
+        double frame_elapsed = frame_start - app->last_frame_time;
         app->last_frame_time = frame_start;
-        if (dt < 0.0f) {
-            dt = 0.0f;
-        }
-        if (dt > 0.1f) {
-            dt = 0.1f;
+        if (frame_elapsed < 0.0) {
+            frame_elapsed = 0.0;
         }
 
         /* Drain SDL events: system handling + menu input accumulation. */
@@ -1549,6 +1584,32 @@ int app_run(AppContext *app)
             app_poll_discrete_input(app);
         }
 
+        /* Look remains responsive at render rate, while world actions use
+         * latched input edges and held movement is sampled on fixed ticks.
+         */
+        if (app->state == GAME_STATE_PLAYING) {
+            int mdx = 0;
+            int mdy = 0;
+            window_get_relative_motion(&mdx, &mdy);
+            if (mdx != 0 || mdy != 0) {
+                player_add_look(&app->player, (float)mdx, (float)mdy, app->sensitivity);
+            }
+        }
+        if (game_state_ticks_world(app->state)) {
+            if (app->discard_next_simulation_elapsed) {
+                frame_elapsed = 0.0;
+                app->discard_next_simulation_elapsed = false;
+            }
+            SimulationAdvance advance = simulation_clock_advance(&app->simulation, frame_elapsed);
+            if (advance.dropped_ticks > 0) {
+                LOG_WARN("simulation: dropped %llu overdue tick(s) (%.3f seconds) after catch-up cap",
+                         (unsigned long long)advance.dropped_ticks, advance.dropped_time);
+            }
+            for (unsigned tick = 0; tick < advance.ticks && game_state_ticks_world(app->state); ++tick) {
+                app_tick_playing(app, (float)SIMULATION_TICK_SECONDS);
+            }
+        }
+
         app_build_uiframe(app, &ui, text_accum);
 
         switch (app->state) {
@@ -1572,7 +1633,8 @@ int app_run(AppContext *app)
                 break;
             }
             {
-                /* Frozen world behind the inventory (sim paused by design). */
+                /* World simulation continues behind the inventory. */
+                app_prepare_world_render(app);
                 float aspect = app->height > 0 ? (float)app->width / (float)app->height : 16.0f / 9.0f;
                 renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
@@ -1586,7 +1648,8 @@ int app_run(AppContext *app)
                  * edge here shares prev_e_key with PLAYING so a held key
                  * from opening never double-triggers. */
                 bool e_down = window_is_key_down(SDL_SCANCODE_E);
-                if (e_down && !app->prev_e_key && app->state == GAME_STATE_INVENTORY) {
+                bool e_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_E);
+                if (e_pressed && app->state == GAME_STATE_INVENTORY) {
                     survival_mine_reset(&app->player);
                     app_resolve_cursor(app);
                     app_resolve_crafting(app);
@@ -1602,7 +1665,8 @@ int app_run(AppContext *app)
                 break;
             }
             {
-                /* Frozen world behind the bench (sim paused by design). */
+                /* World simulation continues behind the workbench. */
+                app_prepare_world_render(app);
                 float aspect = app->height > 0 ? (float)app->width / (float)app->height : 16.0f / 9.0f;
                 renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
@@ -1614,7 +1678,8 @@ int app_run(AppContext *app)
                 screens_update(app, &ui);
                 /* E closes the bench too (shares prev_e_key with PLAYING). */
                 bool e_down = window_is_key_down(SDL_SCANCODE_E);
-                if (e_down && !app->prev_e_key && app->state == GAME_STATE_CRAFTING) {
+                bool e_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_E);
+                if (e_pressed && app->state == GAME_STATE_CRAFTING) {
                     survival_mine_reset(&app->player);
                     app_resolve_cursor(app);
                     app_resolve_crafting(app);
@@ -1651,7 +1716,7 @@ int app_run(AppContext *app)
                 app_enter_state(app, GAME_STATE_QUIT);
                 break;
             }
-            app_tick_playing(app, dt);
+            app_render_playing(app);
             break;
         case GAME_STATE_QUIT:
         default:

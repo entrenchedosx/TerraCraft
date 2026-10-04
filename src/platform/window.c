@@ -1,5 +1,6 @@
 #include "platform/window.h"
 #include "core/log.h"
+#include "game/input_buffer.h"
 
 /* Portable SDL include: vcpkg uses <SDL2/SDL.h>, some distros expose <SDL.h>. */
 #if defined(__has_include)
@@ -18,6 +19,7 @@
 struct Window {
     SDL_Window *handle; /* Owned SDL window. */
     int wheel_accum;    /* Accumulated SDL_MOUSEWHEEL y ticks (consumed on take). */
+    InputBuffer input;
 };
 
 /* Reference count of live windows; SDL video init/quit is tied to it. */
@@ -69,6 +71,7 @@ Window *window_create(const char *title, int width, int height)
     }
     win->handle = handle;
     win->wheel_accum = 0;
+    input_buffer_init(&win->input);
     s_window_count++;
 
     int dw = width;
@@ -114,14 +117,30 @@ bool window_poll_event(Window *win, WindowEvent *out)
     }
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
+            if (ev.key.windowID != SDL_GetWindowID(win->handle)) {
+                continue;
+            }
+            int scancode = (int)ev.key.keysym.scancode;
+            bool pressed = ev.type == SDL_KEYDOWN;
+            input_buffer_key_event(&win->input, scancode, pressed, ev.key.repeat != 0);
+            if (pressed && ev.key.keysym.sym == SDLK_ESCAPE && !ev.key.repeat) {
+                out->kind = WINDOW_EVENT_KEY_ESC;
+                out->width = 0;
+                out->height = 0;
+                return true;
+            }
+            continue;
+        }
+        if (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP) {
+            if (ev.button.windowID == SDL_GetWindowID(win->handle)) {
+                unsigned button = (unsigned)ev.button.button;
+                input_buffer_mouse_event(&win->input, (int)button, ev.type == SDL_MOUSEBUTTONDOWN);
+            }
+            continue;
+        }
         if (ev.type == SDL_QUIT) {
             out->kind = WINDOW_EVENT_QUIT;
-            out->width = 0;
-            out->height = 0;
-            return true;
-        }
-        if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) {
-            out->kind = WINDOW_EVENT_KEY_ESC;
             out->width = 0;
             out->height = 0;
             return true;
@@ -162,6 +181,7 @@ bool window_poll_event(Window *win, WindowEvent *out)
         }
         if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
             ev.window.windowID == SDL_GetWindowID(win->handle)) {
+            input_buffer_focus_lost(&win->input);
             out->kind = WINDOW_EVENT_FOCUS_LOST;
             out->width = 0;
             out->height = 0;
@@ -279,6 +299,11 @@ bool window_is_key_down(int scancode)
     return state[scancode] != 0;
 }
 
+bool window_take_key_pressed(Window *win, int scancode)
+{
+    return win != NULL && input_buffer_take_key_pressed(&win->input, scancode);
+}
+
 /* Query a mouse button's down state.
  *
  * Args:
@@ -299,6 +324,19 @@ bool window_is_mouse_down(int button)
         return false;
     }
     return (SDL_GetMouseState(NULL, NULL) & mask) != 0;
+}
+
+bool window_take_mouse_pressed(Window *win, int button)
+{
+    return win != NULL && input_buffer_take_mouse_pressed(&win->input, button);
+}
+
+void window_clear_input_edges(Window *win)
+{
+    if (win == NULL) {
+        return;
+    }
+    input_buffer_clear_edges(&win->input);
 }
 
 /* Take accumulated wheel motion (consumes it).

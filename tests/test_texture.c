@@ -275,3 +275,51 @@ int test_atlas_apply_dir(void)
     path_remove_dir(dir);
     return failures;
 }
+
+/* Test: resource-pack paths preserve their root and pack names, loaded tile
+ * overrides are applied, and only folders with tiles/ are discoverable.
+ */
+int test_atlas_resource_pack_paths(void)
+{
+    int failures = 0;
+    const char *root = "test_tmp_packroot";
+    const char *pack = "Example Pack";
+    char pack_dir[PATH_MAX_LEN] = {0};
+    char tiles_dir[PATH_MAX_LEN] = {0};
+    char expected_tiles[PATH_MAX_LEN] = {0};
+    char tile_file[PATH_MAX_LEN] = {0};
+    TEST_ASSERT(path_join(pack_dir, sizeof(pack_dir), root, pack) == 0);
+    TEST_ASSERT(path_join(expected_tiles, sizeof(expected_tiles), pack_dir, "tiles") == 0);
+    TEST_ASSERT(texture_atlas_pack_tiles_dir(tiles_dir, sizeof(tiles_dir), root, pack) == 0);
+    TEST_ASSERT(strcmp(tiles_dir, expected_tiles) == 0);
+    TEST_ASSERT(texture_atlas_pack_tiles_dir(tiles_dir, sizeof(tiles_dir), root, "../escape") != 0);
+
+    TEST_ASSERT(path_mkdir_p(tiles_dir) == 0);
+    TEST_ASSERT(path_join(tile_file, sizeof(tile_file), tiles_dir, "wood_pickaxe.bmp") == 0);
+    TEST_ASSERT(test_write_solid_bmp(tile_file, 3, 5, 7) == 0);
+
+    const size_t px_size = (size_t)ATLAS_SIZE * (size_t)ATLAS_SIZE * 4;
+    unsigned char *px = (unsigned char *)malloc(px_size);
+    TEST_ASSERT(px != NULL);
+    if (px != NULL) {
+        texture_atlas_fill_rgba(px);
+        texture_atlas_apply_dir(px, tiles_dir);
+        size_t icon = test_tile_px(TILE_WOOD_PICKAXE);
+        TEST_ASSERT(px[icon] == 7 && px[icon + 1] == 5 && px[icon + 2] == 3 && px[icon + 3] == 255);
+        free(px);
+    }
+
+    char packs[4][64] = {{0}};
+    TEST_ASSERT(texture_atlas_list_packs_in("", packs, 4) == 1);
+    TEST_ASSERT(strcmp(packs[0], "Default") == 0);
+    size_t count = texture_atlas_list_packs_in(root, packs, 4);
+    TEST_ASSERT(count == 2);
+    TEST_ASSERT(strcmp(packs[0], "Default") == 0);
+    TEST_ASSERT(strcmp(packs[1], pack) == 0);
+
+    path_remove_file(tile_file);
+    path_remove_dir(tiles_dir);
+    path_remove_dir(pack_dir);
+    path_remove_dir(root);
+    return failures;
+}

@@ -105,6 +105,14 @@ int test_time_phases(void);
 int test_time_sun(void);
 int test_time_wrap(void);
 
+/* Fixed-rate simulation scheduler tests (defined in test_simulation_clock.c). */
+int test_simulation_clock_render_rates(void);
+int test_simulation_clock_catch_up_and_remainder(void);
+int test_simulation_clock_invalid_elapsed(void);
+int test_input_buffer_press_release_pulse(void);
+int test_input_buffer_held_and_repeat(void);
+int test_input_buffer_clear_and_focus_loss(void);
+
 /* AO mesher tests (defined in test_mesher_ao.c). */
 int test_ao_levels(void);
 int test_ao_flat(void);
@@ -242,3 +250,4 @@ int test_skeleton_drops_save(void);
 /* Atlas tile tests (defined in test_texture.c). */
 int test_atlas_mcfaces(void);
 int test_atlas_apply_dir(void);
+int test_atlas_resource_pack_paths(void);

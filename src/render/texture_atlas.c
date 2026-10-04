@@ -933,6 +933,19 @@ static bool pack_name_ok(const char *pack)
     return true;
 }
 
+int texture_atlas_pack_tiles_dir(char *out, size_t out_cap, const char *packs_dir, const char *pack)
+{
+    if (out == NULL || out_cap == 0 || packs_dir == NULL || packs_dir[0] == '\0' || !pack_name_ok(pack)) {
+        return -1;
+    }
+    char pack_dir[PATH_MAX_LEN];
+    if (path_join(pack_dir, sizeof(pack_dir), packs_dir, pack) != 0 ||
+        path_join(out, out_cap, pack_dir, "tiles") != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 /* Create the GL texture from a resource pack (procedural + BMP overrides).
  *
  * Args:
@@ -961,29 +974,31 @@ unsigned int texture_atlas_generate_from_pack(const char *pack)
         } else {
             char tiles[PATH_MAX_LEN];
             char file[PATH_MAX_LEN];
-            path_join(tiles, sizeof(tiles), "resourcepacks", pack);
-            path_join(tiles, sizeof(tiles), tiles, "tiles");
-            for (int t = 0; t < TILE_FILE_COUNT; ++t) {
-                const char *stem = texture_atlas_tile_file(t);
-                char leaf[96];
-                int n = snprintf(leaf, sizeof(leaf), "%s.bmp", stem != NULL ? stem : "unknown");
-                if (n <= 0 || (size_t)n >= sizeof(leaf)) {
-                    continue;
+            if (texture_atlas_pack_tiles_dir(tiles, sizeof(tiles), "resourcepacks", pack) != 0) {
+                LOG_WARN("texture_atlas: could not build resource-pack path for '%s'", pack);
+            } else {
+                for (int t = 0; t < TILE_FILE_COUNT; ++t) {
+                    const char *stem = texture_atlas_tile_file(t);
+                    char leaf[96];
+                    int n = snprintf(leaf, sizeof(leaf), "%s.bmp", stem != NULL ? stem : "unknown");
+                    if (n <= 0 || (size_t)n >= sizeof(leaf)) {
+                        continue;
+                    }
+                    if (path_join(file, sizeof(file), tiles, leaf) != 0) {
+                        continue;
+                    }
+                    BmpImage img;
+                    img.px = NULL;
+                    if (bmp_load_file(file, &img) != 0 || !bmp_is_tile(&img)) {
+                        bmp_free(&img); /* Missing/invalid: procedural fallback stays. */
+                        continue;
+                    }
+                    atlas_blit_tile(px, t, &img);
+                    bmp_free(&img);
+                    ++overridden;
                 }
-                if (path_join(file, sizeof(file), tiles, leaf) != 0) {
-                    continue;
-                }
-                BmpImage img;
-                img.px = NULL;
-                if (bmp_load_file(file, &img) != 0 || !bmp_is_tile(&img)) {
-                    bmp_free(&img); /* Missing/invalid: procedural fallback stays. */
-                    continue;
-                }
-                atlas_blit_tile(px, t, &img);
-                bmp_free(&img);
-                ++overridden;
+                LOG_INFO("texture_atlas: pack '%s' overrode %d/%d tiles", pack, overridden, TILE_FILE_COUNT);
             }
-            LOG_INFO("texture_atlas: pack '%s' overrode %d/%d tiles", pack, overridden, TILE_FILE_COUNT);
         }
     }
     unsigned int tex = atlas_upload(px);
@@ -998,15 +1013,18 @@ unsigned int texture_atlas_generate_from_pack(const char *pack)
  *
  * Returns: total entries available.
  */
-size_t texture_atlas_list_packs(char out_packs[][64], size_t out_cap)
+size_t texture_atlas_list_packs_in(const char *packs_dir, char out_packs[][64], size_t out_cap)
 {
     size_t total = 1; /* "Default" always exists. */
     if (out_cap > 0 && out_packs != NULL) {
         memcpy(out_packs[0], "Default", 8);
     }
+    if (packs_dir == NULL || packs_dir[0] == '\0') {
+        return total;
+    }
     char dirs[64][64];
     size_t ndirs = 0;
-    if (path_list_dirs("resourcepacks", dirs, 64, &ndirs) != 0) {
+    if (path_list_dirs(packs_dir, dirs, 64, &ndirs) != 0) {
         return total;
     }
     for (size_t i = 0; i < ndirs; ++i) {
@@ -1014,8 +1032,9 @@ size_t texture_atlas_list_packs(char out_packs[][64], size_t out_cap)
             continue;
         }
         char tiles[PATH_MAX_LEN];
-        path_join(tiles, sizeof(tiles), "resourcepacks", dirs[i]);
-        path_join(tiles, sizeof(tiles), tiles, "tiles");
+        if (texture_atlas_pack_tiles_dir(tiles, sizeof(tiles), packs_dir, dirs[i]) != 0) {
+            continue;
+        }
         if (!path_is_dir(tiles)) {
             continue; /* Not a pack (no tiles/); skip quietly. */
         }
@@ -1030,6 +1049,11 @@ size_t texture_atlas_list_packs(char out_packs[][64], size_t out_cap)
         ++total;
     }
     return total;
+}
+
+size_t texture_atlas_list_packs(char out_packs[][64], size_t out_cap)
+{
+    return texture_atlas_list_packs_in("resourcepacks", out_packs, out_cap);
 }
 
 /* Delete a GL atlas texture.

@@ -51,16 +51,20 @@ const char *game_state_name(GameState s);
  */
 bool game_state_can_transition(GameState from, GameState to);
 
-/* Check whether gameplay simulation runs in a state (world tick, physics,
- * clock, streaming, entities). True only for PLAYING and LOADING.
- * INVENTORY/CRAFTING/PAUSED/DEAD freeze the sim (documented M6 decision).
+/* Check whether the world session is live rather than frozen or in a menu.
+ * LOADING, PLAYING, INVENTORY, and CRAFTING are live; PAUSED and DEAD freeze.
  *
  * Args:
  *   s: state value.
  *
- * Returns: true when the world simulates.
+ * Returns: true for live/loading world states.
  */
 bool game_state_is_live(GameState s);
+
+/* Check whether the authoritative world simulation advances in this state.
+ * LOADING streams chunks but does not advance gameplay simulation.
+ */
+bool game_state_ticks_world(GameState s);
 
 /* Check whether a state needs an open world session (world, player,
  * streamer must exist). True for LOADING, PLAYING, PAUSED, INVENTORY,

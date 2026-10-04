@@ -81,6 +81,7 @@ set(TERRACRAFT_SOURCES
   src/world/world_save.c
   src/world/entity_save.c
   src/game/player.c
+  src/game/simulation_clock.c
   src/game/raycast.c
   src/game/interaction.c
   src/game/time_system.c
@@ -88,6 +89,7 @@ set(TERRACRAFT_SOURCES
   src/game/session.c
   src/game/item.c
   src/game/inventory.c
+  src/game/input_buffer.c
   src/game/recipe.c
   src/game/particle.c
   src/game/mob.c
@@ -160,6 +162,7 @@ enable_testing()
 
 add_executable(terracraft_tests
   tests/test_main.c
+  tests/test_input_buffer.c
   tests/test_core.c
   tests/test_world.c
   tests/test_mesher.c
@@ -168,6 +171,7 @@ add_executable(terracraft_tests
   tests/test_physics.c
   tests/test_raycast.c
   tests/test_time.c
+  tests/test_simulation_clock.c
   tests/test_mesher_ao.c
   tests/test_item.c
   tests/test_save.c

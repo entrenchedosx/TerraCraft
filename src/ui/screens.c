@@ -646,6 +646,9 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
         memcpy(app->settings.pack, app->menu.packs[app->menu.pack_idx], pl);
         app->settings.pack[pl] = '\0';
         app_apply_settings(app);
+        if (renderer_reload_atlas(app->renderer, app->settings.pack) != 0) {
+            LOG_WARN("screens: resource pack texture reload failed; previous atlas remains active");
+        }
     }
     y += 56.0f;
 

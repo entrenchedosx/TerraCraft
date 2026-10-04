@@ -24,6 +24,34 @@ returns the replaced block so Survival can spawn its usual drop; those
 changes have regression tests. Further deviations and acceptance work
 remain listed in `docs/JAVA_FIDELITY.md` and `docs/BACKLOG.md`.
 
+## 2026-10-04 — Fixed-rate world updates and queued press edges
+
+The outer loop remains render/UI driven, but `SimulationClock` schedules
+world work at 20 ticks per second and caps catch-up at five ticks per frame.
+Whole overdue ticks are counted and logged; the fractional remainder is
+retained for future presentation interpolation. Camera look and rendering stay
+at frame rate. A small input latch keeps a key/button press until a tick or UI
+frame consumes it, even if SDL reports the matching release first. Focus loss
+clears input state, and world-state transitions discard pending press edges.
+
+Inventory and workbench states tick the world with neutral player movement and
+no player actions. Pause and death freeze it. Streaming, mesh refresh, and
+drawing happen once per rendered frame after scheduled updates. This is a
+timing foundation, not a Java movement model: player control still uses its
+older 1/60-second collision subdivisions, and simulation-to-render position
+interpolation remains open.
+
+## 2026-10-04 — Resource-pack texture loading and settings reload
+
+Pack path construction now keeps the input directory in a separate buffer
+because `path_join()` clears its output before joining. The aliased call had
+reduced `<resourcepacks>/<pack>/tiles` to `tiles`, preventing custom tile
+overrides and confusing discovery. A focused test builds an isolated pack
+root, verifies the named pack is listed, and applies a high-index tool icon
+tile to the CPU atlas. Settings reload the live GL atlas immediately when
+the selected pack changes. The user's report still needs the item and active
+pack details to confirm this was the visible defect.
+
 ## 2026-10-04 — Ranged combat: one projectile system, swept collision, transient arrows
 
 ### One pool for every shooter (no PlayerArrow/SkeletonArrow split)

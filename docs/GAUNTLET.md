@@ -79,6 +79,45 @@ playtest. A code-reading claim is not treated as visual verification.
   because the affected items and screen location are unknown. The hands-on
   fidelity playtest also remains outstanding.
 
+### Round 2 — Texture pack reproduction and fixed tick foundation
+
+- A second independent render-path review found two concrete resource-pack
+  faults: path construction aliased `path_join()` input/output buffers, and
+  changing a pack did not rebuild the live atlas. No per-item UV or atlas
+  index error was found.
+- Fixed pack directory construction and discovery. Settings now reload the
+  atlas when the selected pack changes. A headless test creates a local pack,
+  confirms it is discovered, and verifies its item tile reaches the atlas.
+- Added a pure 20 TPS scheduler with a five-tick catch-up cap, fractional
+  remainder preservation, dropped-time accounting, and one-second tick-count
+  checks at 30/60/144/240 FPS partitions.
+- Routed gameplay, inventory, and crafting world updates through fixed
+  0.05-second ticks. Pause and death freeze the clock. Mouse/key press edges
+  are held across down/up events until consumed; look and rendering remain
+  frame-rate driven. Streaming and drawing happen once per rendered frame.
+- The independent critic found a quick jump-tap gap and a frozen-to-live
+  elapsed-time leak. Both are fixed: jump edges are consumed on a world tick,
+  and the first frame after a frozen state contributes no wall time. The
+  critic found no additional code blocker and caught two stale documentation
+  claims; those are corrected in this round.
+- After those code fixes, the Debug and Release builds succeeded and both
+  CTest suites passed. The Debug runner reports 154 tests, 0 failures.
+- The user's exact item/pack/surface is still unknown, so the texture entry
+  remains open for a visual confirmation even though the custom-pack defect
+  is now fixed.
+
+### Round 2 verification
+
+- The source and test changes pass the Visual Studio Debug and Release builds.
+- `ctest --test-dir build -C Debug --output-on-failure` and the Release
+  equivalent both pass. The direct Debug runner reports 154 tests, 0 failed.
+- The independent critic verified the fixed jump edge, transition-time
+  discard, texture-pack path/reload flow, and current diff; no further
+  code-level blocker was found.
+- The local `docs/AI_MEMORY.md` and `mcassets/` paths are ignored. The current
+  published root tree contains neither, and the staged follow-up file list
+  was checked to contain neither path.
+
 ### Remaining visual round
 
 Capture the affected item in the hotbar/inventory/catalogue and as a dropped

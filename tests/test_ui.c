@@ -11,7 +11,7 @@
 
 #include <string.h>
 
-/* Test: state names, transition table, live/world predicates.
+/* Test: state names, transition table, live/world tick predicates.
  *
  * Returns: failure count.
  */
@@ -43,6 +43,8 @@ int test_game_states(void)
     TEST_ASSERT(game_state_can_transition(GAME_STATE_SETTINGS, GAME_STATE_PLAYING) == false);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_PLAYING, GAME_STATE_CRAFTING) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_CRAFTING, GAME_STATE_PLAYING) == true);
+    TEST_ASSERT(game_state_can_transition(GAME_STATE_INVENTORY, GAME_STATE_DEAD) == true);
+    TEST_ASSERT(game_state_can_transition(GAME_STATE_CRAFTING, GAME_STATE_DEAD) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_CRAFTING, GAME_STATE_PAUSED) == false);
     TEST_ASSERT(game_state_needs_world(GAME_STATE_CRAFTING) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_QUIT, GAME_STATE_MAIN_MENU) == false);
@@ -51,8 +53,16 @@ int test_game_states(void)
     /* Predicates. */
     TEST_ASSERT(game_state_is_live(GAME_STATE_PLAYING) == true);
     TEST_ASSERT(game_state_is_live(GAME_STATE_LOADING) == true);
+    TEST_ASSERT(game_state_is_live(GAME_STATE_INVENTORY) == true);
+    TEST_ASSERT(game_state_is_live(GAME_STATE_CRAFTING) == true);
     TEST_ASSERT(game_state_is_live(GAME_STATE_PAUSED) == false);
     TEST_ASSERT(game_state_is_live(GAME_STATE_MAIN_MENU) == false);
+    TEST_ASSERT(game_state_ticks_world(GAME_STATE_PLAYING) == true);
+    TEST_ASSERT(game_state_ticks_world(GAME_STATE_INVENTORY) == true);
+    TEST_ASSERT(game_state_ticks_world(GAME_STATE_CRAFTING) == true);
+    TEST_ASSERT(game_state_ticks_world(GAME_STATE_LOADING) == false);
+    TEST_ASSERT(game_state_ticks_world(GAME_STATE_PAUSED) == false);
+    TEST_ASSERT(game_state_ticks_world(GAME_STATE_DEAD) == false);
     TEST_ASSERT(game_state_needs_world(GAME_STATE_LOADING) == true);
     TEST_ASSERT(game_state_needs_world(GAME_STATE_PLAYING) == true);
     TEST_ASSERT(game_state_needs_world(GAME_STATE_PAUSED) == true);

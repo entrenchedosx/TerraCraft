@@ -76,6 +76,16 @@ const char *texture_atlas_tile_file(int tile);
 /* Number of overridable tiles (entries in the filename table). */
 int texture_atlas_tile_file_count(void);
 
+/* Build <packs_dir>/<pack>/tiles without aliasing output and input buffers.
+ * Exposed so pack path resolution remains headless-testable.
+ */
+int texture_atlas_pack_tiles_dir(char *out, size_t out_cap, const char *packs_dir, const char *pack);
+
+/* List installed packs beneath a caller-supplied root (used by the app with
+ * "resourcepacks" and by headless tests with an isolated directory).
+ */
+size_t texture_atlas_list_packs_in(const char *packs_dir, char out_packs[][64], size_t out_cap);
+
 /* Block face direction, matching the mesher FACES order (-X,+X,-Y,+Y,-Z,+Z).
  * Used to pick per-face tiles (e.g. grass top vs side).
  */

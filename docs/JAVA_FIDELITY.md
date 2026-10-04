@@ -34,12 +34,20 @@ and rendering all affect what a player observes.
 
 ### Simulation and movement
 
-- `app_tick_playing()` receives variable frame time and updates most gameplay
-  systems once per rendered frame (`src/core/app.c`). The app clamps a long
-  frame, but does not yet own a 20 TPS simulation accumulator.
-- Player collision uses fixed 1/60 s substeps (`PLAYER_STEP_DT` in
-  `src/game/player.h`), with a five-step cap. It is not the requested
-  authoritative 20 TPS tick.
+- `app_run()` schedules authoritative world updates through
+  `SimulationClock` at 20 TPS (`src/game/simulation_clock.c`). It runs at most
+  five catch-up ticks per rendered frame, preserves the fractional remainder,
+  and logs any whole ticks dropped after a long stall. Rendering and chunk
+  refresh run once per frame. Movement input is sampled per tick; discrete
+  key/button presses are latched across down/up events until consumed. Quick
+  jump taps use the same buffer. Time spanning a frozen-to-live state change
+  is discarded so pause/death time does not advance on resume.
+- Player collision still subdivides each 0.05 s world tick into 1/60 s
+  `PLAYER_STEP_DT` steps, with its existing five-step cap. This preserves the
+  current collision integration while the surrounding world becomes ticked.
+  Render interpolation between authoritative positions is not implemented.
+- Player physics subdivides each authoritative world tick into smaller
+  collision steps; those steps do not replace the 20 TPS world scheduler.
 - Standing body dimensions are 0.6×1.8 blocks and eye height is 1.62
   (`player_init()` in `src/game/player.c`). Sneaking changes the speed and
   flag only. There are no crouch/swim/crawl dimensions or headroom checks.
@@ -62,7 +70,8 @@ and rendering all affect what a player observes.
 - Survival block reach is 4.5 and Creative block reach is 5
   (`src/game/survival.h`). Entity attack reach is now 3
   (`PLAYER_ATTACK_REACH` in `src/game/mob.h`).
-- Mining progress is accumulated in seconds and updated with frame time.
+- Mining progress is accumulated in seconds and updated at the fixed world
+  tick rate.
   Releasing, changing target, changing held item, or losing reach resets
   progress. Airborne and underwater mining penalties are not implemented.
 - Placing blocks rejects solid targets and player overlap. Air, water, grass
@@ -74,29 +83,30 @@ and rendering all affect what a player observes.
 
 ### Inventory and survival
 
-- Inventory, workbench, death, and pause screens currently freeze the world
-  (`game_state_is_live()` in `src/game/game_state.c`). Only the pause menu
-  should freeze the world under the target behavior. Inventory and workbench
-  simulation are still a known deviation.
+- Inventory and workbench screens continue advancing the world at 20 TPS
+  with player movement and actions disabled. Pause and death freeze it
+  (`game_state_ticks_world()` in `src/game/game_state.c`). Loading continues
+  chunk streaming without advancing gameplay ticks.
 - Hunger and exhaustion exist, but there is no saturation value or saturation
   refill path. Exhaustion directly removes hunger. Sprint input is not yet
   blocked at low hunger, and regeneration is a simplified fixed timer.
 - Dropped items age for 300 seconds and wait 0.5 seconds before pickup
-  (`src/game/entity.h`). They use small frame-dt substeps and gravity; item
-  stack merging is not implemented. Their lifetime matches 6,000 ticks only
-  when the simulation runs at 20 TPS, which it does not yet do.
+  (`src/game/entity.h`). Their lifetime now spans 6,000 world ticks. Item
+  motion uses small substeps and gravity; item stack merging is not
+  implemented.
 - The day cycle is 1,200 seconds (`TIME_DEFAULT_SPEED` in
-  `src/game/time_system.h`), equivalent to 24,000 ticks at 20 TPS. Its
-  advance is currently frame-time driven.
+  `src/game/time_system.h`), equivalent to 24,000 ticks at 20 TPS. It advances
+  through the fixed world tick and freezes with pause and death.
 
 ### Rendering, lighting, and fluids
 
 - The atlas combines procedural pixels with optional owner-local or user
-  pack tiles. All 32 registered item types map to a named atlas tile; the
-  headless `test_item_texture_mapping` checks that mapping and visible
-  procedural fallback pixels. The user's report of broken item art still
-  needs a screenshot or the names of affected items and screen location to
-  identify a rendered-only defect.
+  pack tiles. All 32 registered item types map to a named atlas tile. A
+  confirmed custom-pack path alias prevented pack discovery and item texture
+  overrides; the path builder and live settings reload are fixed, with
+  coverage in `test_atlas_resource_pack_paths`. The user-reported visual
+  issue still needs a screenshot or the affected item/screen details to
+  confirm that this was the observed cause.
 - Lighting uses a global day/night value, a per-column occlusion heuristic,
   and ambient occlusion. It has no separate propagated sky-light and
   block-light channels, cross-chunk light queue, or torch emission.
@@ -112,18 +122,25 @@ and rendering all affect what a player observes.
   now have explicit test coverage.
 - Resource-pack documentation now lists all 46 current tile names and the
   current sound event stems.
+- A fixed 20 TPS simulation clock now drives the world and logs dropped
+  catch-up ticks; inventory/workbench continue world simulation while pause
+  and death freeze it.
+- Custom resource-pack discovery and tile loading now build paths through
+  non-aliased buffers, and selecting a pack reloads the live atlas.
+- Key and mouse press edges now survive a release until consumed by a world
+  tick or UI frame; focus loss clears queued and held input.
 
 ## Known deviations
 
-1. No authoritative 20 TPS simulation loop or tick-input edge queue.
+1. The simulation clock is fixed at 20 TPS, but gameplay movement is not
+   yet frame-rate independence tested, and rendering lacks position
+   interpolation. Discrete toggles and hotbar changes still process after
+   each event drain rather than inside a world tick.
 2. Direct-velocity movement, no player pose geometry, and no edge-safe
    sneaking or step-up behavior.
-3. Inventory and workbench freeze single-player simulation.
-4. Mining, hunger timers, mob logic, and dropped items are frame-time based
-   rather than tick-quantized.
-5. Hunger has no saturation, and sprint hunger gating is absent.
-6. Lighting has no propagated sky/block channels; water does not flow.
-7. A hands-on fidelity playtest and visual comparison against a live 26.3
+3. Hunger has no saturation, and sprint hunger gating is absent.
+4. Lighting has no propagated sky/block channels; water does not flow.
+5. A hands-on fidelity playtest and visual comparison against a live 26.3
    reference remain outstanding.
 
 The phase is not complete until the measurable behavior is tested and an

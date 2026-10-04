@@ -35,6 +35,7 @@ int main(void)
     RUN_TEST(test_atlas_pixels);
     RUN_TEST(test_atlas_mcfaces);
     RUN_TEST(test_atlas_apply_dir);
+    RUN_TEST(test_atlas_resource_pack_paths);
     RUN_TEST(test_hashmap_basic);
     RUN_TEST(test_world_gen_chunk);
     RUN_TEST(test_streamer_load_unload);
@@ -52,6 +53,12 @@ int main(void)
     RUN_TEST(test_time_phases);
     RUN_TEST(test_time_sun);
     RUN_TEST(test_time_wrap);
+    RUN_TEST(test_simulation_clock_render_rates);
+    RUN_TEST(test_simulation_clock_catch_up_and_remainder);
+    RUN_TEST(test_simulation_clock_invalid_elapsed);
+    RUN_TEST(test_input_buffer_press_release_pulse);
+    RUN_TEST(test_input_buffer_held_and_repeat);
+    RUN_TEST(test_input_buffer_clear_and_focus_loss);
     RUN_TEST(test_ao_levels);
     RUN_TEST(test_ao_flat);
     RUN_TEST(test_ao_corner);

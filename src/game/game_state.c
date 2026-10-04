@@ -48,9 +48,9 @@ bool game_state_can_transition(GameState from, GameState to)
         return to == GAME_STATE_PAUSED || to == GAME_STATE_INVENTORY || to == GAME_STATE_CRAFTING ||
                to == GAME_STATE_DEAD || to == GAME_STATE_QUIT;
     case GAME_STATE_INVENTORY:
-        return to == GAME_STATE_PLAYING || to == GAME_STATE_QUIT;
+        return to == GAME_STATE_PLAYING || to == GAME_STATE_DEAD || to == GAME_STATE_QUIT;
     case GAME_STATE_CRAFTING:
-        return to == GAME_STATE_PLAYING || to == GAME_STATE_QUIT;
+        return to == GAME_STATE_PLAYING || to == GAME_STATE_DEAD || to == GAME_STATE_QUIT;
     case GAME_STATE_DEAD:
         return to == GAME_STATE_PLAYING || to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
     case GAME_STATE_PAUSED:
@@ -69,7 +69,12 @@ bool game_state_can_transition(GameState from, GameState to)
 /* Live simulation states. */
 bool game_state_is_live(GameState s)
 {
-    return s == GAME_STATE_PLAYING || s == GAME_STATE_LOADING;
+    return game_state_ticks_world(s) || s == GAME_STATE_LOADING;
+}
+
+bool game_state_ticks_world(GameState s)
+{
+    return s == GAME_STATE_PLAYING || s == GAME_STATE_INVENTORY || s == GAME_STATE_CRAFTING;
 }
 
 /* States requiring an open world. */

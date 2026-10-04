@@ -102,10 +102,12 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 - [x] Open a persistent reproduction log and manual playtest checklist in `docs/FIDELITY_BUGS.md`.
 - [x] Add coverage for all 32 item registry-to-atlas mappings and nonempty procedural fallback tiles; correct entity interaction reach and replaceable decor placement with Survival drops.
 - [x] Refresh the resource-pack reference to the current 46 atlas tiles and sound events.
-- [ ] Reproduce the reported broken item textures with the affected item names, render location, selected pack, and screenshot; repair the confirmed rendered defect and verify in-game.
-- [ ] Implement and validate the 20 TPS simulation, reference movement/collision, inventory-time, survival, lighting, and fluid behaviors before claiming the fidelity pass complete.
+- [x] Fix custom resource-pack path construction/discovery and reload the live atlas when the selected pack changes; headless tests cover pack listing and item-tile application.
+- [x] Add a tested 20 TPS scheduler with bounded catch-up, dropped-time accounting, event-latched input edges, and world simulation during inventory/workbench screens.
+- [ ] Reproduce the user's item texture report with the affected item names, render location, selected pack, and screenshot; verify the custom-pack fix in-game or identify another runtime cause.
+- [ ] Add render interpolation, then validate ticked movement/collision, survival, lighting, and fluid behaviors before claiming the fidelity pass complete.
 - [ ] Complete a hands-on Survival/Creative playtest against a running Java Edition 26.3 reference.
-- [x] Current verification: Debug and Release builds succeeded; both CTest runs passed; direct Release runner reported 147 tests, 0 failures.
+- [x] Current round verification: Debug and Release builds and CTest passed; the independent critic's high-impact findings are fixed. The staged file list excludes `AI_MEMORY` and `mcassets/`.
 - Gauntlet procedure and round notes: `docs/GAUNTLET.md`.
 
 ## Milestone 8 — Entity Framework + Creatures + Combat (DONE)
