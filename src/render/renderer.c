@@ -324,17 +324,22 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, const float plane
         if (model == NULL || !mob_model_validate(model)) {
             continue;
         }
-        bool skinned = skin != NULL && def->model >= 0 && def->model < 3 &&
-                         r->mob_skin_tex[def->model] != 0;
+        /* Live skin lookup is independent of which pass is emitting:
+         * the tile pass gets skin == NULL but must still skip skinned
+         * mobs (a previous revision keyed this on the skin pointer and
+         * double-drew every skinned mob — z-fighting shimmer between
+         * tile art and hide, doubled draw counters). */
+        bool has_live_skin = def->model >= 0 && def->model < 3 &&
+                             r->mob_skin_tex[def->model] != 0;
         if (model_filter < 0) {
-            /* Tile pass: atlas art only (skinned mobs draw in their own
-             * pass below — drawing both doubles geometry and counters). */
-            if (skinned) {
+            /* Tile pass: atlas art only. */
+            if (has_live_skin) {
                 continue;
             }
         } else if (def->model != model_filter) {
             continue; /* Skin pass takes one model only. */
         }
+        bool skinned = has_live_skin && skin != NULL;
         /* Frustum cull on the collision box (cheap, conservative).
          * Cull on the RENDER position (smoothed): culling on the raw
          * sim pos would pop mobs a frame early at 20 Hz. */

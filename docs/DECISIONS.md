@@ -149,6 +149,13 @@ against the fixed math. Verified: skeleton/cow UV rects rechecked
 fully opaque after the change (ribcage holes still deliberately
 unsampled).
 
+### Skin-pass membership must not depend on the skin pointer
+The tile batch once skipped skinned mobs via `skin != NULL && ...`,
+but the tile pass calls with `skin == NULL` — so the guard never
+fired and every skinned mob drew twice (atlas art + hide z-fighting,
+doubled F3 counters, shimmering "random textures"). Membership now
+keys on the live texture slot alone, independent of the pass.
+
 ### Per-type mob sounds without breaking the headless rule
 `mob_hurt_sound`/`mob_die_sound` map EntityType → AudioEvent (cow →
 moo events, everything else generic) so call sites pick sounds while
