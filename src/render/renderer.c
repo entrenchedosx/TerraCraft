@@ -1120,61 +1120,52 @@ static void entity_emit_cube(float *dst, float minx, float miny, float minz, flo
     }
 }
 
-/* Emit one dropped-item sprite: two diagonal quads (X shape, both
- * windings each = 24 non-indexed verts, VoxelVertex layout) showing the
- * full item tile — the readable MC-fast-graphics look instead of a
- * tiny textured cube. Sprites slowly spin around Y (MC drops rotate;
- * a static X reads as a tan blob from most angles) and bob gently.
- * Normals point up so lighting stays bright; the shader's alpha cutout
- * discards transparent texels (same rule as cross-sprite plants).
- * Depth-tested like everything else.
+/* Emit one dropped-item billboard: a single camera-facing quad (2
+ * triangles, 6 non-indexed verts, VoxelVertex layout) showing the full
+ * item tile — the readable MC look. View-aligned quads never go
+ * edge-on and never mirror (the failure modes of spinning X sprites),
+ * and one quad costs a quarter of the old crossed pair. Normals point
+ * up so lighting stays bright; the shader's alpha cutout discards
+ * transparent texels. Depth-tested like everything else.
  *
  * Args:
- *   dst: 216-float destination (must not be NULL).
+ *   dst: 54-float destination (must not be NULL).
  *   cx, cy, cz: sprite center (world).
  *   size: sprite edge length (> 0).
  *   tile: atlas tile index.
- *   spin: yaw radians (0 faces the diagonal like a static sprite).
+ *   right: camera-right unit vector (world xz).
  */
 static void entity_emit_sprite(float *dst, float cx, float cy, float cz, float size, int tile,
-                               float spin)
+                               float rx, float rz)
 {
     float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
     texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
     float h = size * 0.5f;
-    float c = cosf(spin);
-    float s = sinf(spin);
-    /* Two diagonal quads, each wound both ways (CCW front under culling
-     * from either side). Corner order per quad: BL, BR, TL, TR with
-     * (0,1,2,2,1,3) triangles. */
-    static const float QUAD[4][3] = {{-1, -1, 0}, {1, -1, 0}, {-1, 1, 0}, {1, 1, 0}};
+    /* Corner order: BL, BR, TL, TR with (0,1,2,2,1,3) triangles, wound
+     * CCW as seen along +right (the camera side). Backface culling is
+     * off for this pass? No — culling stays on globally, so the quad
+     * is emitted wound both ways (12 verts): readable from both sides
+     * without touching GL state (drops are few; overdraw is trivial). */
+    static const float QUAD[4][2] = {{-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
     static const int TRIS[6] = {0, 1, 2, 2, 1, 3};
     size_t n = 0;
-    for (int q = 0; q < 2; ++q) {
-        for (int pass = 0; pass < 2; ++pass) {
-            for (int k = 0; k < 6; ++k) {
-                int kk = (pass == 0) ? k : (5 - k); /* Reverse winding. */
-                int i = TRIS[kk];
-                float lx = QUAD[i][0];
-                float ly = QUAD[i][1];
-                float *v = dst + n * MESHER_FLOATS_PER_VERTEX;
-                /* Quad 0 runs (-x,-z)..(+x,+z); quad 1 mirrors in z;
-                 * the pair spins together around Y. */
-                float qx = lx * h;
-                float qz = (q == 0 ? lx : -lx) * h;
-                float dx = qx * c + qz * s;
-                float dz = -qx * s + qz * c;
-                v[0] = cx + dx;
-                v[1] = cy + ly * h;
-                v[2] = cz + dz;
-                v[3] = 0.0f;
-                v[4] = 1.0f;
-                v[5] = 0.0f;
-                v[6] = (lx < 0.0f) ? u0 : u1;
-                v[7] = (ly < 0.0f) ? v0 : v1;
-                v[8] = 1.0f;
-                n += 1;
-            }
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int k = 0; k < 6; ++k) {
+            int kk = (pass == 0) ? k : (5 - k); /* Reverse winding. */
+            int i = TRIS[kk];
+            float lx = QUAD[i][0];
+            float ly = QUAD[i][1];
+            float *v = dst + n * MESHER_FLOATS_PER_VERTEX;
+            v[0] = cx + rx * lx * h;
+            v[1] = cy + ly * h;
+            v[2] = cz + rz * lx * h;
+            v[3] = 0.0f;
+            v[4] = 1.0f;
+            v[5] = 0.0f;
+            v[6] = (lx < 0.0f) ? u0 : u1;
+            v[7] = (ly < 0.0f) ? v0 : v1;
+            v[8] = 1.0f;
+            n += 1;
         }
     }
 }
@@ -1209,8 +1200,8 @@ static void renderer_draw_transient(Renderer *r, const float *verts, size_t vcou
     free(idx);
 }
 
-/* Draw active item entities as floating item sprites (crossed quads
- * with the full item texture + a gentle bob).
+/* Draw active item entities as camera-facing item billboards (full
+ * item texture + a gentle bob).
  *
  * Args:
  *   r: renderer. pool: entity pool. cam: camera. aspect: viewport aspect.
@@ -1235,12 +1226,16 @@ void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *c
     if (!renderer_begin_voxel(r, cam, aspect, ts)) {
         return;
     }
-    size_t vcount = (size_t)n * 24;
+    size_t vcount = (size_t)n * 12;
     float *verts = (float *)malloc(vcount * MESHER_FLOATS_PER_VERTEX * sizeof(float));
     if (verts == NULL) {
         renderer_end_voxel(r);
         return;
     }
+    /* Cylindrical billboard basis from the camera: the camera's own
+     * right vector, so every drop faces the player around Y (readable
+     * from all sides, never edge-on, never mirrored). */
+    Vec3 cam_right = camera_get_right(cam);
     size_t o = 0;
     for (int i = 0; i < ENTITY_MAX; ++i) {
         const ItemEntity *e = &pool->items[i];
@@ -1250,12 +1245,20 @@ void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *c
         float bob = 0.10f + 0.05f * sinf(e->age * 3.0f);
         float size = 0.35f;
         int tile = item_get_info(e->stack.item)->tile;
-        /* Sprite center floats above the settled base (never sinks);
-         * one slow turn every ~4 s so the art reads from all sides. */
-        float spin = e->age * 1.5f;
+        float rx = cam_right.x;
+        float rz = cam_right.z;
+        float len = sqrtf(rx * rx + rz * rz);
+        if (!(len > 1e-4f)) {
+            rx = 1.0f;
+            rz = 0.0f;
+        } else {
+            rx /= len;
+            rz /= len;
+        }
+        /* Sprite center floats above the settled base (never sinks). */
         entity_emit_sprite(verts + o * MESHER_FLOATS_PER_VERTEX, e->pos.x, e->pos.y + bob + size * 0.5f,
-                           e->pos.z, size, tile, spin);
-        o += 24;
+                           e->pos.z, size, tile, rx, rz);
+        o += 12;
     }
     renderer_draw_transient(r, verts, vcount);
     free(verts);

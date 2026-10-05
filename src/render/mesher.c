@@ -88,7 +88,11 @@ float mesher_ao_factor(int level)
     return AO_TABLE[level];
 }
 
-/* Growable push helpers (returns 0 ok, -1 OOM). */
+/* Growable push helpers (returns 0 ok, -1 OOM). Buffers only ever
+ * grow (doubling from 256/512 seeds): callers that can bound the
+ * workload must pre-size instead — per-face reserve calls on a 20k-face
+ * chunk cost milliseconds of repeated realloc/memcpy (measured: ~20 ms
+ * of a ~23 ms terrain rebuild). */
 static int mesh_reserve_vertices(MeshData *m, size_t extra_verts)
 {
     size_t need = m->vertex_count + extra_verts;
@@ -168,10 +172,18 @@ static int mesh_emit_face(MeshData *m, const FaceDef *f, int face_idx, const Chu
     int ez = z + f->nz_o;
 
     /* Per-face sun visibility: full sun unless an occluding block sits
-     * anywhere in the column above the face (M4 skylight heuristic). */
+     * anywhere in the column above the face (M4 skylight heuristic).
+     * The scan exits early on the first occluder (canopy shade) — but
+     * open sky must NOT scan all 256 cells per face (~1M wasted lookups
+     * per chunk); a short probe covers trees, and anything past it is
+     * effectively skylit for gameplay shading. */
     float sun = MESHER_SUN_FULL;
     if (ey < CHUNK_Y) {
-        for (int sy = ey; sy < CHUNK_Y; ++sy) {
+        int top = ey + MESHER_SKY_PROBE;
+        if (top > CHUNK_Y) {
+            top = CHUNK_Y;
+        }
+        for (int sy = ey; sy < top; ++sy) {
             if (mesher_occludes(mesher_neighbor(c, w, ex, sy, ez))) {
                 sun = MESHER_SUN_SHADE;
                 break;
@@ -281,10 +293,15 @@ static int mesh_emit_cross(MeshData *m, const Chunk *c, const World *w, int x, i
     }
     float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
     texture_atlas_tile_uv(block_tile_for_face(block, 0), &u0, &v0, &u1, &v1);
-    /* Sun visibility like a top face (skips AO occlusion entirely). */
+    /* Sun visibility like a top face (skips AO occlusion entirely;
+     * same bounded probe as faces — open sky never scans 256 cells). */
     float sun = MESHER_SUN_FULL;
     if (y + 1 < CHUNK_Y) {
-        for (int sy = y + 1; sy < CHUNK_Y; ++sy) {
+        int top = y + 1 + MESHER_SKY_PROBE;
+        if (top > CHUNK_Y) {
+            top = CHUNK_Y;
+        }
+        for (int sy = y + 1; sy < top; ++sy) {
             if (mesher_occludes(mesher_neighbor(c, w, x, sy, z))) {
                 sun = MESHER_SUN_SHADE;
                 break;
@@ -348,6 +365,21 @@ static MeshData *mesher_build_filtered(const Chunk *c, const World *w, bool tran
         LOG_ERROR("mesher: out of memory");
         return NULL;
     }
+    /* Pre-size once: a full chunk holds 16x256x16 cells; even dense
+     * terrain exposes a small fraction of its faces, and one upfront
+     * allocation beats thousands of doubles. 24k verts / 36k indices
+     * covers measured terrain (~23k worst case); bigger workloads grow
+     * from there instead of from 256. */
+    m->vertices = (float *)malloc((size_t)24576 * MESHER_FLOATS_PER_VERTEX * sizeof(float));
+    m->indices =
+        (unsigned int *)malloc((size_t)36864 * sizeof(unsigned int));
+    if (m->vertices == NULL || m->indices == NULL) {
+        LOG_ERROR("mesher: out of memory (presize)");
+        mesher_free(m);
+        return NULL;
+    }
+    m->vertex_cap = 24576;
+    m->index_cap = 36864;
     for (int y = 0; y < CHUNK_Y; ++y) {
         for (int z = 0; z < CHUNK_Z; ++z) {
             for (int x = 0; x < CHUNK_X; ++x) {

@@ -44,6 +44,13 @@ typedef struct VoxelVertex {
 #define MESHER_SUN_FULL 1.0f
 #define MESHER_SUN_SHADE 0.45f
 
+/* Skylight probe height (cells above the face): covers trees and roofs;
+ * anything past it reads as open sky for gameplay shading (bounding the
+ * per-face column scan — a full 256-cell scan per face costs ~1M
+ * wasted lookups per open-terrain chunk).
+ */
+#define MESHER_SKY_PROBE 12
+
 /* CPU mesh: caller owns vertices/indices, frees via mesher_free(). */
 typedef struct MeshData {
     float *vertices; /* Interleaved VoxelVertex data, vertex_count*9 floats. */
