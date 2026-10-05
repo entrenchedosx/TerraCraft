@@ -547,6 +547,16 @@ int test_mob_raycast(void)
     TEST_ASSERT(mob_raycast(NULL, eye, aim, 8.0f, &dist, &hit) == false);
     TEST_ASSERT(mob_raycast(&pool, eye, mmath_vec3(0.0f, 0.0f, 0.0f), 8.0f, &dist, &hit) == false);
     TEST_ASSERT(mob_raycast(&pool, eye, aim, 0.0f, &dist, &hit) == false);
+    /* Swing shielding: solid blocks stop a swing, decor never does
+     * (swinging through a flower at a mob must connect). */
+    TEST_ASSERT(mob_block_shields(BLOCK_STONE) == true);
+    TEST_ASSERT(mob_block_shields(BLOCK_GLASS) == true);
+    TEST_ASSERT(mob_block_shields(BLOCK_LEAVES) == true);
+    TEST_ASSERT(mob_block_shields(BLOCK_GRASS_PLANT) == false);
+    TEST_ASSERT(mob_block_shields(BLOCK_FLOWER) == false);
+    TEST_ASSERT(mob_block_shields(BLOCK_TORCH) == false);
+    TEST_ASSERT(mob_block_shields(BLOCK_WATER) == false);
+    TEST_ASSERT(mob_block_shields(BLOCK_AIR) == false);
     return failures;
 }
 

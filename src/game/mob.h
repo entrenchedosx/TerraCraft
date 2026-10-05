@@ -379,6 +379,17 @@ bool living_entity_damage_src(MobPool *pool, EntityPool *drops, EntityId id, flo
 bool mob_raycast(const MobPool *pool, Vec3 eye, Vec3 dir, float max_dist, float *out_dist,
                  EntityId *out_id);
 
+/* True when a block cell shields a melee swing aimed past it (solid
+ * blocks only — grass, flowers, torches, and water never block a
+ * swing, though the mining ray still stops on plants by design).
+ *
+ * Args:
+ *   block: block ID of the hit cell.
+ *
+ * Returns: true when the cell blocks the swing.
+ */
+bool mob_block_shields(uint16_t block);
+
 /* Melee stats for a held item (original TerraCraft tuning: fist 1/0.4s,
  * shovel 2/0.5s, pickaxe 3/0.5s, axe 4/0.8s; non-tools hit as fists).
  *

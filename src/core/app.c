@@ -566,7 +566,12 @@ static bool app_aim_mob(AppContext *app, EntityId *out_id)
     }
     HitResult hit =
         raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world, RAYCAST_MAX_DIST);
-    if (hit.hit && hit.dist < edist) {
+    /* Only solid blocks shield a swing: grass tufts, flowers, and
+     * torches stop the mining ray by design, but swinging through a
+     * flower at a cow must still connect (previously any plant between
+     * crosshair and mob made plains mobs unhittable). */
+    if (hit.hit && hit.dist < edist &&
+        mob_block_shields(world_get_block(app->world, hit.block[0], hit.block[1], hit.block[2]))) {
         return false;
     }
     if (out_id != NULL) {

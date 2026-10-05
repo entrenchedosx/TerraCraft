@@ -954,6 +954,12 @@ bool living_entity_damage(MobPool *pool, EntityPool *drops, EntityId id, float a
                                     DAMAGE_MELEE);
 }
 
+/* True when a block cell shields a melee swing (solid only). */
+bool mob_block_shields(uint16_t block)
+{
+    return block_is_solid(block);
+}
+
 /* Ray vs living-mob AABBs (nearest alive hit). */
 bool mob_raycast(const MobPool *pool, Vec3 eye, Vec3 dir, float max_dist, float *out_dist,
                  EntityId *out_id)

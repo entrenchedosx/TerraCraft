@@ -4,18 +4,20 @@
 #include <math.h>
 #include <stddef.h>
 
-/* Cow (model 0): real MC proportions — deep body, head at the front,
- * four legs, two horns. Collision 0.9 x 1.4 (+Z faces forward).
+/* Cow (model 0): real MC proportions — deep body, head forward at
+ * body-top height (never buried: head top flush with the body top),
+ * four legs, two horns on the head. Collision 0.9 x 1.4 (+Z faces
+ * forward).
  */
 static const MobModelPart COW_PARTS[] = {
     {{-0.45f, 0.70f, -0.70f}, {0.90f, 0.70f, 1.40f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_NONE},
-    {{-0.25f, 1.00f, 0.65f}, {0.50f, 0.50f, 0.50f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_HEAD},
+    {{-0.25f, 0.90f, 0.55f}, {0.50f, 0.50f, 0.50f}, TILE_LEATHER, -1, 1.15f, MOB_ANIM_HEAD},
     {{-0.41f, 0.00f, 0.35f}, {0.22f, 0.70f, 0.22f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
     {{0.19f, 0.00f, 0.35f}, {0.22f, 0.70f, 0.22f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
     {{-0.41f, 0.00f, -0.65f}, {0.22f, 0.70f, 0.22f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
     {{0.19f, 0.00f, -0.65f}, {0.22f, 0.70f, 0.22f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
-    {{-0.34f, 1.50f, 0.75f}, {0.12f, 0.12f, 0.12f}, TILE_BONE, -1, 0.0f, MOB_ANIM_NONE},
-    {{0.22f, 1.50f, 0.75f}, {0.12f, 0.12f, 0.12f}, TILE_BONE, -1, 0.0f, MOB_ANIM_NONE},
+    {{-0.31f, 1.40f, 0.72f}, {0.12f, 0.12f, 0.12f}, TILE_BONE, -1, 0.0f, MOB_ANIM_NONE},
+    {{0.19f, 1.40f, 0.72f}, {0.12f, 0.12f, 0.12f}, TILE_BONE, -1, 0.0f, MOB_ANIM_NONE},
 };
 
 /* Gloomstalker (model 1): lanky night hunter — dark ore body, stone
