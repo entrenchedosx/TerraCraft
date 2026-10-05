@@ -791,7 +791,12 @@ void renderer_clear(Renderer *r)
 }
 
 /* Rebuild dirty chunk meshes and upload to GPU (timed phases).
- * Builds both passes (opaque + transparent) per dirty chunk.
+ * Builds both passes (opaque + transparent) per dirty chunk. Only a
+ * bounded number of chunks rebuild per call: a fresh forest view can
+ * queue a dozen dirty meshes at once, and building them all in one
+ * frame costs 30-60 ms (the classic "30fps" hitch). Leftovers stay
+ * dirty and stream in over the next frames — popping one chunk late
+ * beats freezing the whole game.
  *
  * Args:
  *   r: renderer.
@@ -804,7 +809,11 @@ void renderer_refresh_world(Renderer *r, World *w)
     }
     double mesh_ms = 0.0;
     double upload_ms = 0.0;
+    int rebuilt = 0;
     for (size_t i = 0; i < WORLD_MAX_CHUNKS; ++i) {
+        if (rebuilt >= RENDERER_MESH_BUDGET) {
+            break; /* Catch-up cap: the rest stream in next frames. */
+        }
         Chunk *c = w->chunks[i];
         if (c == NULL) {
             continue;
@@ -841,6 +850,7 @@ void renderer_refresh_world(Renderer *r, World *w)
         mesher_free(opaque);
         mesher_free(transp);
         c->dirty = false;
+        ++rebuilt;
     }
     r->perf.mesh_ms = mesh_ms;
     r->perf.upload_ms = upload_ms;
@@ -1113,21 +1123,27 @@ static void entity_emit_cube(float *dst, float minx, float miny, float minz, flo
 /* Emit one dropped-item sprite: two diagonal quads (X shape, both
  * windings each = 24 non-indexed verts, VoxelVertex layout) showing the
  * full item tile — the readable MC-fast-graphics look instead of a
- * tiny textured cube. Normals point up so lighting stays bright; the
- * shader's alpha cutout discards transparent texels (same rule as
- * cross-sprite plants). Depth-tested like everything else.
+ * tiny textured cube. Sprites slowly spin around Y (MC drops rotate;
+ * a static X reads as a tan blob from most angles) and bob gently.
+ * Normals point up so lighting stays bright; the shader's alpha cutout
+ * discards transparent texels (same rule as cross-sprite plants).
+ * Depth-tested like everything else.
  *
  * Args:
  *   dst: 216-float destination (must not be NULL).
  *   cx, cy, cz: sprite center (world).
  *   size: sprite edge length (> 0).
  *   tile: atlas tile index.
+ *   spin: yaw radians (0 faces the diagonal like a static sprite).
  */
-static void entity_emit_sprite(float *dst, float cx, float cy, float cz, float size, int tile)
+static void entity_emit_sprite(float *dst, float cx, float cy, float cz, float size, int tile,
+                               float spin)
 {
     float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
     texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
     float h = size * 0.5f;
+    float c = cosf(spin);
+    float s = sinf(spin);
     /* Two diagonal quads, each wound both ways (CCW front under culling
      * from either side). Corner order per quad: BL, BR, TL, TR with
      * (0,1,2,2,1,3) triangles. */
@@ -1142,9 +1158,12 @@ static void entity_emit_sprite(float *dst, float cx, float cy, float cz, float s
                 float lx = QUAD[i][0];
                 float ly = QUAD[i][1];
                 float *v = dst + n * MESHER_FLOATS_PER_VERTEX;
-                /* Quad 0 runs (-x,-z)..(+x,+z); quad 1 mirrors in z. */
-                float dx = lx * h;
-                float dz = (q == 0 ? lx : -lx) * h;
+                /* Quad 0 runs (-x,-z)..(+x,+z); quad 1 mirrors in z;
+                 * the pair spins together around Y. */
+                float qx = lx * h;
+                float qz = (q == 0 ? lx : -lx) * h;
+                float dx = qx * c + qz * s;
+                float dz = -qx * s + qz * c;
                 v[0] = cx + dx;
                 v[1] = cy + ly * h;
                 v[2] = cz + dz;
@@ -1231,9 +1250,11 @@ void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *c
         float bob = 0.10f + 0.05f * sinf(e->age * 3.0f);
         float size = 0.35f;
         int tile = item_get_info(e->stack.item)->tile;
-        /* Sprite center floats above the settled base (never sinks). */
+        /* Sprite center floats above the settled base (never sinks);
+         * one slow turn every ~4 s so the art reads from all sides. */
+        float spin = e->age * 1.5f;
         entity_emit_sprite(verts + o * MESHER_FLOATS_PER_VERTEX, e->pos.x, e->pos.y + bob + size * 0.5f,
-                           e->pos.z, size, tile);
+                           e->pos.z, size, tile, spin);
         o += 24;
     }
     renderer_draw_transient(r, verts, vcount);

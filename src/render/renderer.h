@@ -21,6 +21,12 @@
 /* Exponential fog density (1/m): R=4 fades distant chunks into the sky. */
 #define RENDERER_FOG_DENSITY 0.014f
 
+/* Chunk remeshes per renderer_refresh_world call (frame pacing: a full
+ * forest view queues a dozen dirty meshes at once; uncapped catch-up
+ * costs 30-60 ms in one frame, i.e. the "30fps" hitch).
+ */
+#define RENDERER_MESH_BUDGET 2
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
