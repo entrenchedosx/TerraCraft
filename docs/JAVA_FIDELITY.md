@@ -70,6 +70,11 @@ and rendering all affect what a player observes.
 - Survival block reach is 4.5 and Creative block reach is 5
   (`src/game/survival.h`). Entity attack reach is now 3
   (`PLAYER_ATTACK_REACH` in `src/game/mob.h`).
+- Melee uses yaw-aligned model bounds with a small margin for the rendered
+  head and limb motion. A ray beginning inside a mob counts as a hit. Holding
+  left mouse retries a mob attack when its tool cooldown ends; an aimed mob
+  keeps the click from mining a block behind it (`mob_raycast()` and
+  `app_try_attack()` in `src/game/mob.c` and `src/core/app.c`).
 - Mining progress is accumulated in seconds and updated at the fixed world
   tick rate.
   Releasing, changing target, changing held item, or losing reach resets
@@ -107,6 +112,12 @@ and rendering all affect what a player observes.
   coverage in `test_atlas_resource_pack_paths`. The user-reported visual
   issue still needs a screenshot or the affected item/screen details to
   confirm that this was the observed cause.
+- The cow uses a 6-cuboid model with face UVs from the 64×64 skin's box nets.
+  Mob parts rotate around the creature root, and render positions ease toward
+  simulation positions each frame so movement and targeting stay aligned. The
+  first-person view draws an original procedural sleeve and hand, a held-item
+  sprite or block cube, and a short shoulder-driven swing. This is a
+  first-person viewmodel; a third-person player body is not implemented.
 - Lighting uses a global day/night value, a per-column occlusion heuristic,
   and ambient occlusion. It has no separate propagated sky-light and
   block-light channels, cross-chunk light queue, or torch emission.

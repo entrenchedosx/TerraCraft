@@ -124,6 +124,8 @@ typedef struct ProjectileFrameEvents {
     int mobs_died;        /* Lethal mob strikes (drops already spawned). */
     Vec3 last_death_pos;  /* Feet position of the last death (FX anchor). */
     ProjectileItemId last_death_item; /* First drop of the last death (FX tint). */
+    int last_died_type;   /* EntityType value of the last death (sound). */
+    int last_hurt_type;   /* EntityType value of the last non-lethal hit. */
     int blocks_hit;       /* Terrain impacts this update. */
     Vec3 last_block_pos;  /* Last terrain impact point (FX anchor). */
 } ProjectileFrameEvents;

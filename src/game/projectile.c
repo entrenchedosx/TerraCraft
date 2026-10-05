@@ -358,12 +358,14 @@ static void proj_collide_segment(ProjectilePool *pool, int idx, MobPool *mobs, E
     if (living_entity_damage_src(mobs, drops, id, p->damage, knock, p->knock_power, &from,
                                  DAMAGE_PROJECTILE)) {
         ev->mobs_died++;
+        ev->last_died_type = (int)target->type;
         const Mob *dead = mob_resolve(mobs, id);
         ev->last_death_pos = dead != NULL ? dead->pos : mmath_vec3_add(a, mmath_vec3_scale(d, mob_t));
         const MobDefinition *fdef = mob_definition(target->type);
         ev->last_death_item = fdef->ndrops > 0 ? (ProjectileItemId)fdef->drops[0].item : 0;
     } else {
         ev->mobs_hit++;
+        ev->last_hurt_type = (int)target->type;
     }
     p->active = false; /* Arrows never penetrate (M9 rule). */
 }
@@ -378,6 +380,8 @@ void projectile_update(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, W
         ev->player_knock = mmath_vec3(0.0f, 0.0f, 0.0f);
         ev->mobs_hit = 0;
         ev->mobs_died = 0;
+        ev->last_died_type = 0;
+        ev->last_hurt_type = 0;
         ev->last_death_pos = mmath_vec3(0.0f, 0.0f, 0.0f);
         ev->last_death_item = 0;
         ev->blocks_hit = 0;

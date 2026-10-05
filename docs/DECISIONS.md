@@ -24,6 +24,29 @@ returns the replaced block so Survival can spawn its usual drop; those
 changes have regression tests. Further deviations and acceptance work
 remain listed in `docs/JAVA_FIDELITY.md` and `docs/BACKLOG.md`.
 
+## 2026-10-05 — Match cow skin geometry, targeting, and first-person punch
+
+The cow skin maps each cuboid face to its own region of the 64×64 box net;
+its former reused rectangles stretched unrelated hide, muzzle, and leg pixels
+across the model. The cow now uses the skin's 12×18×10 torso, 8×8×6 head,
+and 4×12×4 legs. Melee raycasts use yaw-aligned bounds derived from rendered
+parts in their current articulated pitch with a small animation margin, and a
+ray starting inside the bounds hits at distance zero. Mob parts rotate around
+the creature root, and their render positions now follow simulation movement
+with smoothing; raycasts use that same displayed position. Keeping target
+bounds close to the rendered model fixes the visible muzzle falling outside
+the old square physics footprint and stale targets on moving mobs.
+
+Left mouse held on a mob retries after the tool cooldown and suppresses block
+mining while the mob owns the crosshair. First-person hand motion has its own
+timing, separate from damage cooldown; procedural atlas tiles provide an
+original sleeve and skin palette, and the held item appears as a small
+camera-facing sprite. Placeable blocks use a cube while other held items use a
+thin atlas sprite. The viewmodel draws before the HUD and restores depth and
+culling state. Automated checks cover UV regions, yawed model bounds, inside
+rays, displayed-position targeting, swing phase, and opaque arm tiles; visual
+acceptance still needs a running-game playtest.
+
 ## 2026-10-04 — Fixed-rate world updates and queued press edges
 
 The outer loop remains render/UI driven, but `SimulationClock` schedules
@@ -110,6 +133,30 @@ Jitter scales with distance (0.05 rad base) so close shots threaten
 and long shots dodge — an aimbot would make cover meaningless.
 Cooldown 2.2 s with a visible 0.8 s AIM gives the player a dodge
 window every cycle.
+
+## 2026-10-05 — Cow skin mapping is correct; the renderer pivot was not
+
+### The old pivot math displaced every articulated part
+`mob_emit_part` rotated corners about the pivot but added the pivot
+back UNROTATED (`mob_pos + yawed + pivot`). Rigid rotation about a
+pivot P by yaw needs `+ R(yaw)·P`: the old code offset every pivoted
+part by `P - R·P` (at yaw 0 facing −Z, that's `(2px, 0, 2pz)` — half
+a block sideways and 0.65 forward for a cow leg). Every leg, head,
+and arm shipped displaced; earlier "weird animal" reports were this
+bug, not bad boxes. The fix rotates the pivot with the part
+(`root_pivot`); all part tables are authored in true model space
+against the fixed math. Verified: skeleton/cow UV rects rechecked
+fully opaque after the change (ribcage holes still deliberately
+unsampled).
+
+### Per-type mob sounds without breaking the headless rule
+`mob_hurt_sound`/`mob_die_sound` map EntityType → AudioEvent (cow →
+moo events, everything else generic) so call sites pick sounds while
+game logic stays audio-free. Fall/arrow paths carry the victim type
+in the frame events (`last_died_type`/`last_hurt_type`); melee reads
+it off the resolved mob. Cow hurt/death convert from
+`mob/cow/hurt*.ogg` (no dedicated death file exists — a hurt moo
+doubles for death, documented in the converter).
 
 ## 2026-10-04 — Real mob skins without bundling Mojang bytes
 

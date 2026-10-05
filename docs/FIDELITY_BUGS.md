@@ -54,6 +54,9 @@ selection, and Java Edition reference version before comparing results.
   drops; repeat Creative flight, free placement, and instant mining.
 - [ ] Fight a passive creature, a melee hostile, and a skeleton; fire an
   arrow, then save and reload.
+- [ ] From several yaw angles, hit a cow at its body and muzzle, hold attack
+  through cooldown, confirm a mob prevents mining the block behind it, and
+  inspect the first-person hand/swing with empty and occupied hotbar slots.
 - [ ] Inspect all available item icons in the hotbar, inventory, Creative
   catalogue, cursor, and dropped world sprites. Repeat with `Default` and
   the selected resource pack; capture each reported texture failure.
@@ -184,3 +187,27 @@ the affected behavior has been reproduced and checked in a running build.
 - **Test added:** Current tests cover AO, global time lighting, and static
   water ray behavior; propagation/flow tests remain to be added.
 - **Human verified?:** No.
+
+## TC-FID-009 — Cow appearance, melee targeting, and first-person swing (playtest open)
+
+- **Subsystem:** Mob skin/model, melee targeting, and first-person rendering.
+- **Observed TerraCraft behavior:** The supplied screenshot shows hide patches
+  stretched across the cow, and the user reports that clicking the cow does
+  not hit it. The player has no visible first-person arm or swing.
+- **Expected behavior:** Cow face textures follow their own skin regions;
+  visible body parts can be targeted at ordinary entity reach; left-click
+  produces a readable hand swing.
+- **Root cause:** The cow reused unrelated rectangles on several cuboid
+  faces, its muzzle exceeded the old square target box, a ray beginning inside
+  a target was rejected, and attacks were only attempted on the press edge.
+- **Fix:** Replaced cow face UVs and model proportions, aligned target bounds
+  with yawed model parts, accepted inside-box rays, retried held attacks after
+  cooldown, and added an original procedural sleeve/hand with held-item sprite
+  and swing animation.
+- **Review fix:** Held placeable blocks use the block's per-face atlas mapping
+  so grass, wood, and workbench faces retain their correct top, bottom, and
+  side textures in the first-person view.
+- **Tests added:** `test_mob_raycast`, `test_mob_models`,
+  `test_player_swing_animation`, and `test_atlas_pixels` cover the new paths.
+- **Human verified?:** Not yet. Run the new checklist item in a live game at
+  multiple cow orientations and camera settings before closing this report.

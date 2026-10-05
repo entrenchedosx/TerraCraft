@@ -255,6 +255,8 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
     tile_fill(out_px, TILE_CRACK2, 0, 0, 0, 0);
     tile_fill(out_px, TILE_CRACK3, 0, 0, 0, 0);
     tile_fill(out_px, TILE_CRACK4, 0, 0, 0, 0);
+    tile_fill(out_px, TILE_PLAYER_SKIN, 198, 146, 112, 255);
+    tile_fill(out_px, TILE_PLAYER_SLEEVE, 55, 112, 190, 255);
 
     /* Grass top: darker + lighter speckles. */
     tile_speckle(out_px, TILE_GRASS_TOP, 11u, 0.20f, 0.10f);
@@ -677,6 +679,34 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         }
     }
 
+    /* Original first-person player palette: pixel-shaded skin and a blue
+     * sleeve with a small light cuff. These tiles remain procedural. */
+    {
+        int col = TILE_PLAYER_SKIN % ATLAS_TILES;
+        int row = TILE_PLAYER_SKIN / ATLAS_TILES;
+        for (int y = 1; y < ATLAS_TILE_PX - 1; ++y) {
+            for (int x = 1; x < ATLAS_TILE_PX - 1; ++x) {
+                unsigned char red = (unsigned char)(190 + ((x + y) % 3) * 4);
+                unsigned char green = (unsigned char)(137 + ((x * 2 + y) % 3) * 4);
+                unsigned char blue = (unsigned char)(103 + ((x + y * 2) % 3) * 4);
+                put_px(out_px, col, row, x, y, red, green, blue, 255);
+            }
+        }
+        for (int x = 0; x < ATLAS_TILE_PX; ++x) {
+            put_px(out_px, col, row, x, 0, 136, 91, 69, 255);
+            put_px(out_px, col, row, x, 15, 225, 177, 143, 255);
+        }
+    }
+    {
+        int col = TILE_PLAYER_SLEEVE % ATLAS_TILES;
+        int row = TILE_PLAYER_SLEEVE / ATLAS_TILES;
+        tile_speckle(out_px, TILE_PLAYER_SLEEVE, 23u, 0.10f, 0.06f);
+        for (int x = 0; x < ATLAS_TILE_PX; ++x) {
+            put_px(out_px, col, row, x, 13, 35, 70, 130, 255);
+            put_px(out_px, col, row, x, 14, 216, 219, 221, 255);
+        }
+    }
+
     /* Log top: growth rings on transparency-safe full tile. */
     {
         int col = TILE_WOOD_TOP % ATLAS_TILES;
@@ -938,6 +968,7 @@ int texture_atlas_pack_tiles_dir(char *out, size_t out_cap, const char *packs_di
     if (out == NULL || out_cap == 0 || packs_dir == NULL || packs_dir[0] == '\0' || !pack_name_ok(pack)) {
         return -1;
     }
+
     char pack_dir[PATH_MAX_LEN];
     if (path_join(pack_dir, sizeof(pack_dir), packs_dir, pack) != 0 ||
         path_join(out, out_cap, pack_dir, "tiles") != 0) {

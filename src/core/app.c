@@ -9,6 +9,7 @@
 #include "game/inventory.h"
 #include "game/item.h"
 #include "game/player.h"
+#include "game/player_animation.h"
 #include "game/raycast.h"
 #include "game/session.h"
 #include "game/survival.h"
@@ -361,6 +362,7 @@ static void app_poll_move_input(PlayerInput *in)
  */
 static bool app_aim_mob(AppContext *app, EntityId *out_id);
 static void app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock_power);
+static void app_start_arm_swing(AppContext *app);
 static bool app_try_attack(AppContext *app);
 static void app_debug_spawn_mob(AppContext *app, EntityType type);
 static void app_poll_discrete_input(AppContext *app)
@@ -516,18 +518,24 @@ static void app_tick_creative_actions(AppContext *app)
 {
     bool left_pressed = window_take_mouse_pressed(app->window, MINEC_MOUSE_LEFT);
     bool right_pressed = window_take_mouse_pressed(app->window, MINEC_MOUSE_RIGHT);
-    if (!left_pressed && !right_pressed) {
+    bool left_held = window_is_mouse_down(MINEC_MOUSE_LEFT);
+    if (!left_pressed && !left_held && !right_pressed) {
         return;
     }
     Vec3 eye = player_eye_pos(&app->player);
     HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world,
                                      survival_reach(true));
-    if (left_pressed && !app_try_attack(app)) {
-        int broken = interaction_break(app->world, &hit);
-        if (broken >= 0) {
-            audio_play_block(&app->audio, AUDIO_BLOCK_BREAK, (uint16_t)broken);
-            particle_burst_block(&app->particles, (uint16_t)broken, hit.block[0], hit.block[1], hit.block[2], 16);
-            LOG_DEBUG("break ok: id %d", broken);
+    if (left_pressed || left_held) {
+        if (left_pressed) {
+            app_start_arm_swing(app);
+        }
+        if (!app_try_attack(app) && left_pressed) {
+            int broken = interaction_break(app->world, &hit);
+            if (broken >= 0) {
+                audio_play_block(&app->audio, AUDIO_BLOCK_BREAK, (uint16_t)broken);
+                particle_burst_block(&app->particles, (uint16_t)broken, hit.block[0], hit.block[1], hit.block[2], 16);
+                LOG_DEBUG("break ok: id %d", broken);
+            }
         }
     }
     if (right_pressed) {
@@ -593,35 +601,47 @@ static void app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock
     Vec3 from = mmath_vec3(app->player.pos.x - m->pos.x, 0.0f, app->player.pos.z - m->pos.z);
     Vec3 chest = mmath_vec3(m->pos.x, m->pos.y + m->height * 0.6f, m->pos.z);
     float before = m->health;
+    int mtype = (int)m->type;
     bool killed = living_entity_damage(&app->mobs, &app->entities, eid, dmg, kdir, knock_power, &from);
     if (killed) {
-        audio_play(&app->audio, AUDIO_MOB_DIE);
+        audio_play(&app->audio, mob_die_sound(mtype));
         particle_burst_item(&app->particles, ITEM_APPLE, chest, 8);
     } else if (m->health < before) {
         /* Gated strikes (hurt window) stay silent: no damage, no lie. */
-        audio_play(&app->audio, AUDIO_MOB_HURT);
+        audio_play(&app->audio, mob_hurt_sound(mtype));
         particle_burst_item(&app->particles, ITEM_APPLE, chest, 5);
     }
 }
 
-/* Melee swing on the LMB edge: entity-first targeting; on a hit the
- * block action is skipped this tick (mining resumes on hold).
- * Returns true when a mob was struck.
- */
+/* Start the visible first-person swing and its held-button repeat window. */
+static void app_start_arm_swing(AppContext *app)
+{
+    if (app == NULL) {
+        return;
+    }
+    app->arm_swing_started = app->last_frame_time;
+    app->arm_swing_active = true;
+    app->arm_swing_repeat_t = PLAYER_SWING_DURATION;
+}
+
+/* Resolve a melee click against mobs before blocks. Returns true whenever a
+ * mob owns the crosshair, including during cooldown, so blocks behind it do
+ * not start mining or break through the creature. */
 static bool app_try_attack(AppContext *app)
 {
-    if (app->player.attack_cd > 0.0f || app->player.dead) {
-        return false;
-    }
     EntityId eid = ENTITY_ID_NULL;
     if (!app_aim_mob(app, &eid)) {
         return false;
+    }
+    if (app->player.attack_cd > 0.0f || app->player.dead) {
+        return true;
     }
     float dmg = 1.0f;
     float cd = 0.4f;
     mob_tool_stats(app->player.inv.slots[app->player.hotbar_sel].item, &dmg, &cd);
     app_strike_mob(app, eid, dmg, 5.0f);
     app->player.attack_cd = cd;
+    app_start_arm_swing(app);
     return true;
 }
 
@@ -680,7 +700,12 @@ static void app_tick_mining(AppContext *app, float dt)
 {
     bool pressed = window_take_mouse_pressed(app->window, MINEC_MOUSE_LEFT);
     bool held = window_is_mouse_down(MINEC_MOUSE_LEFT);
-    if (pressed && app_try_attack(app)) {
+    if (pressed) {
+        app_start_arm_swing(app);
+    } else if (held && app->arm_swing_repeat_t <= 0.0f) {
+        app_start_arm_swing(app);
+    }
+    if ((pressed || held) && app_try_attack(app)) {
         survival_mine_reset(&app->player);
         app->prev_mouse_l = held;
         return;
@@ -1245,6 +1270,9 @@ static void app_tick_playing(AppContext *app, float dt)
             app->player.attack_cd = 0.0f;
         }
     }
+    if (app->arm_swing_repeat_t > 0.0f) {
+        app->arm_swing_repeat_t -= dt;
+    }
 
     /* Footsteps: distance cadence on ground (either mode, never flying,
      * never sneaking — Minecraft stays silent while sneaking). */
@@ -1329,10 +1357,10 @@ static void app_tick_playing(AppContext *app, float dt)
                      (double)mev.player_damage, (double)app->player.health);
         }
         if (mev.mobs_died > 0) {
-            audio_play(&app->audio, AUDIO_MOB_DIE);
+            audio_play(&app->audio, mob_die_sound(mev.last_died_type));
             particle_burst_item(&app->particles, (uint16_t)mev.last_death_item, mev.last_death_pos, 8);
         } else if (mev.mobs_hurt > 0) {
-            audio_play(&app->audio, AUDIO_MOB_HURT);
+            audio_play(&app->audio, mob_hurt_sound(mev.last_hurt_type));
         }
     }
 
@@ -1358,10 +1386,10 @@ static void app_tick_playing(AppContext *app, float dt)
                      (double)pev.player_damage, (double)app->player.health);
         }
         if (pev.mobs_died > 0) {
-            audio_play(&app->audio, AUDIO_MOB_DIE);
+            audio_play(&app->audio, mob_die_sound(pev.last_died_type));
             particle_burst_item(&app->particles, (uint16_t)pev.last_death_item, pev.last_death_pos, 8);
         } else if (pev.mobs_hit > 0) {
-            audio_play(&app->audio, AUDIO_MOB_HURT);
+            audio_play(&app->audio, mob_hurt_sound(pev.last_hurt_type));
         }
         if (pev.blocks_hit > 0) {
             audio_play(&app->audio, AUDIO_ARROW_STICK);
@@ -1469,6 +1497,16 @@ static void app_render_playing(AppContext *app)
                                         hov.block[2]);
         }
     }
+    {
+        const ItemStack *held = &app->player.inv.slots[app->player.hotbar_sel];
+        int held_tile = stack_is_empty(held) ? -1 : item_get_info(held->item)->tile;
+        uint16_t held_block = stack_is_empty(held) ? 0 : item_to_block(held->item);
+        float swing_phase = app->arm_swing_active
+                                ? player_swing_phase((float)(app->last_frame_time - app->arm_swing_started))
+                                : 1.0f;
+        renderer_draw_player_arm(app->renderer, app->camera, aspect, &app->clock, held_tile,
+                                 held_block, swing_phase);
+    }
     bool vitals = !survival_is_creative(&app->player);
     float eat_frac = app->player.eat_active ? app->player.eat_t / SURVIVAL_EAT_TIME : -1.0f;
     float bow_frac = app->player.bow_drawing ? survival_bow_charge(app->player.bow_t) : -1.0f;
@@ -1507,6 +1545,29 @@ static void app_prepare_world_render(AppContext *app)
             float k = 1.0f - expf(-12.0f / 60.0f);
             app->player.render_pos =
                 mmath_vec3(rp.x + dx * k, rp.y + dy * k, rp.z + dz * k);
+        }
+    }
+    /* Smooth mob rendering toward authoritative simulation positions, just
+     * as the player view is smoothed. Snap large teleports rather than
+     * interpolating across the world. */
+    {
+        const float k = 1.0f - expf(-12.0f / 60.0f);
+        for (int i = 0; i < MOB_MAX; ++i) {
+            Mob *mob = &app->mobs.mobs[i];
+            if (!mob->active) {
+                continue;
+            }
+            Vec3 rp = mob->render_pos;
+            Vec3 sp = mob->pos;
+            float dx = sp.x - rp.x;
+            float dy = sp.y - rp.y;
+            float dz = sp.z - rp.z;
+            float d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > 16.0f) {
+                mob->render_pos = sp;
+            } else if (d2 > 0.0f) {
+                mob->render_pos = mmath_vec3(rp.x + dx * k, rp.y + dy * k, rp.z + dz * k);
+            }
         }
     }
     camera_set_position(app->camera, player_eye_pos(&app->player));

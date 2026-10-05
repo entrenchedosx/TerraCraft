@@ -321,6 +321,11 @@ int test_audio_pack_swap(void)
     /* Bank still functional after the swap. */
     TEST_ASSERT(audio_bank_variants(&sys, AUDIO_EAT, 0) >= 1);
     TEST_ASSERT(audio_bank_variants(&sys, AUDIO_BLOCK_BREAK, AUDIO_MAT_STONE) >= 1);
+    /* Cow events exist with synth fallback even without converted files. */
+    TEST_ASSERT(audio_bank_variants(&sys, AUDIO_COW_HURT, 0) >= 1);
+    TEST_ASSERT(audio_bank_variants(&sys, AUDIO_COW_DIE, 0) >= 1);
+    TEST_ASSERT(audio_event_stem(AUDIO_COW_HURT) != NULL);
+    TEST_ASSERT(audio_event_stem(AUDIO_COW_DIE) != NULL);
     SDL_PauseAudioDevice((SDL_AudioDeviceID)sys.device, 0);
     audio_shutdown(&sys);
     SDL_setenv("SDL_AUDIODRIVER", "", 1);

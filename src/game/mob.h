@@ -15,6 +15,8 @@
 #include "game/inventory.h"
 #include "math/mmath.h"
 
+#include "game/audio.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -315,6 +317,8 @@ typedef struct MobFrameEvents {
                          * feedback plays at the strike site instead). */
     Vec3 last_death_pos; /* Feet position of the last death (FX anchor). */
     ItemId last_death_item; /* First drop item of the last death (FX tint). */
+    int last_died_type;  /* EntityType of the last death (sound select). */
+    int last_hurt_type;  /* EntityType of the last non-lethal hit (sound). */
     int fire_requests;  /* Requested arrow shots this tick (<= MOB_MAX_SHOTS). */
     ProjectileShot shots[MOB_MAX_SHOTS]; /* Fired via projectile_fire by the app. */
     int shots_dropped;  /* Requests dropped past the cap (never expected). */
@@ -364,7 +368,28 @@ bool living_entity_damage(MobPool *pool, EntityPool *drops, EntityId id, float a
 bool living_entity_damage_src(MobPool *pool, EntityPool *drops, EntityId id, float amount,
                               Vec3 knock_dir, float knock_power, const Vec3 *from_dir, int source);
 
-/* Ray vs living-mob AABBs (nearest alive hit for melee targeting).
+/* Hurt sound for a mob type (cows moo, everyone else uses the generic
+ * thud — resolved at the call site so game logic stays audio-free).
+ *
+ * Args:
+ *   type: EntityType value.
+ *
+ * Returns: AudioEvent to play.
+ */
+AudioEvent mob_hurt_sound(int type);
+
+/* Death sound for a mob type (same rule as mob_hurt_sound).
+ *
+ * Args:
+ *   type: EntityType value.
+ *
+ * Returns: AudioEvent to play.
+ */
+AudioEvent mob_die_sound(int type);
+
+/* Ray vs yaw-aligned living-mob model bounds (nearest alive hit for melee
+ * targeting). The bounds include a small animation margin and a ray starting
+ * inside a mob counts as an immediate hit.
  *
  * Args:
  *   pool: mob pool (must not be NULL).

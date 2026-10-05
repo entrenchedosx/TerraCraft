@@ -226,6 +226,7 @@ int test_save_mob_v1_compat(void);
 int test_save_mob_corrupt(void);
 int test_save_mob_dead_excluded(void);
 int test_mob_models(void);
+int test_player_swing_animation(void);
 
 /* Pathfinding tests (defined in test_path.c). */
 int test_path_flat(void);

@@ -151,6 +151,7 @@ int main(void)
     RUN_TEST(test_save_mob_corrupt);
     RUN_TEST(test_save_mob_dead_excluded);
     RUN_TEST(test_mob_models);
+    RUN_TEST(test_player_swing_animation);
     RUN_TEST(test_path_flat);
     RUN_TEST(test_path_wall);
     RUN_TEST(test_path_steps);

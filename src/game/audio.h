@@ -26,6 +26,8 @@ typedef enum AudioEvent {
     AUDIO_STEP_SAND,   /* Footstep on sand-like block (M7 backend). */
     AUDIO_MOB_HURT,    /* Living mob takes damage (M8 backend). */
     AUDIO_MOB_DIE,     /* Living mob dies (M8 backend). */
+    AUDIO_COW_HURT,    /* Cow takes damage: moo (converted, synth fallback). */
+    AUDIO_COW_DIE,     /* Cow dies: low moo (converted, synth fallback). */
     AUDIO_BOW_DRAW,    /* Bow draw started (M9 backend). */
     AUDIO_BOW_FIRE,    /* Arrow released, player or skeleton (M9 backend). */
     AUDIO_ARROW_STICK, /* Arrow embedded in terrain (M9 backend). */

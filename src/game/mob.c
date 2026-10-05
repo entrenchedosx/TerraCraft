@@ -1,4 +1,5 @@
 #include "game/mob.h"
+#include "game/mob_model.h"
 #include "core/log.h"
 #include "game/entity.h"
 #include "game/item.h"
@@ -954,13 +955,31 @@ bool living_entity_damage(MobPool *pool, EntityPool *drops, EntityId id, float a
                                     DAMAGE_MELEE);
 }
 
+/* Hurt sound for a mob type. */
+AudioEvent mob_hurt_sound(int type)
+{
+    if (type == (int)ENTITY_COW) {
+        return AUDIO_COW_HURT;
+    }
+    return AUDIO_MOB_HURT;
+}
+
+/* Death sound for a mob type. */
+AudioEvent mob_die_sound(int type)
+{
+    if (type == (int)ENTITY_COW) {
+        return AUDIO_COW_DIE;
+    }
+    return AUDIO_MOB_DIE;
+}
+
 /* True when a block cell shields a melee swing (solid only). */
 bool mob_block_shields(uint16_t block)
 {
     return block_is_solid(block);
 }
 
-/* Ray vs living-mob AABBs (nearest alive hit). */
+/* Ray vs living-mob model bounds (nearest alive hit). */
 bool mob_raycast(const MobPool *pool, Vec3 eye, Vec3 dir, float max_dist, float *out_dist,
                  EntityId *out_id)
 {
@@ -986,17 +1005,85 @@ bool mob_raycast(const MobPool *pool, Vec3 eye, Vec3 dir, float max_dist, float 
         if (!m->active || m->dead) {
             continue;
         }
-        float hw = m->width * 0.5f;
-        Vec3 mn = mmath_vec3(m->pos.x - hw, m->pos.y, m->pos.z - hw);
-        Vec3 mx = mmath_vec3(m->pos.x + hw, m->pos.y + m->height, m->pos.z + hw);
+        /* Target the geometry that is actually rendered. Several models,
+         * especially the cow muzzle and skeleton limbs, extend beyond the
+         * physics footprint. */
+        float min_x = -m->width * 0.5f;
+        float max_x = m->width * 0.5f;
+        float min_y = 0.0f;
+        float max_y = m->height;
+        float min_z = -m->width * 0.5f;
+        float max_z = m->width * 0.5f;
+        const MobDefinition *def = mob_definition(m->type);
+        const MobModel *model = def != NULL ? mob_model_for(def->model) : NULL;
+        if (model != NULL && mob_model_validate(model)) {
+            min_x = min_y = min_z = INFINITY;
+            max_x = max_y = max_z = -INFINITY;
+            for (int p = 0; p < model->nparts; ++p) {
+                const MobModelPart *part = &model->parts[p];
+                float pitch = 0.0f;
+                if (part->anim == MOB_ANIM_LEG) {
+                    float phase = m->walk_phase + ((p % 2) ? 3.14159265358979323846f : 0.0f);
+                    pitch = sinf(phase) * 0.6f;
+                } else if (part->anim == MOB_ANIM_HEAD) {
+                    pitch = sinf(m->walk_phase * 0.5f) * 0.08f;
+                } else if (part->anim == MOB_ANIM_AIM_ARM) {
+                    if (m->state == MOB_STATE_AIM || m->state == MOB_STATE_ATTACK) {
+                        pitch = -1.3f;
+                    } else {
+                        float phase = m->walk_phase + ((p % 2) ? 3.14159265358979323846f : 0.0f);
+                        pitch = sinf(phase) * 0.6f;
+                    }
+                }
+                Vec3 pivot = mmath_vec3(part->offset.x + part->size.x * 0.5f,
+                                        part->pivot_y,
+                                        part->offset.z + part->size.z * 0.5f);
+                float cp = cosf(pitch);
+                float sp = sinf(pitch);
+                for (int corner = 0; corner < 8; ++corner) {
+                    Vec3 point = mmath_vec3(part->offset.x + ((corner & 1) ? part->size.x : 0.0f),
+                                            part->offset.y + ((corner & 2) ? part->size.y : 0.0f),
+                                            part->offset.z + ((corner & 4) ? part->size.z : 0.0f));
+                    Vec3 rel = mmath_vec3_sub(point, pivot);
+                    Vec3 rotated = mmath_vec3(rel.x, rel.y * cp - rel.z * sp,
+                                              rel.y * sp + rel.z * cp);
+                    point = mmath_vec3_add(pivot, rotated);
+                    if (point.x < min_x) min_x = point.x;
+                    if (point.y < min_y) min_y = point.y;
+                    if (point.z < min_z) min_z = point.z;
+                    if (point.x > max_x) max_x = point.x;
+                    if (point.y > max_y) max_y = point.y;
+                    if (point.z > max_z) max_z = point.z;
+                }
+            }
+            /* Cover minor base shake and idle bob; articulated parts above
+             * are bounded at their current rendered pose. */
+            const float margin = 0.08f;
+            min_x -= margin;
+            min_y -= margin;
+            min_z -= margin;
+            max_x += margin;
+            max_y += margin;
+            max_z += margin;
+        }
+        /* mob_emit_part rotates local geometry by yaw + PI. Undo that
+         * rotation for the ray so the target bound follows the visible mob. */
+        float inv_yaw = -(m->yaw + 3.14159265358979323846f);
+        float cy = cosf(inv_yaw);
+        float sy = sinf(inv_yaw);
+        /* Target the interpolated position that the player actually sees. */
+        Vec3 rel = mmath_vec3(eye.x - m->render_pos.x, eye.y - m->render_pos.y,
+                              eye.z - m->render_pos.z);
+        Vec3 lo = mmath_vec3(rel.x * cy + rel.z * sy, rel.y, -rel.x * sy + rel.z * cy);
+        Vec3 ld = mmath_vec3(d.x * cy + d.z * sy, d.y, -d.x * sy + d.z * cy);
         /* Slab test per axis. */
         float tmin = 0.0f;
         float tmax = best;
         bool miss = false;
-        const float o[3] = {eye.x, eye.y, eye.z};
-        const float dd[3] = {d.x, d.y, d.z};
-        const float bmin[3] = {mn.x, mn.y, mn.z};
-        const float bmax[3] = {mx.x, mx.y, mx.z};
+        const float o[3] = {lo.x, lo.y, lo.z};
+        const float dd[3] = {ld.x, ld.y, ld.z};
+        const float bmin[3] = {min_x, min_y, min_z};
+        const float bmax[3] = {max_x, max_y, max_z};
         for (int a = 0; a < 3 && !miss; ++a) {
             if (fabsf(dd[a]) < 1e-8f) {
                 if (o[a] < bmin[a] || o[a] > bmax[a]) {
@@ -1021,7 +1108,7 @@ bool mob_raycast(const MobPool *pool, Vec3 eye, Vec3 dir, float max_dist, float 
                 }
             }
         }
-        if (!miss && tmin > 0.0f && tmin <= best) {
+        if (!miss && tmax >= 0.0f && tmin <= best) {
             best = tmin;
             best_id = entity_id_make(i, m->gen);
             found = true;
@@ -1171,6 +1258,8 @@ void mob_update_all(MobPool *pool, EntityPool *drops, World *w, const MobPlayerI
     ev->player_knock = mmath_vec3(0.0f, 0.0f, 0.0f);
     ev->mobs_died = 0;
     ev->mobs_hurt = 0;
+    ev->last_died_type = (int)ENTITY_NONE;
+    ev->last_hurt_type = (int)ENTITY_NONE;
     ev->fire_requests = 0;
     ev->shots_dropped = 0;
     ev->last_death_pos = mmath_vec3(0.0f, 0.0f, 0.0f);
@@ -1267,12 +1356,14 @@ void mob_update_all(MobPool *pool, EntityPool *drops, World *w, const MobPlayerI
                                          NULL)) {
                     ev->mobs_died++;
                     ev->last_death_pos = m->pos;
+                    ev->last_died_type = (int)m->type;
                     const MobDefinition *fdef = mob_definition(m->type);
                     ev->last_death_item =
                         fdef->ndrops > 0 ? fdef->drops[0].item : (ItemId)ITEM_NONE;
                 } else if (m->health < before) {
                     /* Gated fall ticks (hurt window) report nothing. */
                     ev->mobs_hurt++;
+                    ev->last_hurt_type = (int)m->type;
                 }
             }
         }

@@ -137,6 +137,25 @@ int test_atlas_pixels(void)
         TEST_ASSERT(px[o + 3] > 25 && px[o + 3] < 255);
     }
 
+    /* The original player sleeve and skin tiles are fully opaque, so the
+     * first-person arm never inherits uninitialized atlas pixels. */
+    {
+        int tiles[2] = {TILE_PLAYER_SKIN, TILE_PLAYER_SLEEVE};
+        for (int t = 0; t < 2; ++t) {
+            int col = tiles[t] % ATLAS_TILES;
+            int row = tiles[t] / ATLAS_TILES;
+            int opaque = 0;
+            for (int y = 0; y < ATLAS_TILE_PX; ++y) {
+                for (int x = 0; x < ATLAS_TILE_PX; ++x) {
+                    size_t o = ((size_t)(row * ATLAS_TILE_PX + y) * ATLAS_SIZE +
+                                (size_t)(col * ATLAS_TILE_PX + x)) * 4;
+                    opaque += px[o + 3] == 255;
+                }
+            }
+            TEST_ASSERT(opaque == ATLAS_TILE_PX * ATLAS_TILE_PX);
+        }
+    }
+
     /* NULL fill is safe. */
     texture_atlas_fill_rgba(NULL);
     free(px);

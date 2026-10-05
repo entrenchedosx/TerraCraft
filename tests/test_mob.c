@@ -5,6 +5,7 @@
 #include "game/inventory.h"
 #include "game/mob.h"
 #include "game/mob_model.h"
+#include "game/player_animation.h"
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/entity_save.h"
@@ -547,6 +548,53 @@ int test_mob_raycast(void)
     TEST_ASSERT(mob_raycast(NULL, eye, aim, 8.0f, &dist, &hit) == false);
     TEST_ASSERT(mob_raycast(&pool, eye, mmath_vec3(0.0f, 0.0f, 0.0f), 8.0f, &dist, &hit) == false);
     TEST_ASSERT(mob_raycast(&pool, eye, aim, 0.0f, &dist, &hit) == false);
+    /* A camera inside a mob's model still registers the immediate hit. */
+    MobPool inside_pool;
+    mob_pool_init(&inside_pool, 12u);
+    EntityId inside_id = mob_spawn(&inside_pool, ENTITY_COW, mmath_vec3(0.0f, 65.0f, 0.0f), 0.0f);
+    TEST_ASSERT(inside_id != ENTITY_ID_NULL);
+    TEST_ASSERT(mob_raycast(&inside_pool, mmath_vec3(0.0f, 65.5f, 0.0f), fwd, 3.0f, &dist, &hit));
+    TEST_ASSERT(hit == inside_id);
+    TEST_ASSERT_FLOAT_EQ(dist, 0.0f, 1e-6f);
+    /* The visible cow muzzle extends beyond the legacy square hitbox and
+     * remains hittable as its root yaw rotates the whole model. */
+    const float cow_yaws[3] = {0.0f, 1.57079632679f, 3.14159265359f};
+    for (int i = 0; i < 3; ++i) {
+        MobPool muzzle_pool;
+        mob_pool_init(&muzzle_pool, 13u + (uint32_t)i);
+        EntityId muzzle_id = mob_spawn(&muzzle_pool, ENTITY_COW, mmath_vec3(3.0f, 65.0f, 0.0f),
+                                       cow_yaws[i]);
+        TEST_ASSERT(muzzle_id != ENTITY_ID_NULL);
+        float facing = cow_yaws[i] + 3.14159265359f;
+        Vec3 muzzle = mmath_vec3(3.0f + sinf(facing) * 0.58f, 66.1f,
+                                 cosf(facing) * 0.58f);
+        Vec3 ray = mmath_vec3_sub(muzzle, eye);
+        TEST_ASSERT(mob_raycast(&muzzle_pool, eye, ray, 4.0f, &dist, &hit));
+        TEST_ASSERT(hit == muzzle_id);
+    }
+    /* The ray follows the rendered interpolation point, not a newer physics
+     * point that has not reached the next displayed frame yet. */
+    MobPool visual_pool;
+    mob_pool_init(&visual_pool, 17u);
+    EntityId visual_id = mob_spawn(&visual_pool, ENTITY_COW, mmath_vec3(3.0f, 65.0f, 0.0f), 0.0f);
+    Mob *visual_mob = mob_resolve(&visual_pool, visual_id);
+    TEST_ASSERT(visual_mob != NULL);
+    if (visual_mob != NULL) {
+        visual_mob->pos.x = 12.0f;
+    }
+    TEST_ASSERT(mob_raycast(&visual_pool, eye, mmath_vec3(1.0f, 0.01f, -0.18f), 4.0f, &dist, &hit));
+    TEST_ASSERT(hit == visual_id);
+    if (visual_mob != NULL) {
+        visual_mob->render_pos = visual_mob->pos;
+    }
+    TEST_ASSERT(mob_raycast(&visual_pool, eye, mmath_vec3(1.0f, 0.01f, -0.18f), 4.0f, &dist, &hit) == false);
+    /* The skeleton's visible arm also reaches beyond its 0.6-wide body box. */
+    MobPool arm_pool;
+    mob_pool_init(&arm_pool, 18u);
+    EntityId arm_id = mob_spawn(&arm_pool, ENTITY_SKELETON, mmath_vec3(3.0f, 65.0f, 0.0f), 0.0f);
+    TEST_ASSERT(arm_id != ENTITY_ID_NULL);
+    TEST_ASSERT(mob_raycast(&arm_pool, eye, mmath_vec3(1.0f, 0.0f, 0.0f), 4.0f, &dist, &hit));
+    TEST_ASSERT(hit == arm_id);
     /* Swing shielding: solid blocks stop a swing, decor never does
      * (swinging through a flower at a mob must connect). */
     TEST_ASSERT(mob_block_shields(BLOCK_STONE) == true);
@@ -557,6 +605,14 @@ int test_mob_raycast(void)
     TEST_ASSERT(mob_block_shields(BLOCK_TORCH) == false);
     TEST_ASSERT(mob_block_shields(BLOCK_WATER) == false);
     TEST_ASSERT(mob_block_shields(BLOCK_AIR) == false);
+    /* Per-type hurt/die sounds: cows moo, everyone else thuds. */
+    TEST_ASSERT(mob_hurt_sound((int)ENTITY_COW) == AUDIO_COW_HURT);
+    TEST_ASSERT(mob_die_sound((int)ENTITY_COW) == AUDIO_COW_DIE);
+    TEST_ASSERT(mob_hurt_sound((int)ENTITY_GLOOMSTALKER) == AUDIO_MOB_HURT);
+    TEST_ASSERT(mob_die_sound((int)ENTITY_GLOOMSTALKER) == AUDIO_MOB_DIE);
+    TEST_ASSERT(mob_hurt_sound((int)ENTITY_SKELETON) == AUDIO_MOB_HURT);
+    TEST_ASSERT(mob_die_sound((int)ENTITY_SKELETON) == AUDIO_MOB_DIE);
+    TEST_ASSERT(mob_hurt_sound(99) == AUDIO_MOB_HURT);
     return failures;
 }
 
@@ -1080,6 +1136,12 @@ int test_mob_models(void)
         TEST_ASSERT(cowsk->width == 64 && cowsk->height == 64);
         TEST_ASSERT(mob_skin_validate(cowsk, moss->nparts) == true);
         TEST_ASSERT(mob_skin_validate(cowsk, moss->nparts + 1) == false);
+        MobSkinRect body_left = cowsk->parts[0].faces[0];
+        MobSkinRect body_front = cowsk->parts[0].faces[5];
+        MobSkinRect head_front = cowsk->parts[1].faces[5];
+        TEST_ASSERT(body_left.x == 18 && body_left.y == 14 && body_left.w == 10 && body_left.h == 18);
+        TEST_ASSERT(body_front.x == 28 && body_front.y == 14 && body_front.w == 12 && body_front.h == 18);
+        TEST_ASSERT(head_front.x == 6 && head_front.y == 6 && head_front.w == 8 && head_front.h == 8);
     }
     const MobSkin *sk = mob_skin_for(2);
     TEST_ASSERT(sk != NULL);
@@ -1103,7 +1165,10 @@ int test_mob_models(void)
     MobSkin bad_skin = {"skeleton", 64, 32, bad_rect, 1};
     TEST_ASSERT(mob_skin_validate(&bad_skin, 1) == false);
     if (moss != NULL) {
-        TEST_ASSERT(moss->nparts == 8);
+        TEST_ASSERT(moss->nparts == 6);
+        TEST_ASSERT_FLOAT_EQ(moss->parts[0].size.x, 0.75f, 1e-6f);
+        TEST_ASSERT_FLOAT_EQ(moss->parts[0].size.y, 1.125f, 1e-6f);
+        TEST_ASSERT(moss->parts[1].size.x < moss->parts[0].size.x);
         /* Legs swing, body does not. */
         int legs = 0;
         for (int i = 0; i < moss->nparts; ++i) {
@@ -1137,5 +1202,21 @@ int test_mob_models(void)
     };
     MobModel m5 = {tall, 1, 1.0f};
     TEST_ASSERT(mob_model_validate(&m5) == false);
+    return failures;
+}
+
+/* Test: first-person swing timing is finite, clamped, and smooth. */
+int test_player_swing_animation(void)
+{
+    int failures = 0;
+    TEST_ASSERT_FLOAT_EQ(player_swing_phase(-1.0f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_phase(0.0f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_phase(PLAYER_SWING_DURATION * 0.5f), 0.5f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_phase(PLAYER_SWING_DURATION * 2.0f), 1.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_phase(NAN), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_weight(0.0f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_weight(0.5f), 1.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_weight(1.0f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_swing_weight(2.0f), 0.0f, 1e-6f);
     return failures;
 }

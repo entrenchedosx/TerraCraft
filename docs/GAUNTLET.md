@@ -127,6 +127,33 @@ fault, then verify the same case in a running game. If no mismatch appears,
 record the exact version, asset layer, and tested items so the issue can be
 triaged against the user's report.
 
+### Round 3 — Cow appearance, melee targeting, and first-person swing
+
+- The supplied screenshot showed a cow with stretched, mismatched hide patches.
+  Code review traced this to reused per-face skin rectangles and a rendered
+  model extending beyond the old square hitbox.
+- Replaced the cow's face UVs with the 64×64 skin box-net regions and tuned
+  the torso, head, and legs to the authored cuboid proportions. Mob parts
+  rotate around the creature root and render positions now track simulation
+  movement. Melee bounds follow root yaw and current limb/head pitch with a
+  small margin; rays starting inside a mob register immediately.
+- Held left mouse now retries attacks after cooldown and a mob under the
+  crosshair suppresses block mining behind it. Added an original procedural
+  first-person sleeve/hand, a held-item sprite, and a swing envelope separate
+  from damage cooldown. Held block cubes use the same per-face textures as
+  world blocks (grass, wood, and workbench tops/bottoms included).
+- Added regression coverage for cow geometry/UVs, muzzle reach at three yaws,
+  inside-box rays, skeleton arm reach, displayed-vs-simulation positions,
+  swing timing, and opaque procedural hand textures.
+- Visual Studio Debug and Release builds succeeded. Debug and Release CTest
+  each passed; the direct runner reports 155 tests, 0 failed.
+- Independent source review verified the swing buffer recovery, held block
+  geometry, GL state restoration, mob targeting transform, and attack cadence;
+  review also caught and fixed the held-block face textures. A running-game
+  check of cow appearance, yaw-dependent targeting, FOV/pitch placement, and
+  swing visibility remains pending. This round is not visually accepted until
+  those checks are done.
+
 ## Research
 
 - [Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) — original

@@ -8,6 +8,7 @@
 #include "game/mob_model.h"
 #include "game/particle.h"
 #include "game/projectile.h"
+#include "game/player_animation.h"
 #include "game/time_system.h"
 #include "platform/gl_ctx.h"
 #include "render/camera.h"
@@ -178,6 +179,7 @@ static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPar
                            part->offset.z + part->size.z * 0.5f);
     }
     float ya = yaw + 3.14159265f;
+    Vec3 root_pivot = mob_rot_y(pivot, ya);
     /* Transform the 8 unit corners once. */
     Vec3 corners[8];
     Vec3 norms[6];
@@ -190,8 +192,9 @@ static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPar
                                 part->offset.z + lz * part->size.z - pivot.z);
         Vec3 pitched = mob_rot_x(local, pitch);
         Vec3 yawed = mob_rot_y(pitched, ya);
-        corners[i] = mmath_vec3(mob_pos.x + yawed.x + pivot.x, mob_pos.y + yawed.y + pivot.y,
-                                mob_pos.z + yawed.z + pivot.z);
+        corners[i] = mmath_vec3(mob_pos.x + yawed.x + root_pivot.x,
+                                mob_pos.y + yawed.y + root_pivot.y,
+                                mob_pos.z + yawed.z + root_pivot.z);
     }
     for (int f = 0; f < 6; ++f) {
         Vec3 n = mob_rot_y(mob_rot_x(mmath_vec3(MOB_FACE_N[f][0], MOB_FACE_N[f][1], MOB_FACE_N[f][2]),
@@ -418,6 +421,109 @@ static void mob_draw_batch(Renderer *r, const Camera *cam, float aspect, const T
     mesh.index_cap = o;
     if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
         gpu_chunk_draw(&r->ent_buf);
+    }
+    renderer_end_voxel(r);
+}
+
+/* Rebase one view-model vertex from camera-local coordinates into world
+ * space after applying the shared shoulder swing. */
+static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up, Vec3 forward,
+                                        Vec3 shoulder, float swing_x, float swing_y)
+{
+    Vec3 p = mmath_vec3(v[0], v[1], v[2]);
+    Vec3 rel = mmath_vec3_sub(p, shoulder);
+    rel = mob_rot_y(mob_rot_x(rel, swing_x), swing_y);
+    p = mmath_vec3_add(shoulder, rel);
+    Vec3 n = mmath_vec3(v[3], v[4], v[5]);
+    n = mob_rot_y(mob_rot_x(n, swing_x), swing_y);
+    Vec3 wp = mmath_vec3_add(eye, mmath_vec3_add(mmath_vec3_scale(right, p.x),
+                         mmath_vec3_add(mmath_vec3_scale(up, p.y), mmath_vec3_scale(forward, p.z))));
+    Vec3 wn = mmath_vec3_add(mmath_vec3_scale(right, n.x),
+                         mmath_vec3_add(mmath_vec3_scale(up, n.y), mmath_vec3_scale(forward, n.z)));
+    v[0] = wp.x;
+    v[1] = wp.y;
+    v[2] = wp.z;
+    v[3] = wn.x;
+    v[4] = wn.y;
+    v[5] = wn.z;
+}
+
+/* Draw an original sleeve/hand and a small atlas sprite for the held item.
+ * This pass deliberately ignores world depth so the hand stays in front;
+ * the HUD still renders afterward. */
+void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
+                              const TimeSystem *ts, int held_tile, uint16_t held_block,
+                              float swing_phase)
+{
+    if (r == NULL || cam == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
+        return;
+    }
+    /* Viewmodel layout (camera-local: x right, y up, z forward): a
+     * compact arm tucked low-right, MC-style — sleeve down from the
+     * shoulder pivot, skin hand at its base, held item just ahead.
+     * Previous tuning sat half a meter high and filled a quarter of
+     * the screen; this keeps the whole assembly in the lower-right. */
+    MobModelPart parts[3] = {
+        {{0.42f, -0.85f, 0.60f}, {0.17f, 0.45f, 0.17f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.42f, -1.01f, 0.59f}, {0.17f, 0.17f, 0.19f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.39f, -0.93f, 0.76f},
+         held_block != 0 ? mmath_vec3(0.20f, 0.20f, 0.20f) : mmath_vec3(0.22f, 0.22f, 0.035f),
+         held_tile, -1, 0.0f, MOB_ANIM_NONE},
+    };
+    int count = held_tile >= 0 && held_tile <= 255 ? 3 : 2;
+    const Vec3 shoulder = {0.50f, -0.42f, 0.62f};
+    float swing = player_swing_weight(swing_phase);
+    float swing_x = -0.70f * swing;
+    float swing_y = 0.06f * swing;
+    Vec3 eye = camera_get_position(cam);
+    Vec3 forward = camera_get_forward(cam);
+    Vec3 right = camera_get_right(cam);
+    Vec3 up = mmath_vec3_normalize(mmath_vec3_cross(right, forward));
+    size_t vertex_count = (size_t)count * 36;
+    for (int p = 0; p < count; ++p) {
+        float fuv[6][4];
+        if (p == 2 && held_block != 0) {
+            for (int face = 0; face < 6; ++face) {
+                int tile = block_tile_for_face(held_block, face);
+                texture_atlas_tile_uv(tile, &fuv[face][0], &fuv[face][1],
+                                      &fuv[face][2], &fuv[face][3]);
+            }
+        } else {
+            mob_tile_uvs(&parts[p], fuv);
+        }
+        float *dst = r->mob_verts + (size_t)p * 36 * MESHER_FLOATS_PER_VERTEX;
+        mob_emit_part(dst, mmath_vec3(0.0f, 0.0f, 0.0f), -3.14159265f, &parts[p], 0.0f, false, fuv);
+        for (size_t v = 0; v < 36; ++v) {
+            player_arm_transform_vertex(dst + v * MESHER_FLOATS_PER_VERTEX, eye, right, up, forward,
+                                        shoulder, swing_x, swing_y);
+        }
+    }
+    if (!renderer_begin_voxel(r, cam, aspect, ts)) {
+        return;
+    }
+    GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean cull_was_enabled = glIsEnabled(GL_CULL_FACE);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    MeshData mesh;
+    mesh.vertices = r->mob_verts;
+    mesh.indices = r->mob_idx;
+    mesh.vertex_count = vertex_count;
+    mesh.index_count = vertex_count;
+    mesh.vertex_cap = vertex_count;
+    mesh.index_cap = vertex_count;
+    if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
+        gpu_chunk_draw(&r->ent_buf);
+    }
+    if (depth_was_enabled) {
+        glEnable(GL_DEPTH_TEST);
+    } else {
+        glDisable(GL_DEPTH_TEST);
+    }
+    if (cull_was_enabled) {
+        glEnable(GL_CULL_FACE);
+    } else {
+        glDisable(GL_CULL_FACE);
     }
     renderer_end_voxel(r);
 }

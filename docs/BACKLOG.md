@@ -104,10 +104,12 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 - [x] Refresh the resource-pack reference to the current 46 atlas tiles and sound events.
 - [x] Fix custom resource-pack path construction/discovery and reload the live atlas when the selected pack changes; headless tests cover pack listing and item-tile application.
 - [x] Add a tested 20 TPS scheduler with bounded catch-up, dropped-time accounting, event-latched input edges, and world simulation during inventory/workbench screens.
+- [x] Replace the stretched cow skin mapping with per-face box-net UVs and skin-proportioned cuboids; align melee ray bounds to yawed rendered models, allow hits from inside, and retry held attacks after cooldown.
+- [x] Add a procedural first-person sleeve and hand, held-item sprite, and independently timed swing; Debug and Release CTest both pass with 155 registered cases.
 - [ ] Reproduce the user's item texture report with the affected item names, render location, selected pack, and screenshot; verify the custom-pack fix in-game or identify another runtime cause.
 - [ ] Add render interpolation, then validate ticked movement/collision, survival, lighting, and fluid behaviors before claiming the fidelity pass complete.
 - [ ] Complete a hands-on Survival/Creative playtest against a running Java Edition 26.3 reference.
-- [x] Current round verification: Debug and Release builds and CTest passed; the independent critic's high-impact findings are fixed. The staged file list excludes `AI_MEMORY` and `mcassets/`.
+- [ ] Current round verification: Debug and Release builds and CTest passed; independent code review is complete and the running-game visual check is pending. Keep `AI_MEMORY` and `mcassets/` excluded from Git.
 - Gauntlet procedure and round notes: `docs/GAUNTLET.md`.
 
 ## Milestone 8 — Entity Framework + Creatures + Combat (DONE)

@@ -235,6 +235,21 @@ static int synth_event(AudioEvent ev, int16_t **out_pcm, size_t *out_frames)
             synth_tone(pcm, frames, 260.0, 60.0, 0.8f, false);
         }
         break;
+    case AUDIO_COW_HURT:
+        pcm = synth_buffer(0.30, &frames);
+        if (pcm != NULL) {
+            /* Moo-ish fallback: lowFM-ish wobble (converted moo wins). */
+            synth_tone(pcm, frames, 170.0, 120.0, 0.7f, false);
+            synth_layer_tone(pcm, 0, frames / 2, 340.0, 240.0, 0.3f, false);
+        }
+        break;
+    case AUDIO_COW_DIE:
+        pcm = synth_buffer(0.55, &frames);
+        if (pcm != NULL) {
+            synth_tone(pcm, frames, 200.0, 70.0, 0.8f, false);
+            synth_layer_tone(pcm, 0, frames / 2, 400.0, 140.0, 0.3f, false);
+        }
+        break;
     case AUDIO_BOW_DRAW:
         pcm = synth_buffer(0.15, &frames);
         if (pcm != NULL) {
@@ -316,6 +331,10 @@ const char *audio_event_stem(AudioEvent ev)
         return "mob_hurt";
     case AUDIO_MOB_DIE:
         return "mob_die";
+    case AUDIO_COW_HURT:
+        return "cow_hurt";
+    case AUDIO_COW_DIE:
+        return "cow_die";
     case AUDIO_BOW_DRAW:
         return "bow_draw";
     case AUDIO_BOW_FIRE:
@@ -753,6 +772,8 @@ static const char *MC_SIMPLE_CLICK[] = {"click", NULL};
 static const char *MC_SIMPLE_TOOL_BREAK[] = {"tool_break", NULL};
 static const char *MC_SIMPLE_EAT[] = {"eat1", "eat2", "eat3", NULL};
 static const char *MC_SIMPLE_CRAFT[] = {"craft", NULL};
+static const char *MC_SIMPLE_COW_HURT[] = {"cow_hurt1", "cow_hurt2", "cow_hurt3", NULL};
+static const char *MC_SIMPLE_COW_DIE[] = {"cow_die", NULL};
 
 /* Load owner-converted WAVs from a directory into one set (up to 4
  * variants, in list order). Returns variants loaded (0 keeps fallback).
@@ -817,7 +838,8 @@ int audio_load_mcassets_from(AudioSystem *sys, const char *dir)
         {AUDIO_ITEM_PICKUP, MC_SIMPLE_PICKUP}, {AUDIO_PLAYER_HURT, MC_SIMPLE_HURT},
         {AUDIO_PLAYER_DIE, MC_SIMPLE_DIE},     {AUDIO_UI_CLICK, MC_SIMPLE_CLICK},
         {AUDIO_TOOL_BREAK, MC_SIMPLE_TOOL_BREAK}, {AUDIO_EAT, MC_SIMPLE_EAT},
-        {AUDIO_CRAFT, MC_SIMPLE_CRAFT},
+        {AUDIO_CRAFT, MC_SIMPLE_CRAFT},         {AUDIO_COW_HURT, MC_SIMPLE_COW_HURT},
+        {AUDIO_COW_DIE, MC_SIMPLE_COW_DIE},
     };
     for (size_t i = 0; i < sizeof(simple) / sizeof(simple[0]); ++i) {
         total += audio_load_set_from_dir(&sys->sets[simple[i].ev], dir, simple[i].names);
