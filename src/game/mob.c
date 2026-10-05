@@ -26,8 +26,8 @@ static const MobDefinition MOB_TABLE[] = {
     {ENTITY_COW, "Cow", 10.0f, 2.0f, 0.9f, 1.4f, 1.3f, false, 0.0f, 0.0f, 0.0f, 0.0f,
      0.0f, 0.0f, {{ITEM_RAW_BEEF, 1, 3, 1.0f}, {ITEM_LEATHER, 0, 2, 1.0f}, {ITEM_NONE, 0, 0, 0.0f}},
      2, 0, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {ENTITY_GLOOMSTALKER, "Gloomstalker", 20.0f, 3.2f, 0.6f, 1.7f, 1.5f, true, 3.0f, 2.2f, 1.2f,
-     0.3f, 12.0f, 18.0f, {{ITEM_COAL, 1, 2, 1.0f}, {ITEM_NONE, 0, 0, 0.0f}, {ITEM_NONE, 0, 0, 0.0f}},
+    {ENTITY_ZOMBIE, "Zombie", 20.0f, 2.4f, 0.6f, 1.9f, 1.7f, true, 3.0f, 2.2f, 1.6f,
+     0.0f, 14.0f, 22.0f, {{ITEM_ROTTEN_FLESH, 0, 2, 1.0f}, {ITEM_NONE, 0, 0, 0.0f}, {ITEM_NONE, 0, 0, 0.0f}},
      1, 1, false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     {ENTITY_SKELETON, "Skeleton", 20.0f, 2.8f, 0.6f, 1.9f, 1.7f, true, 2.0f, 2.2f, 1.5f, 0.2f,
      14.0f, 20.0f, {{ITEM_ARROW, 0, 2, 1.0f}, {ITEM_BONE, 0, 2, 1.0f}, {ITEM_NONE, 0, 0, 0.0f}},
@@ -1066,16 +1066,18 @@ bool mob_raycast(const MobPool *pool, Vec3 eye, Vec3 dir, float max_dist, float 
             max_y += margin;
             max_z += margin;
         }
-        /* mob_emit_part rotates local geometry by yaw + PI. Undo that
-         * rotation for the ray so the target bound follows the visible mob. */
-        float inv_yaw = -(m->yaw + 3.14159265358979323846f);
+        /* mob_emit_part rotates local geometry by yaw + PI (x' = x*c
+         * + z*s, z' = -x*s + z*c). Undo that rotation for the ray with
+         * the transpose (x' = x*c - z*s, z' = x*s + z*c) so the target
+         * bound follows the visible mob. */
+        float inv_yaw = m->yaw + 3.14159265358979323846f;
         float cy = cosf(inv_yaw);
         float sy = sinf(inv_yaw);
         /* Target the interpolated position that the player actually sees. */
         Vec3 rel = mmath_vec3(eye.x - m->render_pos.x, eye.y - m->render_pos.y,
                               eye.z - m->render_pos.z);
-        Vec3 lo = mmath_vec3(rel.x * cy + rel.z * sy, rel.y, -rel.x * sy + rel.z * cy);
-        Vec3 ld = mmath_vec3(d.x * cy + d.z * sy, d.y, -d.x * sy + d.z * cy);
+        Vec3 lo = mmath_vec3(rel.x * cy - rel.z * sy, rel.y, rel.x * sy + rel.z * cy);
+        Vec3 ld = mmath_vec3(d.x * cy - d.z * sy, d.y, d.x * sy + d.z * cy);
         /* Slab test per axis. */
         float tmin = 0.0f;
         float tmax = best;
@@ -1204,12 +1206,12 @@ static void mob_try_spawn(MobPool *pool, World *w, long seed, Vec3 player_pos, b
             if (mob_count_type(pool, ENTITY_COW) >= MOB_MAX_PASSIVE) {
                 return;
             }
-        } else if (type == ENTITY_GLOOMSTALKER || type == ENTITY_SKELETON) {
+        } else if (type == ENTITY_ZOMBIE || type == ENTITY_SKELETON) {
             if (day) {
                 return;
             }
-            /* Shared hostile cap: skeletons count against it (M9 rule). */
-            if (mob_count_type(pool, ENTITY_GLOOMSTALKER) + mob_count_type(pool, ENTITY_SKELETON) >=
+            /* Shared hostile cap: zombies count against it (M9 rule). */
+            if (mob_count_type(pool, ENTITY_ZOMBIE) + mob_count_type(pool, ENTITY_SKELETON) >=
                 MOB_MAX_HOSTILE) {
                 return;
             }
@@ -1236,7 +1238,7 @@ static void mob_spawner_update(MobPool *pool, World *w, float day_progress, Vec3
     mob_try_spawn(pool, w, w->seed, player_pos, day, ENTITY_COW);
     /* Hostile pick: skeletons join the night rotation (~35%) without
      * their own manager or cap (deterministic via pool RNG). */
-    EntityType hostile = (mob_rand(pool) % 100 < 35) ? ENTITY_SKELETON : ENTITY_GLOOMSTALKER;
+    EntityType hostile = (mob_rand(pool) % 100 < 35) ? ENTITY_SKELETON : ENTITY_ZOMBIE;
     mob_try_spawn(pool, w, w->seed, player_pos, day, hostile);
 }
 

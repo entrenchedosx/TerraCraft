@@ -73,6 +73,7 @@ TILES = {
     "bone": "item/bone.png",
     "beef": "item/beef.png",
     "leather": "item/leather.png",
+    "flesh": "item/rotten_flesh.png",
     "tool_pickaxe": "item/wooden_pickaxe.png",
     "tool_axe": "item/wooden_axe.png",
     "tool_shovel": "item/wooden_shovel.png",
@@ -90,6 +91,7 @@ TILES = {
 SKINS = {
     "skeleton": "entity/skeleton/skeleton.png",
     "cow": "entity/cow/temperate_cow.png",
+    "zombie": "entity/zombie/zombie.png",
 }
 
 

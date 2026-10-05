@@ -232,7 +232,7 @@ static bool entity_rec_valid(uint16_t item, uint16_t count, uint16_t durability,
 static bool entity_mob_valid(uint8_t type, uint8_t state, const unsigned char *reserved,
                              const float f[5])
 {
-    if (type != (uint8_t)ENTITY_COW && type != (uint8_t)ENTITY_GLOOMSTALKER &&
+    if (type != (uint8_t)ENTITY_COW && type != (uint8_t)ENTITY_ZOMBIE &&
         type != (uint8_t)ENTITY_SKELETON) {
         return false;
     }
@@ -413,7 +413,7 @@ int entity_save_read(const char *dir, EntityPool *pool, MobPool *mobs)
                         break;
                     }
                     off += 1 + ENTITY_REC_BYTES;
-                } else if (kind == (uint8_t)ENTITY_COW || kind == (uint8_t)ENTITY_GLOOMSTALKER ||
+                } else if (kind == (uint8_t)ENTITY_COW || kind == (uint8_t)ENTITY_ZOMBIE ||
                            kind == (uint8_t)ENTITY_SKELETON) {
                     if (mobs == NULL) {
                         LOG_ERROR("entity_save: mob record %u with no mob pool (%s)", (unsigned)i,

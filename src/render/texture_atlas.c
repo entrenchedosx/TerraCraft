@@ -150,16 +150,17 @@ int block_tile_for_face(uint16_t block, int face)
     return TILE_STONE;
 }
 
-/* Overridable tile file names (index = tile; keep in sync with AtlasTile). */
+/* Overridable tile file names (index = tile; keep in sync with AtlasTile).
+ * Player tiles stay procedural (NULL = no override file). */
 static const char *TILE_FILES[] = {
     "grass_top", "grass_side", "dirt", "stone", "sand", "wood", "leaves", "glass", "water", "bedrock",
     "coal_ore", "iron_ore", "gold_ore", "diamond_ore", "snow", "grass_bottom", "plant", "flower", "torch",
     "tool_pickaxe", "tool_axe", "tool_shovel", "coal", "crack0", "crack1", "crack2", "crack3", "crack4",
     "workbench", "planks", "apple", "stick", "wood_top", "workbench_top", "workbench_side", "wood_pickaxe",
     "stone_pickaxe", "wood_axe", "stone_axe", "wood_shovel", "stone_shovel", "bow", "arrow",
-    "bone", "beef", "leather",
+    "bone", "beef", "leather", NULL, NULL, "flesh",
 };
-#define TILE_FILE_COUNT 46
+#define TILE_FILE_COUNT 49
 
 /* Tile file name for overrides (NULL when out of range).
  *
@@ -676,6 +677,24 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         for (int y = 4; y <= 12; ++y) {
             put_px(out_px, col, row, 4, y, 140, 88, 50, 255);
             put_px(out_px, col, row, 11, y, 140, 88, 50, 255);
+        }
+    }
+
+    /* Rotten flesh: sickly green-brown slab with dark mottling. */
+    {
+        int col = TILE_FLESH % ATLAS_TILES;
+        int row = TILE_FLESH / ATLAS_TILES;
+        for (int y = 5; y <= 11; ++y) {
+            for (int x = 3; x <= 12; ++x) {
+                float r = px_rand(col, row, x, y, 84u);
+                unsigned char g = (unsigned char)(110.0f + r * 30.0f);
+                put_px(out_px, col, row, x, y, (unsigned char)(g * 0.85f), g,
+                        (unsigned char)(g * 0.45f), 255);
+            }
+        }
+        for (int x = 3; x <= 12; ++x) {
+            put_px(out_px, col, row, x, 5, 90, 110, 55, 255);
+            put_px(out_px, col, row, x, 11, 70, 85, 42, 255);
         }
     }
 

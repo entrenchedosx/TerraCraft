@@ -402,7 +402,7 @@ static void app_poll_discrete_input(AppContext *app)
 
     /* Dev helpers (documented): F6 gives 64 of the selected stack (or
      * stone when the slot is empty); F8 deals 5 damage (survival only);
-     * F7 hurts the aimed mob; F9/F10/F11 spawn cow/gloomstalker/
+     * F7 hurts the aimed mob; F9/F10/F11 spawn cow/zombie/
      * skeleton; F12 clears all arrows (shift+F6 gives bow + arrows). */
     bool f6_down = window_is_key_down(SDL_SCANCODE_F6);
     bool f6_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F6);
@@ -461,7 +461,7 @@ static void app_poll_discrete_input(AppContext *app)
     bool f10_down = window_is_key_down(SDL_SCANCODE_F10);
     bool f10_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F10);
     if (f10_pressed) {
-        app_debug_spawn_mob(app, ENTITY_GLOOMSTALKER);
+        app_debug_spawn_mob(app, ENTITY_ZOMBIE);
     }
     app->prev_f10_key = f10_down;
     bool f11_down = window_is_key_down(SDL_SCANCODE_F11);

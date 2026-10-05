@@ -126,7 +126,7 @@ int main(void)
         bench_player(&pi, 1.5f, 65.0f, 8.5f);
         for (int i = 0; i < 20; ++i) {
             float z = 2.0f + (float)i * 0.5f;
-            if (mob_spawn(&pool, ENTITY_GLOOMSTALKER, mmath_vec3(12.5f, 65.0f, z), 0.0f) ==
+            if (mob_spawn(&pool, ENTITY_ZOMBIE, mmath_vec3(12.5f, 65.0f, z), 0.0f) ==
                 ENTITY_ID_NULL) {
                 break;
             }

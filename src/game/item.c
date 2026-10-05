@@ -46,6 +46,10 @@ static const ItemInfo ITEM_TABLE[] = {
      3, 1, 0.4f},
     {ITEM_LEATHER, "Leather", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_LEATHER, 0.65f, 0.42f, 0.25f,
      0, 0, 1, 0.4f},
+    /* Rotten flesh (inedible here: no status-effect system exists, and a
+     * fake free meal would lie — documented gap). */
+    {ITEM_ROTTEN_FLESH, "Rotten Flesh", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_FLESH, 0.45f, 0.35f,
+     0.22f, 0, 0, 1, 0.4f},
     {ITEM_WOOD_PICKAXE, "Wood Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_WOOD, TILE_WOOD_PICKAXE, 0.55f, 0.42f,
      0.25f, 64, 0, 3, 0.5f},
     {ITEM_STONE_PICKAXE, "Stone Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_STONE, TILE_STONE_PICKAXE, 0.55f, 0.55f,

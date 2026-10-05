@@ -25,6 +25,7 @@ typedef uint16_t ItemId;
 #define ITEM_BONE 104u
 #define ITEM_RAW_BEEF 105u
 #define ITEM_LEATHER 106u
+#define ITEM_ROTTEN_FLESH 107u
 #define ITEM_WOOD_PICKAXE 200u
 #define ITEM_STONE_PICKAXE 201u
 #define ITEM_WOOD_AXE 202u
@@ -81,7 +82,7 @@ const ItemInfo *item_get_info(ItemId id);
  *   id: item ID.
  *
  * Returns: true for registered items (blocks 1..19 except water,
- * 100..106, 200..206).
+ * 100..107, 200..206).
  */
 bool item_is_valid(ItemId id);
 

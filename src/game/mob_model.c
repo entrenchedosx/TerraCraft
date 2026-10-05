@@ -12,22 +12,22 @@
 static const MobModelPart COW_PARTS[] = {
     {{-0.375f, 0.275f, -0.3125f}, {0.75f, 1.125f, 0.625f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_NONE},
     {{-0.25f, 0.85f, 0.25f}, {0.50f, 0.50f, 0.375f}, TILE_LEATHER, -1, 1.10f, MOB_ANIM_HEAD},
-    {{-0.375f, 0.00f, 0.20f}, {0.25f, 0.75f, 0.25f}, TILE_LEATHER, -1, 0.75f, MOB_ANIM_LEG},
-    {{0.125f, 0.00f, 0.20f}, {0.25f, 0.75f, 0.25f}, TILE_LEATHER, -1, 0.75f, MOB_ANIM_LEG},
-    {{-0.375f, 0.00f, -0.45f}, {0.25f, 0.75f, 0.25f}, TILE_LEATHER, -1, 0.75f, MOB_ANIM_LEG},
-    {{0.125f, 0.00f, -0.45f}, {0.25f, 0.75f, 0.25f}, TILE_LEATHER, -1, 0.75f, MOB_ANIM_LEG},
+    {{-0.375f, 0.00f, 0.20f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
+    {{0.125f, 0.00f, 0.20f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
+    {{-0.375f, 0.00f, -0.45f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
+    {{0.125f, 0.00f, -0.45f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
 };
 
-/* Gloomstalker (model 1): lanky night hunter — dark ore body, stone
- * head/arms, long legs. Collision 0.6 x 1.7.
+/* Zombie (model 1): classic humanoid — box torso, cube head, hanging
+ * arms, straight legs. Collision 0.6 x 1.9 (+Z faces forward).
  */
-static const MobModelPart GLOOM_PARTS[] = {
-    {{-0.25f, 0.60f, -0.20f}, {0.50f, 0.70f, 0.40f}, TILE_COAL_ORE, -1, 0.0f, MOB_ANIM_NONE},
-    {{-0.20f, 1.30f, -0.20f}, {0.40f, 0.40f, 0.40f}, TILE_STONE, -1, 0.0f, MOB_ANIM_HEAD},
-    {{-0.40f, 0.70f, -0.10f}, {0.15f, 0.60f, 0.15f}, TILE_STONE, -1, 1.20f, MOB_ANIM_LEG},
-    {{0.25f, 0.70f, -0.10f}, {0.15f, 0.60f, 0.15f}, TILE_STONE, -1, 1.20f, MOB_ANIM_LEG},
-    {{-0.22f, 0.00f, -0.10f}, {0.20f, 0.60f, 0.20f}, TILE_COAL_ORE, -1, 0.60f, MOB_ANIM_LEG},
-    {{0.02f, 0.00f, -0.10f}, {0.20f, 0.60f, 0.20f}, TILE_COAL_ORE, -1, 0.60f, MOB_ANIM_LEG},
+static const MobModelPart ZOMBIE_PARTS[] = {
+    {{-0.25f, 0.70f, -0.125f}, {0.50f, 0.70f, 0.25f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_NONE},
+    {{-0.25f, 1.40f, -0.25f}, {0.50f, 0.50f, 0.50f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_HEAD},
+    {{-0.50f, 0.70f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 1.40f, MOB_ANIM_LEG},
+    {{0.25f, 0.70f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 1.40f, MOB_ANIM_LEG},
+    {{-0.25f, 0.00f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
+    {{0.00f, 0.00f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
 };
 
 /* Skeleton (model 2): pale archer — snow-bone limbs, stone ribs/skull,
@@ -44,7 +44,7 @@ static const MobModelPart SKELETON_PARTS[] = {
 
 static const MobModel MOB_MODELS[] = {
     {COW_PARTS, 6, 1.40f},
-    {GLOOM_PARTS, 6, 1.7f},
+    {ZOMBIE_PARTS, 6, 1.9f},
     {SKELETON_PARTS, 6, 1.9f},
 };
 #define MOB_MODEL_COUNT (sizeof(MOB_MODELS) / sizeof(MOB_MODELS[0]))
@@ -117,9 +117,59 @@ static const MobSkinPart COW_SKIN_PARTS[] = {
     {{{0, 20, 4, 12}, {8, 20, 4, 12}, {8, 16, 4, 4}, {4, 16, 4, 4}, {12, 20, 4, 12}, {4, 20, 4, 12}}},
 };
 
+/* Zombie skin (standard 64x64 humanoid layout, top-left pixel origin;
+ * every rect verified fully opaque against the source alpha map).
+ * Face order per entry: -X, +X, -Y, +Y, -Z, +Z. Left limbs mirror the
+ * right regions (same convention as the 64x32 skeleton).
+ */
+static const MobSkinPart ZOMBIE_SKIN_PARTS[] = {
+    /* Torso (body 8x12x4 @ (16,16)). */
+    {{{16, 20, 4, 12},
+      {28, 20, 4, 12},
+      {28, 16, 8, 4},
+      {20, 16, 8, 4},
+      {32, 20, 8, 12},
+      {20, 20, 8, 12}}},
+    /* Head (8x8x8 @ (0,0)). */
+    {{{0, 8, 8, 8},
+      {16, 8, 8, 8},
+      {16, 0, 8, 8},
+      {8, 0, 8, 8},
+      {24, 8, 8, 8},
+      {8, 8, 8, 8}}},
+    /* Arm L (mirrors arm @ (40,16), 4x12x4). */
+    {{{40, 20, 4, 12},
+      {48, 20, 4, 12},
+      {48, 16, 4, 4},
+      {44, 16, 4, 4},
+      {52, 20, 4, 12},
+      {44, 20, 4, 12}}},
+    /* Arm R (@ (40,16), 4x12x4). */
+    {{{40, 20, 4, 12},
+      {48, 20, 4, 12},
+      {48, 16, 4, 4},
+      {44, 16, 4, 4},
+      {52, 20, 4, 12},
+      {44, 20, 4, 12}}},
+    /* Leg L (mirrors leg @ (0,16), 4x12x4). */
+    {{{0, 20, 4, 12},
+      {8, 20, 4, 12},
+      {8, 16, 4, 4},
+      {4, 16, 4, 4},
+      {12, 20, 4, 12},
+      {4, 20, 4, 12}}},
+    /* Leg R (@ (0,16), 4x12x4). */
+    {{{0, 20, 4, 12},
+      {8, 20, 4, 12},
+      {8, 16, 4, 4},
+      {4, 16, 4, 4},
+      {12, 20, 4, 12},
+      {4, 20, 4, 12}}},
+};
+
 static const MobSkin MOB_SKINS[] = {
     {"cow", 64, 64, COW_SKIN_PARTS, 6},
-    {NULL, 0, 0, NULL, 0},              /* Gloomstalker: original, tile path. */
+    {"zombie", 64, 64, ZOMBIE_SKIN_PARTS, 6},
     {"skeleton", 64, 32, SKELETON_SKIN_PARTS, 6},
 };
 #define MOB_SKIN_COUNT (sizeof(MOB_SKINS) / sizeof(MOB_SKINS[0]))

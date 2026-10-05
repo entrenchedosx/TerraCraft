@@ -1059,9 +1059,9 @@ static void screen_creative(AppContext *app, const UiFrame *ui)
         }
     }
     const uint16_t extra[] = {ITEM_COAL, ITEM_APPLE, ITEM_STICK, ITEM_BOW, ITEM_ARROW,
-                              ITEM_BONE, ITEM_RAW_BEEF, ITEM_LEATHER, ITEM_WOOD_PICKAXE,
-                              ITEM_STONE_PICKAXE, ITEM_WOOD_AXE, ITEM_STONE_AXE, ITEM_WOOD_SHOVEL,
-                              ITEM_STONE_SHOVEL};
+                              ITEM_BONE, ITEM_RAW_BEEF, ITEM_LEATHER, ITEM_ROTTEN_FLESH,
+                              ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_WOOD_AXE,
+                              ITEM_STONE_AXE, ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL};
     for (size_t i = 0; i < sizeof(extra) / sizeof(extra[0]) && ncata < (int)(sizeof(cata) / sizeof(cata[0])); ++i) {
         if (item_is_valid(extra[i])) {
             cata[ncata++] = extra[i];
@@ -1357,9 +1357,9 @@ void screens_draw_debug(AppContext *app)
     snprintf(lines[7], sizeof(lines[7]), "Pack: %s", app->settings.pack);
     snprintf(lines[8], sizeof(lines[8]), "Mesh: %.2f ms  Up: %.2f ms  Draw: %.2f ms", perf.mesh_ms,
              perf.upload_ms, perf.draw_ms);
-    snprintf(lines[9], sizeof(lines[9]), "Mobs: %d living (%d cow %d gloom %d skel), %d drawn %d culled",
+    snprintf(lines[9], sizeof(lines[9]), "Mobs: %d living (%d cow %d zomb %d skel), %d drawn %d culled",
              mob_active_count(&app->mobs), mob_count_type(&app->mobs, ENTITY_COW),
-             mob_count_type(&app->mobs, ENTITY_GLOOMSTALKER), mob_count_type(&app->mobs, ENTITY_SKELETON),
+              mob_count_type(&app->mobs, ENTITY_ZOMBIE), mob_count_type(&app->mobs, ENTITY_SKELETON),
              app->mobs_drawn, app->mobs_culled);
     snprintf(lines[10], sizeof(lines[10]), "AI: thinks %u, paths %u (pool rng strain)",
              (unsigned)app->mobs.ai_thinks, (unsigned)app->mobs.path_reqs);

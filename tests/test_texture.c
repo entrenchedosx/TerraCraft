@@ -178,7 +178,7 @@ int test_atlas_mcfaces(void)
     TEST_ASSERT(block_tile_for_face(BLOCK_WORKBENCH, ATLAS_FACE_NEG_Y) == TILE_PLANKS);
     TEST_ASSERT(block_tile_for_face(BLOCK_WORKBENCH, ATLAS_FACE_POS_X) == TILE_WORKBENCH_SIDE);
     /* Per-material tool tiles exist in the pack file table. */
-    TEST_ASSERT(texture_atlas_tile_file_count() == 46);
+    TEST_ASSERT(texture_atlas_tile_file_count() == 49);
     TEST_ASSERT(texture_atlas_tile_file(TILE_WOOD_PICKAXE) != NULL);
     TEST_ASSERT(texture_atlas_tile_file(TILE_STONE_SHOVEL) != NULL);
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_WOOD_TOP), "wood_top") == 0);
@@ -187,7 +187,10 @@ int test_atlas_mcfaces(void)
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_BONE), "bone") == 0);
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_BEEF), "beef") == 0);
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_LEATHER), "leather") == 0);
-    TEST_ASSERT(texture_atlas_tile_file(46) == NULL);
+    TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_FLESH), "flesh") == 0);
+    TEST_ASSERT(texture_atlas_tile_file(TILE_PLAYER_SKIN) == NULL);
+    TEST_ASSERT(texture_atlas_tile_file(TILE_PLAYER_SLEEVE) == NULL);
+    TEST_ASSERT(texture_atlas_tile_file(49) == NULL);
     TEST_ASSERT(texture_atlas_tile_file(-1) == NULL);
     return failures;
 }

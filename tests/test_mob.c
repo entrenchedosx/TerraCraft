@@ -64,7 +64,7 @@ int test_mob_handles(void)
     TEST_ASSERT(a != ENTITY_ID_NULL);
     TEST_ASSERT(mob_active_count(&pool) == 1);
     TEST_ASSERT(mob_count_type(&pool, ENTITY_COW) == 1);
-    TEST_ASSERT(mob_count_type(&pool, ENTITY_GLOOMSTALKER) == 0);
+    TEST_ASSERT(mob_count_type(&pool, ENTITY_ZOMBIE) == 0);
     Mob *m = mob_resolve(&pool, a);
     TEST_ASSERT(m != NULL);
     if (m != NULL) {
@@ -95,7 +95,7 @@ int test_mob_handles(void)
     TEST_ASSERT(mob_active_count(&pool) == 0);
     TEST_ASSERT(mob_resolve(&pool, a) == NULL);
     mob_remove(&pool, a); /* Stale remove: silent no-op. */
-    EntityId b = mob_spawn(&pool, ENTITY_GLOOMSTALKER, mmath_vec3(8.5f, 65.0f, 8.5f), 0.0f);
+    EntityId b = mob_spawn(&pool, ENTITY_ZOMBIE, mmath_vec3(8.5f, 65.0f, 8.5f), 0.0f);
     TEST_ASSERT(b != ENTITY_ID_NULL && b != a);
     TEST_ASSERT(entity_id_index(b) == entity_id_index(a));
     TEST_ASSERT(entity_id_gen(b) != entity_id_gen(a));
@@ -230,11 +230,14 @@ int test_mob_definitions(void)
     TEST_ASSERT(moss->ndrops == 2 && moss->drops[0].item == ITEM_RAW_BEEF &&
                 moss->drops[1].item == ITEM_LEATHER);
     TEST_ASSERT(moss->name != NULL);
-    const MobDefinition *gloom = mob_definition(ENTITY_GLOOMSTALKER);
-    TEST_ASSERT(gloom->type == ENTITY_GLOOMSTALKER && gloom->hostile == true);
-    TEST_ASSERT_FLOAT_EQ(gloom->damage, 3.0f, 1e-4f);
-    TEST_ASSERT_FLOAT_EQ(gloom->detect_range, 12.0f, 1e-4f);
-    TEST_ASSERT(gloom->ndrops == 1 && gloom->drops[0].item == ITEM_COAL);
+    const MobDefinition *zomb = mob_definition(ENTITY_ZOMBIE);
+    TEST_ASSERT(zomb->type == ENTITY_ZOMBIE && zomb->hostile == true && zomb->ranged == false);
+    TEST_ASSERT_FLOAT_EQ(zomb->damage, 3.0f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(zomb->detect_range, 14.0f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(zomb->max_health, 20.0f, 1e-4f);
+    TEST_ASSERT(zomb->ndrops == 1 && zomb->drops[0].item == ITEM_ROTTEN_FLESH);
+    TEST_ASSERT(zomb->drops[0].min_count == 0 && zomb->drops[0].max_count == 2);
+    TEST_ASSERT(zomb->model == 1);
     const MobDefinition *bad = mob_definition((EntityType)99);
     TEST_ASSERT(bad->type == ENTITY_NONE && bad->max_health > 0.0f);
     return failures;
@@ -332,7 +335,7 @@ int test_mob_ai_hostile(void)
     MobPlayerInfo pi;
     test_mob_player(&pi, 4.5f, 65.0f, 4.5f);
     MobFrameEvents ev;
-    EntityId id = mob_spawn(&pool, ENTITY_GLOOMSTALKER, mmath_vec3(9.5f, 65.0f, 4.5f), 0.0f);
+    EntityId id = mob_spawn(&pool, ENTITY_ZOMBIE, mmath_vec3(9.5f, 65.0f, 4.5f), 0.0f);
     TEST_ASSERT(id != ENTITY_ID_NULL);
     /* Player 5 away: acquired within a second, then approaches. */
     int chased = 0;
@@ -471,8 +474,8 @@ int test_mob_fall_events(void)
     MobPlayerInfo pi;
     test_mob_player(&pi, 0.5f, 66.0f, 0.5f); /* Far from drops, noon. */
     MobFrameEvents ev;
-    /* Gloom HP 20, 10-block fall (~7 damage): survives, exactly one hurt. */
-    EntityId id = mob_spawn(&pool, ENTITY_GLOOMSTALKER, mmath_vec3(4.5f, 75.0f, 4.5f), 0.0f);
+    /* Zombie HP 20, 10-block fall (~7 damage): survives, exactly one hurt. */
+    EntityId id = mob_spawn(&pool, ENTITY_ZOMBIE, mmath_vec3(4.5f, 75.0f, 4.5f), 0.0f);
     TEST_ASSERT(id != ENTITY_ID_NULL);
     int hurt_total = 0;
     int died_total = 0;
@@ -526,7 +529,7 @@ int test_mob_raycast(void)
     EntityId near_id =
         mob_spawn(&pool, ENTITY_COW, mmath_vec3(3.0f, 65.0f, 0.0f), 0.0f);
     EntityId far_id =
-        mob_spawn(&pool, ENTITY_GLOOMSTALKER, mmath_vec3(4.0f, 65.0f, 0.0f), 0.0f);
+        mob_spawn(&pool, ENTITY_ZOMBIE, mmath_vec3(4.0f, 65.0f, 0.0f), 0.0f);
     TEST_ASSERT(near_id != ENTITY_ID_NULL && far_id != ENTITY_ID_NULL);
     Vec3 aim = mmath_vec3(1.0f, -0.3f, 0.0f);
     TEST_ASSERT(mob_raycast(&pool, eye, aim, 8.0f, &dist, &hit) == true);
@@ -566,28 +569,25 @@ int test_mob_raycast(void)
                                        cow_yaws[i]);
         TEST_ASSERT(muzzle_id != ENTITY_ID_NULL);
         float facing = cow_yaws[i] + 3.14159265359f;
-        Vec3 muzzle = mmath_vec3(3.0f + sinf(facing) * 0.58f, 66.1f,
-                                 cosf(facing) * 0.58f);
+        Vec3 muzzle = mmath_vec3(3.0f + sinf(facing) * 0.45f, 66.1f,
+                                 cosf(facing) * 0.45f);
         Vec3 ray = mmath_vec3_sub(muzzle, eye);
         TEST_ASSERT(mob_raycast(&muzzle_pool, eye, ray, 4.0f, &dist, &hit));
         TEST_ASSERT(hit == muzzle_id);
     }
-    /* The ray follows the rendered interpolation point, not a newer physics
-     * point that has not reached the next displayed frame yet. */
+    /* The ray follows the geometrically rendered mob: its model-space
+     * bounds (collision box plus the protruding muzzle box the model
+     * raycast covers), so visible geometry is always hittable. */
     MobPool visual_pool;
     mob_pool_init(&visual_pool, 17u);
-    EntityId visual_id = mob_spawn(&visual_pool, ENTITY_COW, mmath_vec3(3.0f, 65.0f, 0.0f), 0.0f);
+    EntityId visual_id = mob_spawn(&visual_pool, ENTITY_COW, mmath_vec3(12.0f, 65.0f, 0.0f), 0.0f);
     Mob *visual_mob = mob_resolve(&visual_pool, visual_id);
     TEST_ASSERT(visual_mob != NULL);
     if (visual_mob != NULL) {
-        visual_mob->pos.x = 12.0f;
-    }
-    TEST_ASSERT(mob_raycast(&visual_pool, eye, mmath_vec3(1.0f, 0.01f, -0.18f), 4.0f, &dist, &hit));
-    TEST_ASSERT(hit == visual_id);
-    if (visual_mob != NULL) {
         visual_mob->render_pos = visual_mob->pos;
     }
-    TEST_ASSERT(mob_raycast(&visual_pool, eye, mmath_vec3(1.0f, 0.01f, -0.18f), 4.0f, &dist, &hit) == false);
+    TEST_ASSERT(mob_raycast(&visual_pool, eye, mmath_vec3(1.0f, 0.0f, -0.018f), 20.0f, &dist, &hit));
+    TEST_ASSERT(hit == visual_id);
     /* The skeleton's visible arm also reaches beyond its 0.6-wide body box. */
     MobPool arm_pool;
     mob_pool_init(&arm_pool, 18u);
@@ -608,8 +608,8 @@ int test_mob_raycast(void)
     /* Per-type hurt/die sounds: cows moo, everyone else thuds. */
     TEST_ASSERT(mob_hurt_sound((int)ENTITY_COW) == AUDIO_COW_HURT);
     TEST_ASSERT(mob_die_sound((int)ENTITY_COW) == AUDIO_COW_DIE);
-    TEST_ASSERT(mob_hurt_sound((int)ENTITY_GLOOMSTALKER) == AUDIO_MOB_HURT);
-    TEST_ASSERT(mob_die_sound((int)ENTITY_GLOOMSTALKER) == AUDIO_MOB_DIE);
+    TEST_ASSERT(mob_hurt_sound((int)ENTITY_ZOMBIE) == AUDIO_MOB_HURT);
+    TEST_ASSERT(mob_die_sound((int)ENTITY_ZOMBIE) == AUDIO_MOB_DIE);
     TEST_ASSERT(mob_hurt_sound((int)ENTITY_SKELETON) == AUDIO_MOB_HURT);
     TEST_ASSERT(mob_die_sound((int)ENTITY_SKELETON) == AUDIO_MOB_DIE);
     TEST_ASSERT(mob_hurt_sound(99) == AUDIO_MOB_HURT);
@@ -713,7 +713,7 @@ int test_mob_spawn_passive(void)
     test_mob_player(&pi, 0.5f, 66.0f, 0.5f); /* Noon. */
     int used = run_spawner(&pool, &drops, w, &pi, 120);
     TEST_ASSERT(mob_count_type(&pool, ENTITY_COW) >= 1);
-    TEST_ASSERT(mob_count_type(&pool, ENTITY_GLOOMSTALKER) == 0);
+    TEST_ASSERT(mob_count_type(&pool, ENTITY_ZOMBIE) == 0);
     TEST_ASSERT(used < 120);
     /* Spawn distance ring honored. */
     for (int i = 0; i < MOB_MAX; ++i) {
@@ -751,7 +751,7 @@ int test_mob_spawn_hostile(void)
     run_spawner(&pool, &drops, w, &pi, 120);
     /* Night spawns hostiles of either kind (skeletons share the night
      * rotation); never passives. */
-    TEST_ASSERT(mob_count_type(&pool, ENTITY_GLOOMSTALKER) +
+    TEST_ASSERT(mob_count_type(&pool, ENTITY_ZOMBIE) +
                     mob_count_type(&pool, ENTITY_SKELETON) >=
                 1);
     TEST_ASSERT(mob_count_type(&pool, ENTITY_COW) == 0);
@@ -790,7 +790,7 @@ int test_mob_spawn_rules(void)
     TEST_ASSERT(mob_count_type(&pool, ENTITY_COW) == MOB_MAX_PASSIVE);
     /* Far hostile (> 80) despawns; far passive persists. */
     EntityId far_hostile =
-        mob_spawn(&pool, ENTITY_GLOOMSTALKER, mmath_vec3(100.5f, 65.0f, 0.5f), 0.0f);
+        mob_spawn(&pool, ENTITY_ZOMBIE, mmath_vec3(100.5f, 65.0f, 0.5f), 0.0f);
     EntityId far_passive =
         mob_spawn(&pool, ENTITY_COW, mmath_vec3(-100.5f, 65.0f, 0.5f), 0.0f);
     TEST_ASSERT(far_hostile != ENTITY_ID_NULL && far_passive != ENTITY_ID_NULL);
@@ -901,10 +901,10 @@ int test_save_mob_roundtrip(void)
     EntityPool drops;
     entity_pool_clear(&drops);
     EntityId moss = mob_spawn(&pool, ENTITY_COW, mmath_vec3(-12.5f, 66.0f, 7.25f), 1.0f);
-    EntityId gloom = mob_spawn(&pool, ENTITY_GLOOMSTALKER, mmath_vec3(30.0f, 70.0f, -40.0f), 2.0f);
-    TEST_ASSERT(moss != ENTITY_ID_NULL && gloom != ENTITY_ID_NULL);
+    EntityId zomb = mob_spawn(&pool, ENTITY_ZOMBIE, mmath_vec3(30.0f, 70.0f, -40.0f), 2.0f);
+    TEST_ASSERT(moss != ENTITY_ID_NULL && zomb != ENTITY_ID_NULL);
     Mob *mm = mob_resolve(&pool, moss);
-    Mob *gm = mob_resolve(&pool, gloom);
+    Mob *gm = mob_resolve(&pool, zomb);
     TEST_ASSERT(mm != NULL && gm != NULL);
     if (mm == NULL || gm == NULL) {
         return failures + 1;
@@ -927,16 +927,16 @@ int test_save_mob_roundtrip(void)
     TEST_ASSERT(entity_active_count(&back_drops) == 1);
     TEST_ASSERT(mob_active_count(&back_mobs) == 2);
     TEST_ASSERT(mob_count_type(&back_mobs, ENTITY_COW) == 1);
-    TEST_ASSERT(mob_count_type(&back_mobs, ENTITY_GLOOMSTALKER) == 1);
-    int found_moss = 0;
-    int found_gloom = 0;
+    TEST_ASSERT(mob_count_type(&back_mobs, ENTITY_ZOMBIE) == 1);
+    int found_cow = 0;
+    int found_zomb = 0;
     for (int i = 0; i < MOB_MAX; ++i) {
         Mob *m = &back_mobs.mobs[i];
         if (!m->active) {
             continue;
         }
         if (m->type == ENTITY_COW) {
-            found_moss = 1;
+            found_cow = 1;
             TEST_ASSERT_FLOAT_EQ(m->pos.x, -12.5f, 1e-4f);
             TEST_ASSERT_FLOAT_EQ(m->pos.y, 66.0f, 1e-4f);
             TEST_ASSERT_FLOAT_EQ(m->pos.z, 7.25f, 1e-4f);
@@ -945,8 +945,8 @@ int test_save_mob_roundtrip(void)
             TEST_ASSERT(m->state == MOB_STATE_WANDER);
             TEST_ASSERT_FLOAT_EQ(m->state_t, 1.25f, 1e-4f);
             TEST_ASSERT(m->dead == false);
-        } else if (m->type == ENTITY_GLOOMSTALKER) {
-            found_gloom = 1;
+        } else if (m->type == ENTITY_ZOMBIE) {
+            found_zomb = 1;
             TEST_ASSERT_FLOAT_EQ(m->health, 17.0f, 1e-4f);
             TEST_ASSERT(m->state == MOB_STATE_CHASE);
             TEST_ASSERT(m->target == ENTITY_ID_NULL); /* Reset by design. */
@@ -954,7 +954,7 @@ int test_save_mob_roundtrip(void)
             TEST_ASSERT_FLOAT_EQ(m->vel.x, 0.0f, 1e-6f); /* At rest. */
         }
     }
-    TEST_ASSERT(found_moss == 1 && found_gloom == 1);
+    TEST_ASSERT(found_cow == 1 && found_zomb == 1);
     mob_save_cleanup(dir);
     return failures;
 }
@@ -1117,31 +1117,41 @@ int test_mob_models(void)
 {
     int failures = 0;
     const MobModel *moss = mob_model_for(0);
-    const MobModel *gloom = mob_model_for(1);
+    const MobModel *zomb = mob_model_for(1);
     const MobModel *skel = mob_model_for(2);
     TEST_ASSERT(moss != NULL && mob_model_validate(moss) == true);
-    TEST_ASSERT(gloom != NULL && mob_model_validate(gloom) == true);
+    TEST_ASSERT(zomb != NULL && mob_model_validate(zomb) == true);
     TEST_ASSERT(skel != NULL && mob_model_validate(skel) == true);
     TEST_ASSERT(mob_model_for(-1) == NULL);
     TEST_ASSERT(mob_model_for(3) == NULL);
     TEST_ASSERT(mob_model_validate(NULL) == false);
-    /* Skins: cow + skeleton wear real art; the gloomstalker is an
-     * original creature (tile path, NULL skin). */
+    if (zomb != NULL) {
+        TEST_ASSERT(zomb->nparts == 6);
+        TEST_ASSERT_FLOAT_EQ(zomb->height, 1.9f, 1e-4f);
+    }
+    /* Skins: cow + zombie + skeleton all wear real art (no placeholders
+     * left in the roster). */
+    const MobSkin *zbsk = mob_skin_for(1);
+    TEST_ASSERT(zbsk != NULL);
+    if (zbsk != NULL && zomb != NULL) {
+        TEST_ASSERT(strcmp(mob_skin_file(1), "zombie") == 0);
+        TEST_ASSERT(zbsk->width == 64 && zbsk->height == 64);
+        TEST_ASSERT(mob_skin_validate(zbsk, zomb->nparts) == true);
+        TEST_ASSERT(mob_skin_validate(zbsk, zomb->nparts + 1) == false);
+    }
     const MobSkin *cowsk = mob_skin_for(0);
     TEST_ASSERT(cowsk != NULL);
-    TEST_ASSERT(mob_skin_for(1) == NULL);
-    TEST_ASSERT(mob_skin_file(1) == NULL);
     if (cowsk != NULL && moss != NULL) {
         TEST_ASSERT(strcmp(mob_skin_file(0), "cow") == 0);
         TEST_ASSERT(cowsk->width == 64 && cowsk->height == 64);
         TEST_ASSERT(mob_skin_validate(cowsk, moss->nparts) == true);
         TEST_ASSERT(mob_skin_validate(cowsk, moss->nparts + 1) == false);
-        MobSkinRect body_left = cowsk->parts[0].faces[0];
-        MobSkinRect body_front = cowsk->parts[0].faces[5];
-        MobSkinRect head_front = cowsk->parts[1].faces[5];
-        TEST_ASSERT(body_left.x == 18 && body_left.y == 14 && body_left.w == 10 && body_left.h == 18);
-        TEST_ASSERT(body_front.x == 28 && body_front.y == 14 && body_front.w == 12 && body_front.h == 18);
-        TEST_ASSERT(head_front.x == 6 && head_front.y == 6 && head_front.w == 8 && head_front.h == 8);
+        MobSkinRect body_side = cowsk->parts[0].faces[0];
+        MobSkinRect body_end = cowsk->parts[0].faces[4];
+        MobSkinRect head_side = cowsk->parts[1].faces[0];
+        TEST_ASSERT(body_side.x == 18 && body_side.y == 14 && body_side.w == 10 && body_side.h == 18);
+        TEST_ASSERT(body_end.x == 50 && body_end.y == 14 && body_end.w == 12 && body_end.h == 18);
+        TEST_ASSERT(head_side.x == 0 && head_side.y == 6 && head_side.w == 6 && head_side.h == 8);
     }
     const MobSkin *sk = mob_skin_for(2);
     TEST_ASSERT(sk != NULL);

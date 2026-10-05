@@ -26,7 +26,7 @@ is in progress.
   day/night cycle.
 - Creative flight and Survival health, hunger, mining, tool wear, food,
   crafting, item drops, and death recovery.
-- Cows, skeletons, an original hostile creature, pathfinding, melee, bows,
+- Cows, zombies, and skeletons with real skins, pathfinding, melee, bows,
   and arrows.
 - Persistent named worlds with versioned block, player, inventory, and
   entity data.

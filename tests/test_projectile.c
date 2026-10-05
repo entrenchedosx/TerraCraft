@@ -405,7 +405,7 @@ int test_projectile_owner(void)
     /* Shooter at x=4, victim at x=8: fire THROUGH the shooter from behind
      * (origin ahead of the shooter so the shot starts clear, as the app
      * does) — victim still hit, shooter untouched during grace. */
-    EntityId shooter = mob_spawn(&mobs, ENTITY_GLOOMSTALKER, mmath_vec3(4.5f, 65.0f, 8.5f), 0.0f);
+    EntityId shooter = mob_spawn(&mobs, ENTITY_ZOMBIE, mmath_vec3(4.5f, 65.0f, 8.5f), 0.0f);
     EntityId victim = mob_spawn(&mobs, ENTITY_COW, mmath_vec3(8.5f, 65.0f, 8.5f), 0.0f);
     projectile_pool_clear(&pool);
     TEST_ASSERT(projectile_fire(&pool, PROJECTILE_ARROW, mmath_vec3(5.5f, 65.4f, 8.5f),
@@ -422,7 +422,7 @@ int test_projectile_owner(void)
      * remove the shooter, let it fly into the victim anyway. */
     mob_pool_init(&mobs, 32u);
     entity_pool_clear(&drops);
-    shooter = mob_spawn(&mobs, ENTITY_GLOOMSTALKER, mmath_vec3(4.5f, 65.0f, 8.5f), 0.0f);
+    shooter = mob_spawn(&mobs, ENTITY_ZOMBIE, mmath_vec3(4.5f, 65.0f, 8.5f), 0.0f);
     victim = mob_spawn(&mobs, ENTITY_COW, mmath_vec3(8.5f, 65.0f, 8.5f), 0.0f);
     projectile_pool_clear(&pool);
     TEST_ASSERT(projectile_fire(&pool, PROJECTILE_ARROW, mmath_vec3(5.5f, 65.4f, 8.5f),

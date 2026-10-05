@@ -13,7 +13,7 @@
  *   u16 version        ENTITY_SAVE_VERSION (currently 2)
  *   u32 count          total records (0..ENTITY_SAVE_MAX_RECORDS)
  *   per record:
- *     u8 kind          1 = item, 2 = cow, 3 = gloomstalker, 4 = skeleton
+ *     u8 kind          1 = item, 2 = cow, 3 = zombie, 4 = skeleton
  *     item payload (38 bytes, M6.1 layout):
  *       u16 item       ItemId (must be a valid item)
  *       u16 count      1..item max stack

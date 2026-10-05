@@ -32,13 +32,15 @@ typedef uint32_t EntityId;
 
 /* Stable entity type IDs (persistent: never reorder, never reuse).
  * Kind 2 was the M8 "mossling" placeholder; it is now the cow (same
- * value, so old saves load their grazers as cows — documented).
+ * value, so old saves load their grazers as cows). Kind 3 was the
+ * "gloomstalker" placeholder; it is now the zombie (same value, old
+ * night stalkers load as zombies — documented).
  */
 typedef enum EntityType {
     ENTITY_NONE = 0,      /* No entity. */
     ENTITY_ITEM_DROP = 1,  /* M6 dropped-item entity (separate pool). */
     ENTITY_COW = 2,        /* Passive cow (real MC animal). */
-    ENTITY_GLOOMSTALKER = 3, /* M8 hostile ground creature. */
+    ENTITY_ZOMBIE = 3,     /* Hostile zombie (real MC monster). */
     ENTITY_SKELETON = 4   /* M9 hostile ranged creature. */
 } EntityType;
 

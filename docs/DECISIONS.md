@@ -184,9 +184,11 @@ real art beats texel parity — our skeleton proportions are not
 Mojang's, and forcing their boxes would change collision tuning.
 
 ### Only mobs with a real counterpart get skins
-The gloomstalker is an original creature; no MC texture exists for
-it, so it keeps the stylized tile path. A full roster (cow, creeper, …)
-with real models/AI/drops is a future milestone, not a texture swap —
+Every mob in the roster now has a real counterpart (cow, zombie,
+skeleton) with converted skins and MC loot; the last placeholder
+(the gloomstalker) was replaced by the zombie at the same stable
+type value, so old night-stalker saves migrate. A full roster
+(cow, creeper, …) with real models/AI/drops is a future milestone, not a texture swap —
 skinning a creeper-shaped AI onto a gloomstalker body would be a
 costume, not accuracy. (The M8 mossling placeholder was replaced by a
 real cow under this same rule: kind 2 kept its value so old saves load

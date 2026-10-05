@@ -468,15 +468,21 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
      * shoulder pivot, skin hand at its base, held item just ahead.
      * Previous tuning sat half a meter high and filled a quarter of
      * the screen; this keeps the whole assembly in the lower-right. */
+    /* Viewmodel layout (camera-local: x right, y up, z forward, FOV 70):
+     * fractions verified against the projection (x/(z*1.245) and
+     * y/(z*0.700) NDC at 16:9): sleeve fills the right edge from 0.55H
+     * down past the frame, hand grips below it, held item sits
+     * lower-center-right fully on screen. Previous tuning floated half
+     * a meter high and filled a quarter of the view. */
     MobModelPart parts[3] = {
-        {{0.42f, -0.85f, 0.60f}, {0.17f, 0.45f, 0.17f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.42f, -1.01f, 0.59f}, {0.17f, 0.17f, 0.19f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.39f, -0.93f, 0.76f},
-         held_block != 0 ? mmath_vec3(0.20f, 0.20f, 0.20f) : mmath_vec3(0.22f, 0.22f, 0.035f),
+        {{0.30f, -0.46f, 0.55f}, {0.15f, 0.42f, 0.15f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.30f, -0.61f, 0.54f}, {0.15f, 0.15f, 0.17f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.27f, -0.38f, 0.62f},
+         held_block != 0 ? mmath_vec3(0.18f, 0.18f, 0.18f) : mmath_vec3(0.22f, 0.22f, 0.035f),
          held_tile, -1, 0.0f, MOB_ANIM_NONE},
     };
     int count = held_tile >= 0 && held_tile <= 255 ? 3 : 2;
-    const Vec3 shoulder = {0.50f, -0.42f, 0.62f};
+    const Vec3 shoulder = {0.37f, -0.06f, 0.58f};
     float swing = player_swing_weight(swing_phase);
     float swing_x = -0.70f * swing;
     float swing_y = 0.06f * swing;
