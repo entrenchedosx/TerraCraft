@@ -98,6 +98,7 @@ typedef unsigned char MinecGLubyte;
  */
 #define MINEC_GL_FALSE 0
 #define MINEC_GL_TRUE 1
+#define MINEC_GL_LINES 0x0001u
 #define MINEC_GL_TRIANGLES 0x0004u
 #define MINEC_GL_UNSIGNED_INT 0x1405u
 #define MINEC_GL_FLOAT 0x1406u

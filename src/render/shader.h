@@ -118,3 +118,10 @@ const char *shader_ui_vert_src(void);
 const char *shader_ui_frag_src(void);
 const char *shader_ui_tex_vert_src(void);
 const char *shader_ui_tex_frag_src(void);
+
+/* Embedded line shaders (GLSL 330 core, world-space segments).
+ * Vertex: layout 0 pos (vec3 world); uniform uMVP.
+ * Fragment: flat uColor (vec3) + uAlpha (float), no lighting.
+ */
+const char *shader_line_vert_src(void);
+const char *shader_line_frag_src(void);

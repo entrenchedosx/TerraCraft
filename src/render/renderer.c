@@ -72,6 +72,12 @@ struct Renderer {
     unsigned int ui_tex_vbo; /* Icon quad buffer (dynamic, per frame). */
     int ui_tex_ortho_loc; /* uOrtho location (-1 when unavailable). */
     int ui_tex_atlas_loc; /* uAtlas location (-1 when unavailable). */
+    Shader *line_shader; /* Owned 3D line program for the block outline. */
+    unsigned int line_vao; /* Line segment array (0 when unavailable). */
+    unsigned int line_vbo; /* Line segment buffer (dynamic, per outline). */
+    int line_mvp_loc; /* uMVP location (-1 when unavailable). */
+    int line_color_loc; /* uColor location (-1 when unavailable). */
+    int line_alpha_loc; /* uAlpha location (-1 when unavailable). */
     GpuChunkBuffer gpu[WORLD_MAX_CHUNKS][RENDERER_PASSES]; /* Per-slot opaque/transparent pair. */
     GpuChunkBuffer ent_buf; /* Scratch buffer for entities/overlay (re-uploaded). */
     float *part_verts; /* Owned particle vertex scratch (NULL when OOM). */
@@ -701,6 +707,35 @@ Renderer *renderer_create(GlContext *gl)
             LOG_WARN("renderer_create: icon buffers unavailable; item icons will be hidden");
         }
     }
+
+    /* 3D line pipeline (block selection outline). Same degrade-silently
+     * contract: missing GL entry points hide the outline, never the game. */
+    r->line_shader = shader_create(shader_line_vert_src(), shader_line_frag_src());
+    if (r->line_shader == NULL) {
+        LOG_WARN("renderer_create: line shader failed; block outline hidden");
+    } else {
+        r->line_mvp_loc = shader_get_uniform_location(r->line_shader, "uMVP");
+        r->line_color_loc = shader_get_uniform_location(r->line_shader, "uColor");
+        r->line_alpha_loc = shader_get_uniform_location(r->line_shader, "uAlpha");
+        if (minec_glGenVertexArrays != NULL && minec_glGenBuffers != NULL) {
+            minec_glGenVertexArrays(1, &r->line_vao);
+            minec_glGenBuffers(1, &r->line_vbo);
+        }
+        if (r->line_vao != 0 && r->line_vbo != 0 && minec_glBindVertexArray != NULL &&
+            minec_glBindBuffer != NULL && minec_glBufferData != NULL &&
+            minec_glVertexAttribPointer != NULL && minec_glEnableVertexAttribArray != NULL) {
+            minec_glBindVertexArray(r->line_vao);
+            minec_glBindBuffer((MinecGLenum)MINEC_GL_ARRAY_BUFFER, r->line_vbo);
+            minec_glBufferData((MinecGLenum)MINEC_GL_ARRAY_BUFFER, 0, NULL,
+                               (MinecGLenum)MINEC_GL_STATIC_DRAW);
+            minec_glVertexAttribPointer(0, 3, (MinecGLenum)MINEC_GL_FLOAT, 0, (MinecGLsizei)12,
+                                        (const void *)0);
+            minec_glEnableVertexAttribArray(0);
+            minec_glBindVertexArray(0);
+        } else {
+            LOG_WARN("renderer_create: line buffers unavailable; block outline hidden");
+        }
+    }
     return r;
 }
 
@@ -731,6 +766,13 @@ void renderer_destroy(Renderer *r)
     if (r->ui_tex_vao != 0 && minec_glDeleteVertexArrays != NULL) {
         minec_glDeleteVertexArrays(1, &r->ui_tex_vao);
     }
+    if (r->line_vbo != 0 && minec_glDeleteBuffers != NULL) {
+        minec_glDeleteBuffers(1, &r->line_vbo);
+    }
+    if (r->line_vao != 0 && minec_glDeleteVertexArrays != NULL) {
+        minec_glDeleteVertexArrays(1, &r->line_vao);
+    }
+    shader_destroy(r->line_shader);
     shader_destroy(r->ui_shader);
     shader_destroy(r->ui_tex_shader);
     texture_atlas_delete(r->atlas);
@@ -1094,7 +1136,8 @@ static const float CUBE_U[4] = {0.0f, 1.0f, 0.0f, 1.0f};
 static const float CUBE_V[4] = {0.0f, 0.0f, 1.0f, 1.0f};
 
 /* Emit one textured cube (36 non-indexed verts, VoxelVertex layout) into
- * dst (36*9 floats); ao is constant across the cube.
+ * dst (36*9 floats); ao is constant across the cube. Yaw spins the cube
+ * around Y about its center (drops rotate so every face reads in turn).
  *
  * Args:
  *   dst: 324-float destination (must not be NULL).
@@ -1102,24 +1145,32 @@ static const float CUBE_V[4] = {0.0f, 0.0f, 1.0f, 1.0f};
  *   size: edge length (> 0).
  *   tile: atlas tile index.
  *   ao: brightness multiplier.
+ *   yaw: radians around Y about the cube center (0 = axis-aligned).
  */
-static void entity_emit_cube(float *dst, float minx, float miny, float minz, float size, int tile, float ao)
+static void entity_emit_cube(float *dst, float minx, float miny, float minz, float size, int tile, float ao,
+                             float yaw)
 {
     float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
     texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
     /* Two triangles per face: (0,1,2) + (2,1,3). */
     static const int TRIS[6] = {0, 1, 2, 2, 1, 3};
+    float c = cosf(yaw);
+    float s = sinf(yaw);
+    float cx = minx + size * 0.5f;
+    float cz = minz + size * 0.5f;
     size_t n = 0;
     for (int f = 0; f < 6; ++f) {
         for (int k = 0; k < 6; ++k) {
             int i = TRIS[k];
             float *v = dst + n * MESHER_FLOATS_PER_VERTEX;
-            v[0] = minx + CUBE_CORNERS[f][i][0] * size;
+            float lx = (CUBE_CORNERS[f][i][0] - 0.5f) * size;
+            float lz = (CUBE_CORNERS[f][i][2] - 0.5f) * size;
+            v[0] = cx + lx * c + lz * s;
             v[1] = miny + CUBE_CORNERS[f][i][1] * size;
-            v[2] = minz + CUBE_CORNERS[f][i][2] * size;
-            v[3] = CUBE_NORMALS[f][0];
+            v[2] = cz - lx * s + lz * c;
+            v[3] = CUBE_NORMALS[f][0] * c + CUBE_NORMALS[f][2] * s;
             v[4] = CUBE_NORMALS[f][1];
-            v[5] = CUBE_NORMALS[f][2];
+            v[5] = -CUBE_NORMALS[f][0] * s + CUBE_NORMALS[f][2] * c;
             v[6] = (CUBE_U[i] == 0.0f) ? u0 : u1;
             v[7] = (CUBE_V[i] == 0.0f) ? v0 : v1;
             v[8] = ao;
@@ -1208,8 +1259,10 @@ static void renderer_draw_transient(Renderer *r, const float *verts, size_t vcou
     free(idx);
 }
 
-/* Draw active item entities as camera-facing item billboards (full
- * item texture + a gentle bob).
+/* Draw active item entities as small spinning 3D cubes (full item
+ * texture on every face + a gentle bob). Volumetric drops read from
+ * every angle with correct depth; one slow turn every ~4 s shows all
+ * faces in turn.
  *
  * Args:
  *   r: renderer. pool: entity pool. cam: camera. aspect: viewport aspect.
@@ -1234,16 +1287,12 @@ void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *c
     if (!renderer_begin_voxel(r, cam, aspect, ts)) {
         return;
     }
-    size_t vcount = (size_t)n * 12;
+    size_t vcount = (size_t)n * 36;
     float *verts = (float *)malloc(vcount * MESHER_FLOATS_PER_VERTEX * sizeof(float));
     if (verts == NULL) {
         renderer_end_voxel(r);
         return;
     }
-    /* Cylindrical billboard basis from the camera: the camera's own
-     * right vector, so every drop faces the player around Y (readable
-     * from all sides, never edge-on, never mirrored). */
-    Vec3 cam_right = camera_get_right(cam);
     size_t o = 0;
     for (int i = 0; i < ENTITY_MAX; ++i) {
         const ItemEntity *e = &pool->items[i];
@@ -1251,22 +1300,14 @@ void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *c
             continue;
         }
         float bob = 0.10f + 0.05f * sinf(e->age * 3.0f);
-        float size = 0.35f;
+        float size = 0.30f;
         int tile = item_get_info(e->stack.item)->tile;
-        float rx = cam_right.x;
-        float rz = cam_right.z;
-        float len = sqrtf(rx * rx + rz * rz);
-        if (!(len > 1e-4f)) {
-            rx = 1.0f;
-            rz = 0.0f;
-        } else {
-            rx /= len;
-            rz /= len;
-        }
-        /* Sprite center floats above the settled base (never sinks). */
-        entity_emit_sprite(verts + o * MESHER_FLOATS_PER_VERTEX, e->pos.x, e->pos.y + bob + size * 0.5f,
-                           e->pos.z, size, tile, rx, rz);
-        o += 12;
+        /* Cube base floats above the settled base (never sinks); slow
+         * Y spin so the art reads from all sides. */
+        float yaw = e->age * 1.5f;
+        entity_emit_cube(verts + o * MESHER_FLOATS_PER_VERTEX, e->pos.x - size * 0.5f,
+                         e->pos.y + bob, e->pos.z - size * 0.5f, size, tile, 1.0f, yaw);
+        o += 36;
     }
     renderer_draw_transient(r, verts, vcount);
     free(verts);
@@ -1306,7 +1347,7 @@ void renderer_draw_particles(Renderer *r, const ParticlePool *pool, const Camera
             continue;
         }
         entity_emit_cube(r->part_verts + o * MESHER_FLOATS_PER_VERTEX, p->pos.x - size * 0.5f,
-                         p->pos.y - size * 0.5f, p->pos.z - size * 0.5f, size, p->tile, 1.0f);
+                         p->pos.y - size * 0.5f, p->pos.z - size * 0.5f, size, p->tile, 1.0f, 0.0f);
         o += 36;
     }
     if (o == 0) {
@@ -1332,7 +1373,7 @@ void renderer_draw_particles(Renderer *r, const ParticlePool *pool, const Camera
  *
  * Args:
  *   r: renderer. cam: camera. aspect: viewport aspect. ts: time of day.
- *   bx, by, bz: target cell. progress: mining fraction 0..1.
+ *   bx, by, bz: target block cell. progress: mining fraction 0..1.
  */
 void renderer_draw_block_overlay(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts, int bx,
                                  int by, int bz, float progress)
@@ -1356,9 +1397,66 @@ void renderer_draw_block_overlay(Renderer *r, const Camera *cam, float aspect, c
     float verts[36 * 9];
     float pad = 0.001f;
     entity_emit_cube(verts, (float)bx - pad, (float)by - pad, (float)bz - pad, 1.0f + pad * 2.0f,
-                     TILE_CRACK0 + stage, 1.0f);
+                     TILE_CRACK0 + stage, 1.0f, 0.0f);
     renderer_draw_transient(r, verts, 36);
     renderer_end_voxel(r);
+}
+
+/* Draw the hovered-block selection outline: 12 edges of a slightly
+ * expanded cell box as GL lines (MC-style black outline). Depth-tested
+ * so hidden edges stay hidden; translucent so the block art reads
+ * through. Degrades to nothing when the line pipeline is unavailable.
+ *
+ * Args:
+ *   r: renderer. cam: camera. aspect: viewport aspect.
+ *   bx, by, bz: outlined cell.
+ */
+void renderer_draw_block_outline(Renderer *r, const Camera *cam, float aspect, int bx, int by, int bz)
+{
+    if (r == NULL || cam == NULL || r->line_shader == NULL || !shader_is_ready(r->line_shader) ||
+        r->line_vao == 0 || r->line_vbo == 0 || minec_glBindVertexArray == NULL ||
+        minec_glBindBuffer == NULL || minec_glBufferData == NULL || minec_glDrawArrays == NULL) {
+        return;
+    }
+    float x0 = (float)bx - 0.002f;
+    float y0 = (float)by - 0.002f;
+    float z0 = (float)bz - 0.002f;
+    float x1 = (float)bx + 1.002f;
+    float y1 = (float)by + 1.002f;
+    float z1 = (float)bz + 1.002f;
+    /* 8 corners, 12 edges (24 endpoints). */
+    static const int EDGES[12][2] = {{0, 1}, {1, 3}, {3, 2}, {2, 0}, {4, 5}, {5, 7},
+                                     {7, 6}, {6, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+    float corners[8][3];
+    for (int i = 0; i < 8; ++i) {
+        corners[i][0] = (i & 1) ? x1 : x0;
+        corners[i][1] = (i & 2) ? y1 : y0;
+        corners[i][2] = (i & 4) ? z1 : z0;
+    }
+    float verts[24 * 3];
+    for (int e = 0; e < 12; ++e) {
+        for (int k = 0; k < 2; ++k) {
+            int c = EDGES[e][k];
+            verts[(e * 2 + k) * 3 + 0] = corners[c][0];
+            verts[(e * 2 + k) * 3 + 1] = corners[c][1];
+            verts[(e * 2 + k) * 3 + 2] = corners[c][2];
+        }
+    }
+    if (shader_bind(r->line_shader) != MINEC_SHADER_OK) {
+        return;
+    }
+    Mat4 view = camera_get_view(cam);
+    Mat4 proj = camera_get_proj(cam, aspect);
+    Mat4 mvp = mmath_mat4_mul(proj, view);
+    shader_set_uniform_mat4(r->line_mvp_loc, mvp.m);
+    shader_set_uniform_vec3(r->line_color_loc, 0.0f, 0.0f, 0.0f);
+    shader_set_uniform_float(r->line_alpha_loc, 0.7f);
+    minec_glBindVertexArray(r->line_vao);
+    minec_glBindBuffer((MinecGLenum)MINEC_GL_ARRAY_BUFFER, r->line_vbo);
+    minec_glBufferData((MinecGLenum)MINEC_GL_ARRAY_BUFFER, sizeof(verts), verts,
+                       (MinecGLenum)MINEC_GL_STATIC_DRAW);
+    minec_glDrawArrays((MinecGLenum)MINEC_GL_LINES, 0, 24);
+    minec_glBindVertexArray(0);
 }
 
 /* Drop every chunk GPU buffer (both passes) for session teardown.

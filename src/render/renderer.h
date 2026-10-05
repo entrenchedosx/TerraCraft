@@ -270,6 +270,19 @@ void renderer_draw_projectiles(Renderer *r, const ProjectilePool *pool, const Ca
 void renderer_draw_block_overlay(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts, int bx,
                                  int by, int bz, float progress);
 
+/* Draw the hovered-block selection outline (MC-style black wireframe
+ * box, depth-tested, translucent). Call once per frame for the current
+ * crosshair target; call never (or with a miss) for no outline.
+ * No-op on bad args or when the line pipeline is unavailable.
+ *
+ * Args:
+ *   r: renderer (must not be NULL).
+ *   cam: camera (must not be NULL).
+ *   aspect: viewport width/height (> 0).
+ *   bx, by, bz: outlined cell.
+ */
+void renderer_draw_block_outline(Renderer *r, const Camera *cam, float aspect, int bx, int by, int bz);
+
 /* Draw raw colored UI quads (HUD-vertex format: x,y,r,g,b,a) fullscreen.
  * Depth-tested off during the pass. No-op on bad args or missing UI pipe.
  *

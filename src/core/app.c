@@ -1452,6 +1452,18 @@ static void app_render_playing(AppContext *app)
         renderer_draw_block_overlay(app->renderer, app->camera, aspect, &app->clock, app->player.mine_bx,
                                     app->player.mine_by, app->player.mine_bz, frac);
     }
+    /* Hover highlight: one raycast per frame outlines the crosshair
+     * block in reach (both modes; mining aims at the same cell, so the
+     * crack overlay and the outline agree by construction). */
+    {
+        Vec3 eye = player_eye_pos(&app->player);
+        HitResult hov = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world,
+                                         survival_reach(survival_is_creative(&app->player)));
+        if (hov.hit) {
+            renderer_draw_block_outline(app->renderer, app->camera, aspect, hov.block[0], hov.block[1],
+                                        hov.block[2]);
+        }
+    }
     bool vitals = !survival_is_creative(&app->player);
     float eat_frac = app->player.eat_active ? app->player.eat_t / SURVIVAL_EAT_TIME : -1.0f;
     float bow_frac = app->player.bow_drawing ? survival_bow_charge(app->player.bow_t) : -1.0f;

@@ -356,3 +356,27 @@ const char *shader_ui_tex_frag_src(void)
            "    FragColor = tex;\n"
            "}\n";
 }
+
+/* Embedded line vertex shader (world-space 3D segments for the block
+ * selection outline). */
+const char *shader_line_vert_src(void)
+{
+    return "#version 330 core\n"
+           "layout (location = 0) in vec3 aPos;\n"
+           "uniform mat4 uMVP;\n"
+           "void main() {\n"
+           "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
+           "}\n";
+}
+
+/* Embedded line fragment shader (flat color + alpha, no lighting). */
+const char *shader_line_frag_src(void)
+{
+    return "#version 330 core\n"
+           "uniform vec3 uColor;\n"
+           "uniform float uAlpha;\n"
+           "out vec4 FragColor;\n"
+           "void main() {\n"
+           "    FragColor = vec4(uColor, uAlpha);\n"
+           "}\n";
+}
