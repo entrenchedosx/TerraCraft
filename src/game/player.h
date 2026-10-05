@@ -40,6 +40,7 @@ typedef struct PlayerInput {
  */
 typedef struct Player {
     Vec3 pos;         /* Feet position (world). */
+    Vec3 render_pos;  /* Interpolated feet for rendering (smoothed). */
     Vec3 vel;         /* Velocity (m/s). */
     Vec3 acc;         /* Last computed acceleration (debug/inspection). */
     float yaw;        /* Horizontal rotation, radians (0 faces -Z). */
@@ -109,7 +110,9 @@ void player_init(Player *p);
  */
 bool player_find_spawn(const World *w, int sx, int sz, Vec3 *out);
 
-/* Eye (camera) position: pos + eye_height.
+/* Eye (camera) position: interpolated render feet + eye height.
+ * Reads render_pos (not pos) so the camera rides the 60 Hz smoothed
+ * position instead of stepping at the 20 Hz simulation rate.
  *
  * Args:
  *   p: player (must not be NULL).

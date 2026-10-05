@@ -127,6 +127,7 @@ typedef struct Mob {
     uint32_t gen;       /* Generation (handle validation). */
     EntityType type;    /* Cow / gloomstalker / skeleton. */
     Vec3 pos;           /* Feet position (world). */
+    Vec3 render_pos;    /* Interpolated feet for rendering (smoothed). */
     Vec3 prev_pos;      /* Previous tick position (stuck detect + interp). */
     Vec3 vel;           /* Velocity m/s. */
     float yaw;          /* Facing, radians. */

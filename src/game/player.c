@@ -51,6 +51,7 @@ void player_init(Player *p)
         return;
     }
     p->pos = mmath_vec3(8.5f, 80.0f, 8.5f);
+    p->render_pos = p->pos;
     p->vel = mmath_vec3(0.0f, 0.0f, 0.0f);
     p->acc = mmath_vec3(0.0f, 0.0f, 0.0f);
     p->yaw = 0.0f;
@@ -140,7 +141,8 @@ Vec3 player_eye_pos(const Player *p)
     if (p == NULL) {
         return mmath_vec3(0.0f, 0.0f, 0.0f);
     }
-    return mmath_vec3(p->pos.x, p->pos.y + p->eye_height, p->pos.z);
+    /* Render eye: interpolated feet + eye height (smoothed at 60 Hz). */
+    return mmath_vec3(p->render_pos.x, p->render_pos.y + p->eye_height, p->render_pos.z);
 }
 
 /* Apply mouse look (clamped pitch).

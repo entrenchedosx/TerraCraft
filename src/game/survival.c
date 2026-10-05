@@ -407,6 +407,7 @@ void survival_respawn(Player *p, Vec3 spawn)
         return;
     }
     p->pos = spawn;
+    p->render_pos = spawn;
     p->vel = mmath_vec3(0.0f, 0.0f, 0.0f);
     p->acc = mmath_vec3(0.0f, 0.0f, 0.0f);
     p->health = p->max_health > 0.0f ? p->max_health : 20.0f;

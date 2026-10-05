@@ -315,17 +315,23 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, const float plane
         if (model == NULL || !mob_model_validate(model)) {
             continue;
         }
-        bool skinned = skin != NULL && r->mob_skin_tex[def->model] != 0;
-        if (model_filter < 0 && skinned) {
-            continue; /* Tile pass skips live-skinned mobs. */
-        }
-        if (model_filter >= 0 && def->model != model_filter) {
+        bool skinned = skin != NULL && def->model >= 0 && def->model < 3 &&
+                         r->mob_skin_tex[def->model] != 0;
+        if (model_filter < 0) {
+            /* Tile pass: atlas art only (skinned mobs draw in their own
+             * pass below — drawing both doubles geometry and counters). */
+            if (skinned) {
+                continue;
+            }
+        } else if (def->model != model_filter) {
             continue; /* Skin pass takes one model only. */
         }
-        /* Frustum cull on the collision box (cheap, conservative). */
+        /* Frustum cull on the collision box (cheap, conservative).
+         * Cull on the RENDER position (smoothed): culling on the raw
+         * sim pos would pop mobs a frame early at 20 Hz. */
         float hw = m->width * 0.5f;
-        Vec3 mn = mmath_vec3(m->pos.x - hw, m->pos.y, m->pos.z - hw);
-        Vec3 mx = mmath_vec3(m->pos.x + hw, m->pos.y + m->height, m->pos.z + hw);
+        Vec3 mn = mmath_vec3(m->render_pos.x - hw, m->render_pos.y, m->render_pos.z - hw);
+        Vec3 mx = mmath_vec3(m->render_pos.x + hw, m->render_pos.y + m->height, m->render_pos.z + hw);
         if (!camera_aabb_visible(planes, mn, mx)) {
             ++(*culled);
             continue;
@@ -351,9 +357,9 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, const float plane
             sink = m->dead_t < 0.6f ? m->dead_t * 0.3f : 0.18f;
         }
         float idle_bob = sinf(anim_time * 2.0f + (float)i) * 0.02f;
-        Vec3 base =
-            mmath_vec3(m->pos.x + hurt_shake, m->pos.y - sink + (m->grounded ? idle_bob : 0.0f),
-                       m->pos.z);
+        Vec3 base = mmath_vec3(m->render_pos.x + hurt_shake,
+                               m->render_pos.y - sink + (m->grounded ? idle_bob : 0.0f),
+                               m->render_pos.z);
         for (int p = 0; p < model->nparts; ++p) {
             const MobModelPart *part = &model->parts[p];
             float pitch = 0.0f;
@@ -436,17 +442,13 @@ void renderer_draw_projectiles(Renderer *r, const ProjectilePool *pool, const Ca
     }
     float planes[6][4];
     camera_get_frustum_planes(cam, aspect, planes);
+    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+    texture_atlas_tile_uv(TILE_ARROW, &u0, &v0, &u1, &v1);
+    /* Shaft along local Z (mob convention: yaw + pitch about the part
+     * center), head cube at the tip. Pivot 0 keeps rotation centered:
+     * both parts are built symmetric about the origin. UVs share one
+     * rect on all 6 faces (auv array, same tile everywhere). */
     float auv[6][4];
-    {
-        float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
-        texture_atlas_tile_uv(TILE_ARROW, &u0, &v0, &u1, &v1);
-        for (int f = 0; f < 6; ++f) {
-            auv[f][0] = u0;
-            auv[f][1] = v0;
-            auv[f][2] = u1;
-            auv[f][3] = v1;
-        }
-    }
     /* Shaft along local Z (mob convention: yaw + pitch about the part
      * center), head cube at the tip. Pivot 0 keeps rotation centered:
      * both parts are built symmetric about the origin. */
@@ -454,6 +456,12 @@ void renderer_draw_projectiles(Renderer *r, const ProjectilePool *pool, const Ca
                           MOB_ANIM_NONE};
     MobModelPart head = {{-0.06f, -0.06f, 0.30f}, {0.12f, 0.12f, 0.18f}, TILE_ARROW, -1, 0.0f,
                          MOB_ANIM_NONE};
+    for (int f = 0; f < 6; ++f) {
+        auv[f][0] = u0;
+        auv[f][1] = v0;
+        auv[f][2] = u1;
+        auv[f][3] = v1;
+    }
     size_t o = 0;
     int drawn = 0;
     for (int i = 0; i < PROJECTILE_MAX; ++i) {

@@ -160,6 +160,7 @@ EntityId mob_spawn(MobPool *pool, EntityType type, Vec3 pos, float yaw)
         m->active = true;
         m->type = type;
         m->pos = pos;
+        m->render_pos = pos;
         m->prev_pos = pos;
         m->vel = mmath_vec3(0.0f, 0.0f, 0.0f);
         m->yaw = yaw;
@@ -1194,6 +1195,7 @@ void mob_update_all(MobPool *pool, EntityPool *drops, World *w, const MobPlayerI
         if (dist > MOB_SIM_RANGE) {
             /* Frozen: persist position, hold still, skip everything. */
             m->prev_pos = m->pos;
+            m->render_pos = m->pos;
             m->stuck_pos = m->pos;
             m->wish_speed = 0.0f;
             continue;

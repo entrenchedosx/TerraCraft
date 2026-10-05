@@ -1464,12 +1464,33 @@ static void app_render_playing(AppContext *app)
 }
 
 /* Refresh streaming and camera state once before rendering any live world
- * view, including inventory and crafting overlays.
+ * view, including inventory and crafting overlays. The camera rides the
+ * 60 Hz smoothed render position (player_eye_pos reads render_pos):
+ * simulation still steps at 20 Hz, but the view never stair-steps.
  */
 static void app_prepare_world_render(AppContext *app)
 {
     if (app == NULL || !app->world_open) {
         return;
+    }
+    /* Render smoothing (critically damped, 60 Hz frame-rate independent):
+     * render_pos chases the authoritative sim pos with zero overshoot.
+     * Snap on teleports (respawn/load > 4 blocks) so fast-travel never
+     * smears across the world. */
+    {
+        Vec3 rp = app->player.render_pos;
+        Vec3 sp = app->player.pos;
+        float dx = sp.x - rp.x;
+        float dy = sp.y - rp.y;
+        float dz = sp.z - rp.z;
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > 16.0f) {
+            app->player.render_pos = sp;
+        } else if (d2 > 0.0f) {
+            float k = 1.0f - expf(-12.0f / 60.0f);
+            app->player.render_pos =
+                mmath_vec3(rp.x + dx * k, rp.y + dy * k, rp.z + dz * k);
+        }
     }
     camera_set_position(app->camera, player_eye_pos(&app->player));
     camera_set_yaw_pitch(app->camera, app->player.yaw, app->player.pitch);

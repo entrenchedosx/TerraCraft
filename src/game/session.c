@@ -231,6 +231,7 @@ int session_open_world(AppContext *app, const char *world_dir)
     app->player.mode = m.mode;
     if (m.has_player) {
         app->player.pos = mmath_vec3(m.px, m.py, m.pz);
+        app->player.render_pos = app->player.pos;
         app->player.yaw = m.yaw;
         app->player.pitch = m.pitch;
     }
@@ -388,6 +389,7 @@ int session_find_spawn(AppContext *app)
                     }
                     if (!app->player_from_save) {
                         app->player.pos = out;
+                        app->player.render_pos = out;
                     }
                     LOG_INFO("session: spawn at (%.1f, %.1f, %.1f)", out.x, out.y, out.z);
                     return 0;
@@ -402,6 +404,7 @@ int session_find_spawn(AppContext *app)
         }
         if (!app->player_from_save) {
             app->player.pos = fallback;
+            app->player.render_pos = fallback;
         }
         return 0;
     }
@@ -411,6 +414,7 @@ int session_find_spawn(AppContext *app)
     }
     if (!app->player_from_save) {
         app->player.pos = app->spawn_point;
+        app->player.render_pos = app->spawn_point;
     }
     LOG_WARN("session_find_spawn: no ground found; high drop-in");
     return 0;
