@@ -31,6 +31,12 @@ else()
   endif()
 endif()
 
+# macOS 10.14+ deprecates OpenGL; TerraCraft targets GL 3.3 core
+# deliberately, so silence the deprecation warning build-wide on Apple.
+if(APPLE)
+  add_compile_definitions(GL_SILENCE_DEPRECATION)
+endif()
+
 # --- Dependencies ------------------------------------------------------------
 # SDL2: prefer CONFIG package (vcpkg / upstream), fall back to Find module.
 find_package(SDL2 CONFIG QUIET)
