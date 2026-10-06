@@ -418,7 +418,7 @@ static void app_poll_discrete_input(AppContext *app)
             uint16_t la = inv_insert(&app->player.inv, &ra);
             LOG_INFO("Dev give: bow + arrows (%u/%u leftover)", (unsigned)lb, (unsigned)la);
         } else {
-            ItemStack give = {ITEM_NONE, 0};
+            ItemStack give = {ITEM_NONE, 0, 0};
             const ItemStack *sel = &app->player.inv.slots[app->player.hotbar_sel];
             give.item = stack_is_empty(sel) ? (ItemId)BLOCK_STONE : sel->item;
             give.count = item_get_info(give.item)->max_stack;

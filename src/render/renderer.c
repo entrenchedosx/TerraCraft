@@ -1126,14 +1126,13 @@ void renderer_draw_world(Renderer *r, const World *w, const Camera *cam, float a
     if (r == NULL || w == NULL || cam == NULL) {
         return;
     }
-    /* Day/night sky drives the clear color (NULL ts keeps noon defaults). */
+    /* Day/night sky drives the clear color (NULL ts keeps noon defaults).
+     * Lighting itself resolves inside the voxel pass from ts. */
     Vec3 sky = mmath_vec3(0.529f, 0.808f, 0.922f);
     Vec3 sun = mmath_vec3(-0.45f, 0.85f, 0.30f);
-    float intensity = 1.0f;
     if (ts != NULL) {
         sky = time_get_sky_color(ts);
         sun = time_get_sun_dir(ts);
-        intensity = time_get_light_intensity(ts);
     } else {
         sun = mmath_vec3_normalize(sun);
     }
@@ -1286,56 +1285,6 @@ static void entity_emit_cube(float *dst, float minx, float miny, float minz, flo
             v[6] = (CUBE_U[i] == 0.0f) ? u0 : u1;
             v[7] = (CUBE_V[i] == 0.0f) ? v0 : v1;
             v[8] = ao;
-            n += 1;
-        }
-    }
-}
-
-/* Emit one dropped-item billboard: a single camera-facing quad (2
- * triangles, 6 non-indexed verts, VoxelVertex layout) showing the full
- * item tile — the readable MC look. View-aligned quads never go
- * edge-on and never mirror (the failure modes of spinning X sprites),
- * and one quad costs a quarter of the old crossed pair. Normals point
- * up so lighting stays bright; the shader's alpha cutout discards
- * transparent texels. Depth-tested like everything else.
- *
- * Args:
- *   dst: 54-float destination (must not be NULL).
- *   cx, cy, cz: sprite center (world).
- *   size: sprite edge length (> 0).
- *   tile: atlas tile index.
- *   right: camera-right unit vector (world xz).
- */
-static void entity_emit_sprite(float *dst, float cx, float cy, float cz, float size, int tile,
-                               float rx, float rz)
-{
-    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
-    texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
-    float h = size * 0.5f;
-    /* Corner order: BL, BR, TL, TR with (0,1,2,2,1,3) triangles, wound
-     * CCW as seen along +right (the camera side). Backface culling is
-     * off for this pass? No — culling stays on globally, so the quad
-     * is emitted wound both ways (12 verts): readable from both sides
-     * without touching GL state (drops are few; overdraw is trivial). */
-    static const float QUAD[4][2] = {{-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
-    static const int TRIS[6] = {0, 1, 2, 2, 1, 3};
-    size_t n = 0;
-    for (int pass = 0; pass < 2; ++pass) {
-        for (int k = 0; k < 6; ++k) {
-            int kk = (pass == 0) ? k : (5 - k); /* Reverse winding. */
-            int i = TRIS[kk];
-            float lx = QUAD[i][0];
-            float ly = QUAD[i][1];
-            float *v = dst + n * MESHER_FLOATS_PER_VERTEX;
-            v[0] = cx + rx * lx * h;
-            v[1] = cy + ly * h;
-            v[2] = cz + rz * lx * h;
-            v[3] = 0.0f;
-            v[4] = 1.0f;
-            v[5] = 0.0f;
-            v[6] = (lx < 0.0f) ? u0 : u1;
-            v[7] = (ly < 0.0f) ? v0 : v1;
-            v[8] = 1.0f;
             n += 1;
         }
     }

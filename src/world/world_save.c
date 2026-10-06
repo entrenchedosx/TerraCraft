@@ -298,7 +298,7 @@ int world_save_all(const char *dir, World *w, const Player *p, Vec3 spawn, bool 
     return chunk_fails == 0 ? 0 : -3;
 }
 
-/* Delete a world tree: chunks/*.bin, world.meta, then the directories. */
+/* Delete a world tree: chunk bins, world.meta, then the directories. */
 int world_save_delete(const char *dir)
 {
     if (dir == NULL || dir[0] == '\0') {

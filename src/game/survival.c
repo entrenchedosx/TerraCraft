@@ -52,7 +52,7 @@ float survival_mine_time(uint16_t block, ItemId held)
 /* Drop stack for a broken block with a held item (MC harvest rule). */
 ItemStack survival_block_drop(uint16_t block, ItemId held)
 {
-    ItemStack out = {ITEM_NONE, 0};
+    ItemStack out = {ITEM_NONE, 0, 0};
     const BlockInfo *info = block_get_info(block);
     if (info->drop == 0 || info->drop_count == 0) {
         return out;

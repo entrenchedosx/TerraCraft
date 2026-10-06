@@ -138,50 +138,50 @@ int test_item_registry(void)
 int test_stack_ops(void)
 {
     int failures = 0;
-    ItemStack e = {ITEM_NONE, 0};
+    ItemStack e = {ITEM_NONE, 0, 0};
     TEST_ASSERT(stack_is_empty(&e) == true);
     TEST_ASSERT(stack_is_empty(NULL) == true);
-    ItemStack bad = {ITEM_NONE, 27};
+    ItemStack bad = {ITEM_NONE, 27, 0};
     TEST_ASSERT(stack_is_empty(&bad) == true); /* NONE always reads empty. */
 
-    ItemStack a = {3, 60};
-    ItemStack b = {3, 10};
+    ItemStack a = {3, 60, 0};
+    ItemStack b = {3, 10, 0};
     TEST_ASSERT(stack_can_merge(&a, &b) == true);
     uint16_t moved = stack_add(&a, &b);
     TEST_ASSERT(moved == 4 && a.count == 64 && b.count == 6);
 
-    ItemStack full = {3, 64};
-    ItemStack extra = {3, 5};
+    ItemStack full = {3, 64, 0};
+    ItemStack extra = {3, 5, 0};
     TEST_ASSERT(stack_can_merge(&full, &extra) == false);
     TEST_ASSERT(stack_add(&full, &extra) == 0 && extra.count == 5);
 
-    ItemStack diff = {2, 5};
+    ItemStack diff = {2, 5, 0};
     TEST_ASSERT(stack_can_merge(&a, &diff) == false);
 
     ItemStack dst;
     stack_clear(&dst);
-    ItemStack src = {2, 70}; /* Over max: clamps to 64, keeps 6. */
+    ItemStack src = {2, 70, 0}; /* Over max: clamps to 64, keeps 6. */
     TEST_ASSERT(stack_add(&dst, &src) == 64);
     TEST_ASSERT(dst.item == 2 && dst.count == 64 && src.count == 6);
 
-    ItemStack junk = {999, 10};
-    ItemStack anywhere = {2, 1};
+    ItemStack junk = {999, 10, 0};
+    ItemStack anywhere = {2, 1, 0};
     TEST_ASSERT(stack_add(&anywhere, &junk) == 0 && stack_is_empty(&junk) == true);
 
-    ItemStack r = {2, 10};
+    ItemStack r = {2, 10, 0};
     TEST_ASSERT(stack_remove(&r, 4) == 4 && r.count == 6);
     TEST_ASSERT(stack_remove(&r, 99) == 6 && stack_is_empty(&r) == true);
     TEST_ASSERT(stack_remove(&r, 1) == 0);
     TEST_ASSERT(stack_remove(NULL, 1) == 0);
 
-    ItemStack s = {2, 7};
-    ItemStack half = {ITEM_NONE, 0};
+    ItemStack s = {2, 7, 0};
+    ItemStack half = {ITEM_NONE, 0, 0};
     stack_split_half(&s, &half);
     TEST_ASSERT(half.item == 2 && half.count == 4 && s.count == 3);
-    ItemStack s2 = {2, 8};
+    ItemStack s2 = {2, 8, 0};
     stack_split_half(&s2, &half);
     TEST_ASSERT(half.count == 4 && s2.count == 4);
-    ItemStack e2 = {ITEM_NONE, 0};
+    ItemStack e2 = {ITEM_NONE, 0, 0};
     stack_split_half(&e2, &half);
     TEST_ASSERT(stack_is_empty(&half) == true);
     stack_clear(NULL);
@@ -211,7 +211,7 @@ int test_inventory_ops(void)
     TEST_ASSERT(inv_find_empty(&inv) == 0);
     TEST_ASSERT(inv_find_merge(&inv, 3) == -1);
 
-    ItemStack s = {3, 70};
+    ItemStack s = {3, 70, 0};
     TEST_ASSERT(inv_insert(&inv, &s) == 0); /* 64 + 6 across two slots. */
     TEST_ASSERT(inv.slots[0].count == 64 && inv.slots[1].item == 3 && inv.slots[1].count == 6);
     TEST_ASSERT(inv_find_merge(&inv, 3) == 1);
@@ -221,11 +221,11 @@ int test_inventory_ops(void)
     Inventory full;
     inv_init(&full);
     inv_fill_n(&full, 35); /* 35x stone/1. */
-    ItemStack big = {2, 130}; /* Dirt: one empty slot takes 64, rest spills. */
+    ItemStack big = {2, 130, 0}; /* Dirt: one empty slot takes 64, rest spills. */
     uint16_t left = inv_insert(&full, &big);
     TEST_ASSERT(left == 66 && big.count == 66);
     TEST_ASSERT(inv_count_item(&full, 2) == 64);
-    ItemStack more = {2, 1};
+    ItemStack more = {2, 1, 0};
     TEST_ASSERT(inv_insert(&full, &more) == 1); /* Nowhere left. */
     TEST_ASSERT(inv_find_empty(&full) == -1);
 
@@ -247,9 +247,9 @@ int test_inventory_ops(void)
     TEST_ASSERT(inv_valid_slot(35) == true && inv_valid_slot(36) == false && inv_valid_slot(-1) == false);
 
     /* Invalid insert sanitizes. */
-    ItemStack bad = {999, 10};
+    ItemStack bad = {999, 10, 0};
     TEST_ASSERT(inv_insert(&inv, &bad) == 0 && stack_is_empty(&bad) == true);
-    ItemStack empty = {ITEM_NONE, 0};
+    ItemStack empty = {ITEM_NONE, 0, 0};
     TEST_ASSERT(inv_insert(&inv, &empty) == 0);
     TEST_ASSERT(inv_insert(NULL, &empty) == 0);
     return failures;

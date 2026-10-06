@@ -290,7 +290,7 @@ int test_entity_pickup(void)
     Player p;
     player_init(&p);
 
-    ItemStack drop = {(ItemId)BLOCK_STONE, 5};
+    ItemStack drop = {(ItemId)BLOCK_STONE, 5, 0};
     int idx = entity_spawn(&pool, p.pos, &drop);
     TEST_ASSERT(idx >= 0);
     TEST_ASSERT(entity_active_count(&pool) == 1);
@@ -312,7 +312,7 @@ int test_entity_pickup(void)
         p.inv.slots[i].item = (ItemId)BLOCK_STONE;
         p.inv.slots[i].count = stone_info->max_stack;
     }
-    ItemStack dirt = {(ItemId)BLOCK_DIRT, 3};
+    ItemStack dirt = {(ItemId)BLOCK_DIRT, 3, 0};
     int idx2 = entity_spawn(&pool, p.pos, &dirt);
     TEST_ASSERT(idx2 >= 0);
     pool.items[idx2].pickup_t = 0.0f;
@@ -333,7 +333,7 @@ int test_entity_lifetime(void)
     int failures = 0;
     EntityPool pool;
     entity_pool_clear(&pool);
-    ItemStack drop = {(ItemId)BLOCK_DIRT, 1};
+    ItemStack drop = {(ItemId)BLOCK_DIRT, 1, 0};
     int idx = entity_spawn(&pool, mmath_vec3(0.0f, 100.0f, 0.0f), &drop);
     TEST_ASSERT(idx >= 0);
     /* Updates clamp dt to 0.25 s slices (anti-spiral), so pump frames. */

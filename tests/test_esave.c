@@ -103,7 +103,7 @@ int test_esave_single(void)
     const char *dir = ESAVE_TMP "/single";
     EntityPool pool;
     entity_pool_clear(&pool);
-    ItemStack drop = {(ItemId)BLOCK_STONE, 5};
+    ItemStack drop = {(ItemId)BLOCK_STONE, 5, 0};
     int idx = entity_spawn(&pool, mmath_vec3(1.5f, 65.25f, -3.5f), &drop);
     TEST_ASSERT(idx >= 0);
     pool.items[idx].vel = mmath_vec3(0.5f, -2.0f, 0.25f);
@@ -139,9 +139,9 @@ int test_esave_multiple(void)
     const char *dir = ESAVE_TMP "/multi";
     EntityPool pool;
     entity_pool_clear(&pool);
-    ItemStack a = {(ItemId)BLOCK_DIRT, 7}; /* Partial stack. */
-    ItemStack b = {(ItemId)BLOCK_STONE, 64}; /* Maximum stack. */
-    ItemStack c = {ITEM_COAL, 3};
+    ItemStack a = {(ItemId)BLOCK_DIRT, 7, 0}; /* Partial stack. */
+    ItemStack b = {(ItemId)BLOCK_STONE, 64, 0}; /* Maximum stack. */
+    ItemStack c = {ITEM_COAL, 3, 0};
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(-100.5f, 70.0f, -200.25f), &a) >= 0);
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(0.0f, 80.0f, 0.0f), &b) >= 0);
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(3000.0f, 65.0f, 4000.0f), &c) >= 0);
@@ -281,7 +281,7 @@ int test_esave_missing(void)
     const char *dir = ESAVE_TMP "/nodir_xyz";
     EntityPool pool;
     entity_pool_clear(&pool);
-    ItemStack drop = {(ItemId)BLOCK_STONE, 2};
+    ItemStack drop = {(ItemId)BLOCK_STONE, 2, 0};
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(0.0f, 70.0f, 0.0f), &drop) >= 0);
     TEST_ASSERT(entity_save_read(dir, &pool, NULL) == 0);
     TEST_ASSERT(entity_active_count(&pool) == 0);
@@ -299,7 +299,7 @@ int test_esave_transient(void)
     EntityPool pool;
     entity_pool_clear(&pool);
     /* One entity aged past its lifetime (despawned on update). */
-    ItemStack old = {(ItemId)BLOCK_DIRT, 4};
+    ItemStack old = {(ItemId)BLOCK_DIRT, 4, 0};
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(0.0f, 100.0f, 0.0f), &old) >= 0);
     for (int i = 0; i < 1205; ++i) {
         entity_update(&pool, NULL, 0.25f);
@@ -308,7 +308,7 @@ int test_esave_transient(void)
     /* One entity picked up by the player. */
     Player p;
     player_init(&p);
-    ItemStack fresh = {(ItemId)BLOCK_STONE, 3};
+    ItemStack fresh = {(ItemId)BLOCK_STONE, 3, 0};
     int idx = entity_spawn(&pool, p.pos, &fresh);
     TEST_ASSERT(idx >= 0);
     pool.items[idx].pickup_t = 0.0f;

@@ -72,7 +72,7 @@ int world_save_read_chunk(const char *dir, Chunk *c);
  */
 int world_save_all(const char *dir, World *w, const Player *p, Vec3 spawn, bool has_spawn, float day);
 
-/* Delete a world directory tree (chunks/*.bin, world.meta, dirs).
+/* Delete a world directory tree (chunk bins, world.meta, dirs).
  * Only removes files inside <dir>/chunks plus the meta file, then the
  * directories themselves. Refuses empty/NULL paths.
  *

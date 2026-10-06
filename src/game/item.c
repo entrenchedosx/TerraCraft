@@ -6,7 +6,7 @@
 
 /* Fallback entry for unknown IDs (aliases NONE). */
 static const ItemInfo ITEM_INVALID = {
-    ITEM_NONE, "none", 64, 0, TOOL_NONE, TOOL_TIER_NONE, 3, 0.0f, 0.0f, 0.0f, 0, 0,
+    ITEM_NONE, "none", 64, 0, TOOL_NONE, TOOL_TIER_NONE, 3, 0.0f, 0.0f, 0.0f, 0, 0, 0, 0.0f,
 };
 
 /* Static registry. Block items mirror BlockType values (frozen); tools and
@@ -36,7 +36,8 @@ static const ItemInfo ITEM_TABLE[] = {
     {18, "Workbench", 64, 18, TOOL_NONE, TOOL_TIER_NONE, TILE_WORKBENCH, 0.55f, 0.40f, 0.22f, 0, 0, 1, 0.4f},
     {19, "Planks", 64, 19, TOOL_NONE, TOOL_TIER_NONE, TILE_PLANKS, 0.62f, 0.47f, 0.26f, 0, 0, 1, 0.4f},
     {ITEM_COAL, "Coal", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_COAL, 0.15f, 0.15f, 0.15f, 0, 0, 1, 0.4f},
-    {ITEM_APPLE, "Apple", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_APPLE, 0.85f, 0.15f, 0.15f, 0, 4},
+    {ITEM_APPLE, "Apple", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_APPLE, 0.85f, 0.15f, 0.15f, 0, 4, 0,
+     0.0f},
     {ITEM_STICK, "Stick", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_STICK, 0.55f, 0.42f, 0.25f, 0, 0, 1, 0.4f},
     {ITEM_ARROW, "Arrow", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_ARROW, 0.80f, 0.75f, 0.60f, 0, 0, 1,
      0.4f},
