@@ -463,26 +463,21 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     if (r == NULL || cam == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
         return;
     }
-    /* Viewmodel layout (camera-local: x right, y up, z forward): a
-     * compact arm tucked low-right, MC-style — sleeve down from the
-     * shoulder pivot, skin hand at its base, held item just ahead.
-     * Previous tuning sat half a meter high and filled a quarter of
-     * the screen; this keeps the whole assembly in the lower-right. */
     /* Viewmodel layout (camera-local: x right, y up, z forward, FOV 70):
-     * fractions verified against the projection (x/(z*1.245) and
-     * y/(z*0.700) NDC at 16:9): sleeve fills the right edge from 0.55H
-     * down past the frame, hand grips below it, held item sits
-     * lower-center-right fully on screen. Previous tuning floated half
-     * a meter high and filled a quarter of the view. */
+     * compact corner arm — sleeve fills the right edge from ~0.65H down
+     * past the frame (~90px wide at 1280x720), hand grips below it,
+     * held item sits lower-center-right fully on screen. Earlier
+     * tunings ran 2x too large (sleeve spanned a quarter of the view
+     * up to crosshair height). */
     MobModelPart parts[3] = {
-        {{0.30f, -0.46f, 0.55f}, {0.15f, 0.42f, 0.15f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.30f, -0.61f, 0.54f}, {0.15f, 0.15f, 0.17f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.27f, -0.38f, 0.62f},
-         held_block != 0 ? mmath_vec3(0.18f, 0.18f, 0.18f) : mmath_vec3(0.22f, 0.22f, 0.035f),
+        {{0.34f, -0.52f, 0.58f}, {0.10f, 0.30f, 0.10f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.34f, -0.63f, 0.57f}, {0.10f, 0.10f, 0.11f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.31f, -0.36f, 0.66f},
+         held_block != 0 ? mmath_vec3(0.12f, 0.12f, 0.12f) : mmath_vec3(0.14f, 0.14f, 0.025f),
          held_tile, -1, 0.0f, MOB_ANIM_NONE},
     };
     int count = held_tile >= 0 && held_tile <= 255 ? 3 : 2;
-    const Vec3 shoulder = {0.37f, -0.06f, 0.58f};
+    const Vec3 shoulder = {0.38f, -0.10f, 0.60f};
     float swing = player_swing_weight(swing_phase);
     float swing_x = -0.70f * swing;
     float swing_y = 0.06f * swing;
