@@ -280,7 +280,7 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
         return;
     }
     sflush(app, rects, &rn);
-    stext_c(app, "TerraCraft v0.9.0 - original engine, no Mojang assets", cx, (float)app->height - 30.0f,
+    stext_c(app, "TerraCraft v0.9.1 - original engine, no Mojang assets", cx, (float)app->height - 30.0f,
             SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_QUIT);

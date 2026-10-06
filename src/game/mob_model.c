@@ -34,12 +34,12 @@ static const MobModelPart ZOMBIE_PARTS[] = {
  * right arm rigged as the bow arm. Collision 0.6 x 1.9.
  */
 static const MobModelPart SKELETON_PARTS[] = {
-    {{-0.20f, 0.85f, -0.10f}, {0.40f, 0.65f, 0.20f}, TILE_STONE, -1, 0.0f, MOB_ANIM_NONE},
+    {{-0.15f, 0.85f, -0.10f}, {0.30f, 0.65f, 0.20f}, TILE_STONE, -1, 0.0f, MOB_ANIM_NONE},
     {{-0.19f, 1.50f, -0.19f}, {0.38f, 0.40f, 0.38f}, TILE_SNOW, -1, 0.0f, MOB_ANIM_HEAD},
-    {{-0.38f, 0.85f, -0.07f}, {0.16f, 0.65f, 0.16f}, TILE_SNOW, -1, 1.50f, MOB_ANIM_LEG},
-    {{0.22f, 0.85f, -0.07f}, {0.16f, 0.65f, 0.16f}, TILE_WOOD, -1, 1.50f, MOB_ANIM_AIM_ARM},
-    {{-0.20f, 0.00f, -0.09f}, {0.18f, 0.85f, 0.18f}, TILE_SNOW, -1, 0.85f, MOB_ANIM_LEG},
-    {{0.02f, 0.00f, -0.09f}, {0.18f, 0.85f, 0.18f}, TILE_SNOW, -1, 0.85f, MOB_ANIM_LEG},
+    {{-0.27f, 0.85f, -0.07f}, {0.12f, 0.65f, 0.16f}, TILE_SNOW, -1, 1.50f, MOB_ANIM_LEG},
+    {{0.15f, 0.85f, -0.07f}, {0.12f, 0.65f, 0.16f}, TILE_WOOD, -1, 1.50f, MOB_ANIM_AIM_ARM},
+    {{-0.19f, 0.00f, -0.09f}, {0.14f, 0.85f, 0.18f}, TILE_SNOW, -1, 0.85f, MOB_ANIM_LEG},
+    {{0.05f, 0.00f, -0.09f}, {0.14f, 0.85f, 0.18f}, TILE_SNOW, -1, 0.85f, MOB_ANIM_LEG},
 };
 
 static const MobModel MOB_MODELS[] = {

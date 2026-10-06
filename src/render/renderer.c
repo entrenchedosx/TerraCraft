@@ -470,14 +470,14 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
      * tunings ran 2x too large (sleeve spanned a quarter of the view
      * up to crosshair height). */
     MobModelPart parts[3] = {
-        {{0.34f, -0.52f, 0.58f}, {0.10f, 0.30f, 0.10f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.34f, -0.63f, 0.57f}, {0.10f, 0.10f, 0.11f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.31f, -0.36f, 0.66f},
-         held_block != 0 ? mmath_vec3(0.12f, 0.12f, 0.12f) : mmath_vec3(0.14f, 0.14f, 0.025f),
+        {{0.34f, -0.33f, 0.58f}, {0.07f, 0.30f, 0.07f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.34f, -0.44f, 0.57f}, {0.07f, 0.07f, 0.08f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
+        {{0.32f, -0.17f, 0.66f},
+         held_block != 0 ? mmath_vec3(0.09f, 0.09f, 0.09f) : mmath_vec3(0.11f, 0.11f, 0.02f),
          held_tile, -1, 0.0f, MOB_ANIM_NONE},
     };
     int count = held_tile >= 0 && held_tile <= 255 ? 3 : 2;
-    const Vec3 shoulder = {0.38f, -0.10f, 0.60f};
+    const Vec3 shoulder = {0.37f, 0.02f, 0.60f};
     float swing = player_swing_weight(swing_phase);
     float swing_x = -0.70f * swing;
     float swing_y = 0.06f * swing;
