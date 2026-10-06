@@ -68,6 +68,17 @@ static bool interaction_replaceable(uint16_t block)
 {
     return block == BLOCK_AIR || block == BLOCK_WATER || block_is_cross(block);
 }
+
+/* Flowers and grass plants need a valid ground surface. A cross-sprite plant
+ * is not a support block, so this also prevents vegetation columns. */
+static bool interaction_plant_supported(const World *w, int wx, int wy, int wz)
+{
+    if (w == NULL || wy <= 0) {
+        return false;
+    }
+    uint16_t support = world_get_block(w, wx, wy - 1, wz);
+    return support == BLOCK_GRASS || support == BLOCK_DIRT || support == BLOCK_SNOW;
+}
 /* Write a block by world coords (chunk must be loaded).
  *
  * Args:
@@ -163,14 +174,29 @@ bool interaction_place(World *w, const Player *p, const HitResult *hit, uint16_t
     if (block_id == BLOCK_AIR) {
         return false;
     }
-    int tx = hit->block[0] + hit->normal[0];
-    int ty = hit->block[1] + hit->normal[1];
-    int tz = hit->block[2] + hit->normal[2];
+    int hx = hit->block[0];
+    int hy = hit->block[1];
+    int hz = hit->block[2];
+    uint16_t clicked = world_get_block(w, hx, hy, hz);
+    int tx = hx + hit->normal[0];
+    int ty = hy + hit->normal[1];
+    int tz = hz + hit->normal[2];
+    /* Small decor is itself the placement surface: replace the clicked
+     * cell instead of treating its top face as a shelf for another plant. */
+    if (block_is_cross(clicked)) {
+        tx = hx;
+        ty = hy;
+        tz = hz;
+    }
     if (ty < 0 || ty >= CHUNK_Y) {
         return false;
     }
     uint16_t cur = world_get_block(w, tx, ty, tz);
     if (!interaction_replaceable(cur)) {
+        return false;
+    }
+    if ((block_id == BLOCK_GRASS_PLANT || block_id == BLOCK_FLOWER) &&
+        !interaction_plant_supported(w, tx, ty, tz)) {
         return false;
     }
     if (placement_hits_player(p, tx, ty, tz, block_id)) {

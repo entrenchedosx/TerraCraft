@@ -61,6 +61,7 @@ int test_block_table(void);
 int test_chunk_basic(void);
 int test_arena(void);
 int test_path_dirs(void);
+int test_camera_viewmodel_fov_compensation(void);
 
 /* World tests (defined in test_world.c). */
 int test_chunk_index(void);
@@ -122,6 +123,7 @@ int test_ao_sun_shade(void);
 
 /* Item/inventory tests (defined in test_item.c). */
 int test_item_registry(void);
+int test_item_stackability_contract(void);
 int test_item_texture_mapping(void);
 int test_stack_ops(void);
 int test_inventory_ops(void);

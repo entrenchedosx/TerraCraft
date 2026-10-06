@@ -106,10 +106,13 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 - [x] Add a tested 20 TPS scheduler with bounded catch-up, dropped-time accounting, event-latched input edges, and world simulation during inventory/workbench screens.
 - [x] Replace the stretched cow skin mapping with per-face box-net UVs and skin-proportioned cuboids; align melee ray bounds to yawed rendered models, allow hits from inside, and retry held attacks after cooldown.
 - [x] Add a procedural first-person sleeve and hand, held-item sprite, and independently timed swing; Debug and Release CTest both pass with 155 registered cases.
+- [x] Prevent stacked flowers and grass plants: clicking decor replaces its cell, and new vegetation requires grass, dirt, or snow support.
 - [ ] Reproduce the user's item texture report with the affected item names, render location, selected pack, and screenshot; verify the custom-pack fix in-game or identify another runtime cause.
 - [ ] Add render interpolation, then validate ticked movement/collision, survival, lighting, and fluid behaviors before claiming the fidelity pass complete.
 - [ ] Complete a hands-on Survival/Creative playtest against a running Java Edition 26.3 reference.
-- [ ] Current round verification: Debug and Release builds and CTest passed; independent code review is complete and the running-game visual check is pending. Keep `AI_MEMORY` and `mcassets/` excluded from Git.
+- [x] Latest code round: plant placement is supported/non-stacking; first-person arm skin, scale/framing, grip, and FOV behavior are corrected. Debug and Release builds and CTest pass (160 tests); independent source review is complete. Keep `AI_MEMORY` and `mcassets/` excluded from Git.
+- [x] Audit max stack sizes against Java Edition behavior for every registered item; all seven tools/bow are already single-stack, with regression checks covering inventory and save sanitization.
+- [ ] Manual game verification remains open for plant replacement/support, cow targeting and appearance, and first-person hand/swing at low and high FOV. The reported item texture issue also needs the item, screen path, and resource pack to reproduce.
 - Gauntlet procedure and round notes: `docs/GAUNTLET.md`.
 
 ## Milestone 8 — Entity Framework + Creatures + Combat (DONE)

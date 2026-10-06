@@ -118,6 +118,16 @@ Mat4 camera_get_proj(const Camera *cam, float aspect)
     return mmath_mat4_perspective(cam->fov_y_rad, aspect, cam->near_z, cam->far_z);
 }
 
+/* Preserve perspective projection by scaling viewmodel screen axes only. */
+float camera_get_viewmodel_xy_scale(const Camera *cam, float authored_fov_degrees)
+{
+    if (cam == NULL || !(authored_fov_degrees >= 40.0f) || !(authored_fov_degrees <= 120.0f)) {
+        return 1.0f;
+    }
+    float authored_rad = authored_fov_degrees * (MMATH_PI / 180.0f);
+    return tanf(cam->fov_y_rad * 0.5f) / tanf(authored_rad * 0.5f);
+}
+
 /* Get position.
  *
  * Args:

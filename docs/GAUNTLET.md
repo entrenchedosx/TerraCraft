@@ -154,6 +154,67 @@ triaged against the user's report.
   swing visibility remains pending. This round is not visually accepted until
   those checks are done.
 
+### Round 4 — Supported, non-stacking vegetation placement
+
+- The user demonstrated that right-clicking flowers and grass plants could
+  create another plant in the next cell above. The ray correctly selected the
+  decor, but placement always used the adjacent face cell.
+- Clicking cross-sprite decor now replaces the clicked cell instead of using
+  it as a shelf. New grass plants and flowers require grass, dirt, or snow
+  directly beneath them; snow is included because the snow biome already
+  generates grass plants there.
+- Regression coverage verifies same-cell replacement, no plant above the
+  replaced cell, invalid stone support rejection, and valid grass/dirt/snow
+  support.
+- The user closed the running game; full Release and Debug builds now succeed,
+  including the game executable, and both CTest suites pass.
+- Manual in-game placement confirmation remains open.
+
+### Round 5 — First-person arm and held-item correction
+
+- Independent arm review found the held item was positioned above the fist,
+  the sleeve was unusually narrow, and the viewmodel layout changed screen
+  position with the player's FOV setting.
+- Widened the arm cuboids and placed the held item at the hand. Camera-local
+  X/Y coordinates use the tangent ratio between live FOV and authored
+  70-degree FOV while depth stays fixed, preserving perspective placement.
+  Pose offsets translate the arm vertices with their swing pivot. World
+  projection and FOV are unchanged.
+- Added a projection regression check at 40, 70, and 120-degree FOV, including
+  invalid-reference and null-camera fallback cases.
+- Debug and Release builds both succeed. CTest passes in both configurations;
+  the Release runner reports 159 tests, 0 failures. `git diff --check` passes.
+- An independent reviewer caught that an initial uniform xyz scale canceled
+  under perspective. The code now scales only viewmodel X/Y and has a direct
+  projection regression check. Human visual verification in first-person
+  mode, with empty and occupied hands at low and high FOV, remains open.
+
+### Round 6 — First-person arm skin, framing, and stackability
+
+- The latest screenshot still showed a pole-like flat teal/brown arm. Review
+  traced it to repeated 16x16 fallback atlas swatches and a model placed only
+  0.58 blocks from the camera; the loaded 64x64 player skin was not used by
+  the first-person pass.
+- The first-person arm now uses the right-arm face UVs from the loaded player
+  skin, drawn in a separate skin-texture pass. It rests farther away in the
+  lower-right corner with a modest inward cant; the held item has a matching
+  grip/depth and retains its atlas texture. Depth is cleared for the overlay,
+  then enabled so the arm's own cuboid surfaces occlude correctly. The punch
+  now swings toward the camera, and the atlas arm remains as a no-assets
+  fallback.
+- The catalog audit found 33 registered items: six tools and the bow already
+  have `max_stack = 1`; all other 26 stack to 64. No registered item needs a
+  source limit correction. New exhaustive regression coverage checks limits,
+  merges, inventory insertion, split behavior, and sanitization for every
+  unstackable item. Swords, armor, buckets, and other absent catalog items
+  remain outside this pass.
+- Mojang's Java Edition component notes and 24w09a stack-format notes are
+  recorded in `docs/JAVA_FIDELITY.md` as the stack-limit references.
+- Debug and Release game builds and CTest pass; the direct Release runner
+  reports 160 tests, 0 failures. Independent arm and stackability reviews
+  found no remaining code-level blocker. A new live screenshot is still
+  needed to accept the arm's appearance.
+
 ## Research
 
 - [Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) — original

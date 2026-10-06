@@ -131,6 +131,89 @@ int test_item_registry(void)
     return failures;
 }
 
+/* TerraCraft currently registers the Java-style 64-stack set plus damageable
+ * tools and a bow. Keep this explicit audit synchronized with ITEM_TABLE:
+ * the six tools and bow are the only implemented items whose max stack is 1.
+ */
+int test_item_stackability_contract(void)
+{
+    static const ItemId unstackable[] = {
+        ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_WOOD_AXE,
+        ITEM_STONE_AXE, ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL, ITEM_BOW,
+    };
+    int failures = 0;
+    int registered = 0;
+
+    /* Exhaustively check each currently allocated registry range, including
+     * the intentionally omitted water block and unused ID gaps.
+     */
+    for (ItemId id = 1; id <= 19; ++id) {
+        bool expected_valid = id != 4; /* Water has no inventory item. */
+        TEST_ASSERT(item_is_valid(id) == expected_valid);
+        if (expected_valid) {
+            ++registered;
+            TEST_ASSERT(item_get_info(id)->max_stack == 64);
+        }
+    }
+    for (ItemId id = 100; id <= 107; ++id) {
+        TEST_ASSERT(item_is_valid(id));
+        ++registered;
+        TEST_ASSERT(item_get_info(id)->max_stack == 64);
+    }
+    for (ItemId id = 200; id <= 206; ++id) {
+        TEST_ASSERT(item_is_valid(id));
+        ++registered;
+        TEST_ASSERT(item_get_info(id)->max_stack == 1);
+    }
+    TEST_ASSERT(registered == 33);
+    for (size_t i = 0; i < sizeof(unstackable) / sizeof(unstackable[0]); ++i) {
+        TEST_ASSERT(item_get_info(unstackable[i])->max_stack == 1);
+    }
+
+    /* Exercise the shared rules used by inventory insertion, GUI merges,
+     * right-click splitting, and save-load sanitization for every singleton.
+     */
+    for (size_t i = 0; i < sizeof(unstackable) / sizeof(unstackable[0]); ++i) {
+        ItemId id = unstackable[i];
+        ItemStack dst = {id, 1, 0};
+        ItemStack src = {id, 1, 0};
+        TEST_ASSERT(!stack_can_merge(&dst, &src));
+        TEST_ASSERT(stack_add(&dst, &src) == 0);
+        TEST_ASSERT(dst.item == id && dst.count == 1);
+        TEST_ASSERT(src.item == id && src.count == 1);
+
+        /* Defensive clamp: even a malformed count cannot create a stack. */
+        ItemStack oversized = {id, 2, 0};
+        ItemStack empty = {ITEM_NONE, 0, 0};
+        TEST_ASSERT(stack_add(&empty, &oversized) == 1);
+        TEST_ASSERT(empty.item == id && empty.count == 1);
+        TEST_ASSERT(oversized.item == id && oversized.count == 1);
+
+        /* Two obtained copies land in distinct slots, never one stack. */
+        Inventory inv;
+        inv_init(&inv);
+        ItemStack pair = {id, 2, 0};
+        TEST_ASSERT(inv_insert(&inv, &pair) == 0);
+        TEST_ASSERT(stack_is_empty(&pair));
+        TEST_ASSERT(inv.slots[0].item == id && inv.slots[0].count == 1);
+        TEST_ASSERT(inv.slots[1].item == id && inv.slots[1].count == 1);
+
+        /* A singleton RMB split transfers that one item; it cannot duplicate
+         * it. Persisted over-counts are clamped back to one on sanitize.
+         */
+        ItemStack single = {id, 1, 0};
+        ItemStack picked = {ITEM_NONE, 0, 0};
+        stack_split_half(&single, &picked);
+        TEST_ASSERT(single.item == ITEM_NONE && single.count == 0);
+        TEST_ASSERT(picked.item == id && picked.count == 1);
+        inv.slots[2].item = id;
+        inv.slots[2].count = 64;
+        inv_sanitize(&inv);
+        TEST_ASSERT(inv.slots[2].item == id && inv.slots[2].count == 1);
+    }
+    return failures;
+}
+
 /* Test: empty/canonical, merge checks, add/remove/split.
  *
  * Returns: failure count.

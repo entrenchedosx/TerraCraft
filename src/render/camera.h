@@ -47,6 +47,11 @@ Mat4 camera_get_view(const Camera *cam);
  */
 Mat4 camera_get_proj(const Camera *cam, float aspect);
 
+/* Scale camera-local viewmodel X/Y coordinates to preserve their screen
+ * projection from the authored FOV. Keep camera-local Z unchanged. Returns
+ * 1.0 for a NULL camera or an authored FOV outside 40..120 degrees. */
+float camera_get_viewmodel_xy_scale(const Camera *cam, float authored_fov_degrees);
+
 /* Get the camera position.
  *
  * Args:

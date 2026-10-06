@@ -156,6 +156,14 @@ static Vec3 mob_rot_y(Vec3 p, float a)
     return mmath_vec3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c);
 }
 
+/* Rotate a camera-local point around its view axis (arm cant). */
+static Vec3 mob_rot_z(Vec3 p, float a)
+{
+    float c = cosf(a);
+    float s = sinf(a);
+    return mmath_vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z);
+}
+
 /* Emit one rotated cuboid part (6 faces x 2 triangles in soup order,
  * matching entity_emit_cube so identity indices apply). Transform: pitch
  * about the part pivot first, then yaw+PI, then translate to mob feet.
@@ -514,14 +522,24 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
 /* Rebase one view-model vertex from camera-local coordinates into world
  * space after applying the shared shoulder swing. */
 static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up, Vec3 forward,
-                                        Vec3 shoulder, float swing_x, float swing_y)
+                                        Vec3 shoulder, Vec3 pose_offset,
+                                        float rest_roll, float swing_x, float swing_y,
+                                        float viewmodel_scale)
 {
     Vec3 p = mmath_vec3(v[0], v[1], v[2]);
+    p = mmath_vec3_add(p, pose_offset);
     Vec3 rel = mmath_vec3_sub(p, shoulder);
-    rel = mob_rot_y(mob_rot_x(rel, swing_x), swing_y);
+    rel = mob_rot_y(mob_rot_x(mob_rot_z(rel, rest_roll), swing_x), swing_y);
     p = mmath_vec3_add(shoulder, rel);
     Vec3 n = mmath_vec3(v[3], v[4], v[5]);
-    n = mob_rot_y(mob_rot_x(n, swing_x), swing_y);
+    n = mob_rot_y(mob_rot_x(mob_rot_z(n, rest_roll), swing_x), swing_y);
+    /* Uniformly scaling xyz would cancel under perspective. Scale only the
+     * screen axes, leaving depth intact, to keep the authored framing. */
+    p.x *= viewmodel_scale;
+    p.y *= viewmodel_scale;
+    n.x /= viewmodel_scale;
+    n.y /= viewmodel_scale;
+    n = mmath_vec3_normalize(n);
     Vec3 wp = mmath_vec3_add(eye, mmath_vec3_add(mmath_vec3_scale(right, p.x),
                          mmath_vec3_add(mmath_vec3_scale(up, p.y), mmath_vec3_scale(forward, p.z))));
     Vec3 wn = mmath_vec3_add(mmath_vec3_scale(right, n.x),
@@ -534,9 +552,34 @@ static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up,
     v[5] = wn.z;
 }
 
-/* Draw an original sleeve/hand and a small atlas sprite for the held item.
- * This pass deliberately ignores world depth so the hand stays in front;
- * the HUD still renders afterward. */
+/* Draw one arm/item batch with a chosen skin or atlas texture. The arm
+ * overlay uses a cleared depth buffer, so depth still resolves its own
+ * cuboid faces without being hidden by the world. */
+static bool renderer_draw_player_arm_batch(Renderer *r, const Camera *cam, float aspect,
+                                           const TimeSystem *ts, float *vertices,
+                                           size_t vertex_count, unsigned int texture)
+{
+    if (r == NULL || vertices == NULL || vertex_count == 0 || texture == 0 ||
+        !renderer_begin_voxel_tex(r, cam, aspect, ts, texture)) {
+        return false;
+    }
+    MeshData mesh;
+    mesh.vertices = vertices;
+    mesh.indices = r->mob_idx;
+    mesh.vertex_count = vertex_count;
+    mesh.index_count = vertex_count;
+    mesh.vertex_cap = vertex_count;
+    mesh.index_cap = vertex_count;
+    bool drew = gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0;
+    if (drew) {
+        gpu_chunk_draw(&r->ent_buf);
+    }
+    renderer_end_voxel(r);
+    return drew;
+}
+
+/* Draw the skinned first-person right arm, or the procedural sleeve/hand
+ * fallback, with a separately textured held item. */
 void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
                               const TimeSystem *ts, int held_tile, uint16_t held_block,
                               float swing_phase, const PlayerAnimPose *pose)
@@ -544,20 +587,27 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     if (r == NULL || cam == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
         return;
     }
-    /* Viewmodel layout (camera-local: x right, y up, z forward, FOV 70):
-     * compact corner arm — sleeve fills the right edge from ~0.65H down
-     * past the frame (~90px wide at 1280x720), hand grips below it,
-     * held item sits lower-center-right fully on screen. Earlier
-     * tunings ran 2x too large (sleeve spanned a quarter of the view
-     * up to crosshair height). */
-    MobModelPart parts[3] = {
-        {{0.34f, -0.33f, 0.58f}, {0.07f, 0.30f, 0.07f}, TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.34f, -0.44f, 0.57f}, {0.07f, 0.07f, 0.08f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
-        {{0.32f, -0.17f, 0.66f},
-         held_block != 0 ? mmath_vec3(0.09f, 0.09f, 0.09f) : mmath_vec3(0.11f, 0.11f, 0.02f),
-         held_tile, -1, 0.0f, MOB_ANIM_NONE},
-    };
-    int count = held_tile >= 0 && held_tile <= 255 ? 3 : 2;
+    bool has_skin = r->player_skin_tex != 0;
+    bool has_item = held_tile >= 0 && held_tile <= 255;
+    int arm_parts = has_skin ? 1 : 2;
+    int item_part = arm_parts;
+    int count = arm_parts + (has_item ? 1 : 0);
+    MobModelPart parts[3];
+    /* Rest pose sits in the lower-right corner, mostly below the view. A
+     * complete 64x64 right-arm skin region replaces both procedural pieces
+     * when the owner skin is available. */
+    parts[0] = (MobModelPart){{0.76f, -0.53f, 0.92f}, {0.12f, 0.36f, 0.12f},
+                              TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE};
+    if (!has_skin) {
+        parts[1] = (MobModelPart){{0.76f, -0.57f, 0.88f}, {0.12f, 0.10f, 0.12f},
+                                  TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE};
+    }
+    if (has_item) {
+        parts[item_part] = (MobModelPart){{0.60f, -0.52f, held_block != 0 ? 0.82f : 0.87f},
+                                          held_block != 0 ? mmath_vec3(0.10f, 0.10f, 0.10f)
+                                                          : mmath_vec3(0.11f, 0.11f, 0.04f),
+                                          held_tile, -1, 0.0f, MOB_ANIM_NONE};
+    }
     /* Controller pose: stride bob, landing dip, use raise, punch envelope.
      * NULL pose falls back to the legacy swing-phase drive. */
     float bob_x = 0.0f;
@@ -572,18 +622,23 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
         raise = pose->raise;
         punch = pose->punch;
     }
-    Vec3 shoulder = {0.37f + bob_x - raise * 0.5f, 0.02f + bob_y - dip + raise * 0.7f,
-                     0.60f + raise * 0.3f};
-    float swing_x = -0.70f * punch;
+    Vec3 pose_offset = {bob_x - raise * 0.5f, bob_y - dip + raise * 0.7f, raise * 0.3f};
+    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.83f, -0.17f, 0.98f), pose_offset);
+    const float rest_roll = -0.18f;
+    float swing_x = 0.70f * punch;
     float swing_y = 0.06f * punch + bob_x * 0.8f;
     Vec3 eye = camera_get_position(cam);
     Vec3 forward = camera_get_forward(cam);
     Vec3 right = camera_get_right(cam);
     Vec3 up = mmath_vec3_normalize(mmath_vec3_cross(right, forward));
+    float viewmodel_scale = camera_get_viewmodel_xy_scale(cam, 70.0f);
     size_t vertex_count = (size_t)count * 36;
+    const MobSkin *player_skin = player_body_skin();
     for (int p = 0; p < count; ++p) {
         float fuv[6][4];
-        if (p == 2 && held_block != 0) {
+        if (has_skin && p == 0) {
+            mob_skin_uvs(player_skin, PLAYER_PART_ARM_R, fuv);
+        } else if (has_item && p == item_part && held_block != 0) {
             for (int face = 0; face < 6; ++face) {
                 int tile = block_tile_for_face(held_block, face);
                 texture_atlas_tile_uv(tile, &fuv[face][0], &fuv[face][1],
@@ -594,27 +649,30 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
         }
         float *dst = r->mob_verts + (size_t)p * 36 * MESHER_FLOATS_PER_VERTEX;
         mob_emit_part(dst, mmath_vec3(0.0f, 0.0f, 0.0f), -3.14159265f, &parts[p], 0.0f, false, fuv);
+        float part_roll = rest_roll + ((has_item && p == item_part) ? 0.28f : 0.0f);
         for (size_t v = 0; v < 36; ++v) {
             player_arm_transform_vertex(dst + v * MESHER_FLOATS_PER_VERTEX, eye, right, up, forward,
-                                        shoulder, swing_x, swing_y);
+                                        shoulder, pose_offset, part_roll, swing_x, swing_y,
+                                        viewmodel_scale);
         }
-    }
-    if (!renderer_begin_voxel(r, cam, aspect, ts)) {
-        return;
     }
     GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);
     GLboolean cull_was_enabled = glIsEnabled(GL_CULL_FACE);
+    GLboolean depth_mask_was_enabled = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask_was_enabled);
+    glDepthMask(GL_TRUE);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    glDisable(GL_DEPTH_TEST);
-    MeshData mesh;
-    mesh.vertices = r->mob_verts;
-    mesh.indices = r->mob_idx;
-    mesh.vertex_count = vertex_count;
-    mesh.index_count = vertex_count;
-    mesh.vertex_cap = vertex_count;
-    mesh.index_cap = vertex_count;
-    if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
-        gpu_chunk_draw(&r->ent_buf);
+    if (has_skin) {
+        renderer_draw_player_arm_batch(r, cam, aspect, ts, r->mob_verts, 36,
+                                       r->player_skin_tex);
+        if (has_item) {
+            float *item_verts = r->mob_verts + (size_t)item_part * 36 * MESHER_FLOATS_PER_VERTEX;
+            renderer_draw_player_arm_batch(r, cam, aspect, ts, item_verts, 36, r->atlas);
+        }
+    } else {
+        renderer_draw_player_arm_batch(r, cam, aspect, ts, r->mob_verts, vertex_count, r->atlas);
     }
     if (depth_was_enabled) {
         glEnable(GL_DEPTH_TEST);
@@ -626,7 +684,7 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     } else {
         glDisable(GL_CULL_FACE);
     }
-    renderer_end_voxel(r);
+    glDepthMask(depth_mask_was_enabled);
 }
 
 /* Draw live projectiles as small oriented shafts (one transient upload

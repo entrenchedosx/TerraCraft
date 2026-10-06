@@ -24,10 +24,12 @@ typedef struct HitResult HitResult;
  */
 int interaction_break(World *w, const HitResult *hit);
 
-/* Place the selected hotbar block against the targeted face:
- * target = block + normal. Rejected when the target cell is outside
- * [0,255], not replaceable (air, water, or non-solid decor), or overlaps
- * the player AABB (prevents self-entombing).
+/* Place the selected hotbar block against the targeted face. Clicking
+ * non-solid decor replaces its own cell rather than placing on top of it.
+ * Flowers and grass plants additionally require grass, dirt, or snow beneath
+ * them.
+ * Placement is rejected when the target cell is outside [0,255], occupied
+ * by a non-replaceable block, unsupported, or overlaps the player AABB.
  *
  * Args:
  *   w: world (must not be NULL).

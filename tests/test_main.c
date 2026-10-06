@@ -21,6 +21,7 @@ int main(void)
     RUN_TEST(test_chunk_basic);
     RUN_TEST(test_arena);
     RUN_TEST(test_path_dirs);
+    RUN_TEST(test_camera_viewmodel_fov_compensation);
     RUN_TEST(test_chunk_index);
     RUN_TEST(test_block_ids);
     RUN_TEST(test_world_gen);
@@ -65,6 +66,7 @@ int main(void)
     RUN_TEST(test_ao_seam);
     RUN_TEST(test_ao_sun_shade);
     RUN_TEST(test_item_registry);
+    RUN_TEST(test_item_stackability_contract);
     RUN_TEST(test_item_texture_mapping);
     RUN_TEST(test_stack_ops);
     RUN_TEST(test_inventory_ops);

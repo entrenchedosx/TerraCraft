@@ -291,9 +291,52 @@ int test_interaction_break_place(void)
         drop = survival_block_drop(replaced, ITEM_NONE);
         TEST_ASSERT(drop.item == BLOCK_TORCH && drop.count == 1);
         TEST_ASSERT(world_get_block(w, 8, 64, 8) == BLOCK_PLANKS);
+
+        /* A plant can only be planted on soil, and clicking an existing
+         * plant replaces that cell instead of stacking another plant above. */
+        chunk_set_block(c, 8, 63, 8, BLOCK_GRASS);
+        chunk_set_block(c, 8, 64, 8, BLOCK_GRASS_PLANT);
+        HitResult plant_hit = ph;
+        plant_hit.block[1] = 64;
+        plant_hit.normal[1] = 1;
+        TEST_ASSERT(interaction_place(w, &p, &plant_hit, BLOCK_FLOWER, &replaced) == true);
+        TEST_ASSERT(replaced == BLOCK_GRASS_PLANT);
+        TEST_ASSERT(world_get_block(w, 8, 64, 8) == BLOCK_FLOWER);
+        TEST_ASSERT(world_get_block(w, 8, 65, 8) == BLOCK_AIR);
+
+        /* New vegetation above stone is rejected; dirt is valid support. */
+        chunk_set_block(c, 7, 63, 8, BLOCK_STONE);
+        chunk_set_block(c, 7, 64, 8, BLOCK_AIR);
+        HitResult unsupported = ph;
+        unsupported.block[0] = 7;
+        unsupported.block[1] = 63;
+        TEST_ASSERT(interaction_place(w, &p, &unsupported, BLOCK_GRASS_PLANT, NULL) == false);
+        TEST_ASSERT(world_get_block(w, 7, 64, 8) == BLOCK_AIR);
+        chunk_set_block(c, 7, 63, 8, BLOCK_DIRT);
+        TEST_ASSERT(interaction_place(w, &p, &unsupported, BLOCK_GRASS_PLANT, NULL) == true);
+        TEST_ASSERT(world_get_block(w, 7, 64, 8) == BLOCK_GRASS_PLANT);
+
+        /* Snow biome terrain also supports its naturally generated grass. */
+        chunk_set_block(c, 6, 63, 8, BLOCK_SNOW);
+        chunk_set_block(c, 6, 64, 8, BLOCK_AIR);
+        HitResult snow_surface = unsupported;
+        snow_surface.block[0] = 6;
+        TEST_ASSERT(interaction_place(w, &p, &snow_surface, BLOCK_GRASS_PLANT, NULL) == true);
+        TEST_ASSERT(world_get_block(w, 6, 64, 8) == BLOCK_GRASS_PLANT);
+
+        /* A second plant aimed at the first plant replaces it at the same
+         * coordinate; it never creates a vertical flower/grass stack. */
+        HitResult grass_hit = unsupported;
+        grass_hit.block[1] = 64;
+        TEST_ASSERT(interaction_place(w, &p, &grass_hit, BLOCK_FLOWER, &replaced) == true);
+        TEST_ASSERT(replaced == BLOCK_GRASS_PLANT);
+        TEST_ASSERT(world_get_block(w, 7, 64, 8) == BLOCK_FLOWER);
+        TEST_ASSERT(world_get_block(w, 7, 65, 8) == BLOCK_AIR);
     }
 
     /* Self-overlap rejected: aim at the floor under our feet. */
+    chunk_set_block(world_get_chunk(w, 0, 0), 8, 64, 8, BLOCK_STONE);
+    chunk_set_block(world_get_chunk(w, 0, 0), 8, 65, 8, BLOCK_AIR);
     p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
     HitResult sh;
     sh.hit = true;

@@ -89,6 +89,21 @@ and rendering all affect what a player observes.
 
 ### Inventory and survival
 
+- **Stack-limit audit (2026-10-06):** the registered item table contains 33
+  items. Its six damageable tools (wood/stone pickaxes, axes, and shovels) and
+  its damageable bow have `max_stack = 1`. The other 26 registered items,
+  including grass plants and flowers, have `max_stack = 64`; none of the
+  implemented items uses the 16-item limit. This matches the Java Edition
+  item-stack rule that counts are capped by each item's own maximum, and its
+  item components disallow a stack limit above 1 together with durability
+  (`minecraft:max_damage`). See Mojang's [Java Edition 1.20.5 item-component
+  notes](https://www.minecraft.net/en-us/article/minecraft-java-edition-1-20-5)
+  and [24w09a stack-format notes](https://feedback.minecraft.net/hc/en-us/articles/24531969592077-Minecraft-Java-Edition-Snapshot-24w09a).
+  `test_item_stackability_contract` exhaustively checks all registered ID
+  ranges and runs every singleton through merge, add, inventory insertion,
+  one-item splitting, and inventory sanitization (the save-load clamp).
+  Additional Minecraft items such as swords, hoes, armor, shields, buckets,
+  and potions are not registered yet, so their limits are outside this audit.
 - Inventory and workbench screens continue advancing the world at 60 TPS
   with player movement and actions disabled. Pause and death freeze it
   (`game_state_ticks_world()` in `src/game/game_state.c`). Loading continues

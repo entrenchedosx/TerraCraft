@@ -191,23 +191,50 @@ the affected behavior has been reproduced and checked in a running build.
 ## TC-FID-009 — Cow appearance, melee targeting, and first-person swing (playtest open)
 
 - **Subsystem:** Mob skin/model, melee targeting, and first-person rendering.
-- **Observed TerraCraft behavior:** The supplied screenshot shows hide patches
-  stretched across the cow, and the user reports that clicking the cow does
-  not hit it. The player has no visible first-person arm or swing.
+- **Observed TerraCraft behavior:** The supplied cow screenshot showed hide
+  patches stretched across the model, and the user reports that clicking the
+  cow does not hit it. The latest first-person screenshot shows an oversized,
+  flat-colored upright arm covering much of the lower-right view.
 - **Expected behavior:** Cow face textures follow their own skin regions;
   visible body parts can be targeted at ordinary entity reach; left-click
   produces a readable hand swing.
 - **Root cause:** The cow reused unrelated rectangles on several cuboid
   faces, its muzzle exceeded the old square target box, a ray beginning inside
   a target was rejected, and attacks were only attempted on the press edge.
+  The first-person arm reused a tiny atlas swatch on each cuboid face and sat
+  unusually close to the camera, which made it look like a large flat pole.
 - **Fix:** Replaced cow face UVs and model proportions, aligned target bounds
-  with yawed model parts, accepted inside-box rays, retried held attacks after
-  cooldown, and added an original procedural sleeve/hand with held-item sprite
-  and swing animation.
+  with yawed model parts, accepted inside-box rays, and retried held attacks
+  after cooldown. The first-person arm now uses the loaded player's per-face
+  right-arm skin, has a smaller lower-right rest pose and inward cant, renders
+  its own surfaces with depth testing after clearing world depth, and swings
+  toward the camera. Its held item keeps the atlas texture and meets the palm;
+  pose offsets move the arm vertices with the swing pivot. A procedural atlas
+  arm remains available when the skin asset is absent.
 - **Review fix:** Held placeable blocks use the block's per-face atlas mapping
   so grass, wood, and workbench faces retain their correct top, bottom, and
   side textures in the first-person view.
 - **Tests added:** `test_mob_raycast`, `test_mob_models`,
-  `test_player_swing_animation`, and `test_atlas_pixels` cover the new paths.
-- **Human verified?:** Not yet. Run the new checklist item in a live game at
-  multiple cow orientations and camera settings before closing this report.
+  `test_player_swing_animation`, `test_atlas_pixels`, and
+  `test_camera_viewmodel_fov_compensation` cover the new paths.
+- **Human verified?:** Not yet. Check the new lower-right arm and its skin in a
+  live first-person game with empty hands, a block, and a flower; verify the
+  grip and swing at low and high FOV before closing this report.
+
+## TC-FID-010 — Flowers and grass plants stack vertically (source fix; playtest open)
+
+- **Subsystem:** Block ray targeting and placement.
+- **Observed TerraCraft behavior:** The user can place flowers or grass plants
+  directly on top of existing flowers/grass plants.
+- **Expected behavior:** Small plants occupy one supported cell. Clicking an
+  existing plant replaces that cell; flowers and grass plants require grass,
+  dirt, or snow beneath them (matching existing snow-biome vegetation).
+- **Root cause:** Placement always chose `hit.block + hit.normal`, even when
+  the ray hit non-solid decor, and planting had no soil-support validation.
+- **Fix:** Clicked cross-sprite decor now supplies its own replacement cell;
+  flower/grass placement checks the support block below before writing.
+- **Tests added:** `test_interaction_break_place` checks plant replacement,
+  no vertical stacking, rejected stone support, and valid grass/dirt/snow
+  support.
+- **Human verified?:** Not yet. Confirm normal right-click placement and
+  replacement behavior in a running game before closing this report.

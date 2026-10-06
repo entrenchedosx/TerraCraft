@@ -3,6 +3,7 @@
 #include "core/mem.h"
 #include "core/path.h"
 #include "math/mmath.h"
+#include "render/camera.h"
 #include "world/block.h"
 #include "world/chunk.h"
 
@@ -22,6 +23,37 @@ int test_vec3_add(void)
     TEST_ASSERT_FLOAT_EQ(c.x, 5.0f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(c.y, 1.0f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(c.z, 3.5f, 1e-6f);
+    return failures;
+}
+
+/* Camera-local arm X/Y must retain their 70-degree screen projection. */
+int test_camera_viewmodel_fov_compensation(void)
+{
+    int failures = 0;
+    Camera *cam = camera_create();
+    TEST_ASSERT(cam != NULL);
+    if (cam == NULL) {
+        return failures;
+    }
+    const float test_fovs[] = {40.0f, 70.0f, 120.0f};
+    const float authored_half_fov = 70.0f * (MMATH_PI / 360.0f);
+    const float local_x = 0.41f;
+    const float local_y = -0.37f;
+    const float local_z = 0.63f;
+    for (size_t i = 0; i < sizeof(test_fovs) / sizeof(test_fovs[0]); ++i) {
+        camera_set_fov_y(cam, test_fovs[i]);
+        float scale = camera_get_viewmodel_xy_scale(cam, 70.0f);
+        float current_half_fov = test_fovs[i] * (MMATH_PI / 360.0f);
+        float projected_x = (local_x * scale) / (local_z * tanf(current_half_fov));
+        float projected_y = (local_y * scale) / (local_z * tanf(current_half_fov));
+        float expected_x = local_x / (local_z * tanf(authored_half_fov));
+        float expected_y = local_y / (local_z * tanf(authored_half_fov));
+        TEST_ASSERT_FLOAT_EQ(projected_x, expected_x, 1e-5f);
+        TEST_ASSERT_FLOAT_EQ(projected_y, expected_y, 1e-5f);
+    }
+    TEST_ASSERT_FLOAT_EQ(camera_get_viewmodel_xy_scale(cam, 121.0f), 1.0f, 1e-6f);
+    camera_destroy(cam);
+    TEST_ASSERT_FLOAT_EQ(camera_get_viewmodel_xy_scale(NULL, 70.0f), 1.0f, 1e-6f);
     return failures;
 }
 
