@@ -1,3 +1,11 @@
+#if defined(__APPLE__)
+/* macOS 10.14+ deprecates OpenGL; TerraCraft targets GL 3.3 core
+ * deliberately, so silence the deprecation warning at the source. */
+#ifndef GL_SILENCE_DEPRECATION
+#define GL_SILENCE_DEPRECATION 1
+#endif
+#endif
+
 #include "platform/gl_ctx.h"
 #include "core/log.h"
 #include "platform/window.h"

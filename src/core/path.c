@@ -1,5 +1,12 @@
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+/* Strict ISO C (C_EXTENSIONS OFF) hides POSIX declarations such as
+ * readlink on glibc; request them explicitly before any system header. */
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "core/path.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
