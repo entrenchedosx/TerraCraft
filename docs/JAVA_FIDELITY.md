@@ -116,9 +116,11 @@ and rendering all affect what a player observes.
 - The cow uses a 6-cuboid model with face UVs from the 64×64 skin's box nets.
   Mob parts rotate around the creature root, and render positions ease toward
   simulation positions each frame so movement and targeting stay aligned. The
-  first-person view draws an original procedural sleeve and hand, a held-item
-  sprite or block cube, and a short shoulder-driven swing. This is a
-  first-person viewmodel; a third-person player body is not implemented.
+  first-person view draws a Steve-sourced sleeve and hand (converter crops,
+  procedural fallback), a held-item sprite or block cube, and a controller
+  with idle/walk/sprint/air/land/attack/use/hurt/sneak states. F5 switches
+  to a third-person chase camera rendering the articulated Steve body
+  (verified in-game by screenshot).
 - Lighting uses a global day/night value, a per-column occlusion heuristic,
   and ambient occlusion. It has no separate propagated sky-light and
   block-light channels, cross-chunk light queue, or torch emission.

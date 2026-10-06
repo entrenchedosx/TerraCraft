@@ -50,6 +50,7 @@ is in progress.
 | `E` | Open inventory |
 | `Esc` | Pause or close the current screen |
 | `F3` | Toggle debug overlay |
+| `F5` | Toggle first/third-person camera |
 
 Developer-only keys are kept in source comments and are not needed for
 ordinary play.
