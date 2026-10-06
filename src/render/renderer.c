@@ -166,10 +166,12 @@ static Vec3 mob_rot_y(Vec3 p, float a)
  *   pitch: part pitch (radians, procedural animation).
  *   pivot_override: when true, rotate about the mob feet origin instead
  *     of the part pivot (death fall-over).
- *   fuv: per-face UV rects (must not be NULL).
+ *   fuv: per-face UV rects (must not be NULL; non-const param because
+ *     pre-C2X GCC -Wpedantic rejects the const array-pointer conversion;
+ *     never written).
  */
 static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPart *part, float pitch,
-                          bool pivot_override, const float fuv[6][4])
+                          bool pivot_override, float fuv[6][4])
 {
     Vec3 pivot;
     if (pivot_override) {
@@ -226,7 +228,7 @@ static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPar
 /* Forward: mob batch helpers (defined below draw_mobs). */
 static void mob_tile_uvs(const MobModelPart *part, float fuv[6][4]);
 static void mob_skin_uvs(const MobSkin *skin, int part, float fuv[6][4]);
-static size_t mob_emit_batch(Renderer *r, const MobPool *pool, const float planes[6][4],
+static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4],
                              float anim_time, int model_filter, const MobSkin *skin, size_t o,
                              int *drawn, int *culled);
 static void mob_draw_batch(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts,
@@ -307,7 +309,7 @@ static void mob_skin_uvs(const MobSkin *skin, int part, float fuv[6][4])
  * passes take a single model index. Returns vertices emitted (o is the
  * running cursor, also used for the scratch-full bound).
  */
-static size_t mob_emit_batch(Renderer *r, const MobPool *pool, const float planes[6][4],
+static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4],
                              float anim_time, int model_filter, const MobSkin *skin, size_t o,
                              int *drawn, int *culled)
 {

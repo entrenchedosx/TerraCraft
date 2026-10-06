@@ -327,12 +327,12 @@ void camera_get_frustum_planes(const Camera *cam, float aspect, float out_planes
 /* Test an AABB against frustum planes (positive vertex method).
  *
  * Args:
- *   planes: 6 normalized planes.
+ *   planes: 6 normalized planes (non-const param, see camera.h; read-only).
  *   mn, mx: box corners.
  *
  * Returns: true when intersecting/inside.
  */
-bool camera_aabb_visible(const float planes[6][4], Vec3 mn, Vec3 mx)
+bool camera_aabb_visible(float planes[6][4], Vec3 mn, Vec3 mx)
 {
     if (planes == NULL) {
         return true;

@@ -154,10 +154,12 @@ void camera_get_frustum_planes(const Camera *cam, float aspect, float out_planes
  * method). Boxes touching a plane count as visible.
  *
  * Args:
- *   planes: 6 normalized planes from camera_get_frustum_planes.
+ *   planes: 6 normalized planes from camera_get_frustum_planes (non-const
+ *     param because pre-C2X GCC -Wpedantic rejects the const array-pointer
+ *     conversion; never written).
  *   mn: AABB minimum corner.
  *   mx: AABB maximum corner.
  *
  * Returns: true when the box intersects (or is inside) the frustum.
  */
-bool camera_aabb_visible(const float planes[6][4], Vec3 mn, Vec3 mx);
+bool camera_aabb_visible(float planes[6][4], Vec3 mn, Vec3 mx);
