@@ -23,6 +23,8 @@
 #include <SDL2/SDL.h>
 #endif
 
+#include <string.h> /* memcpy for proc-address loads (see MINEC_LOAD_GL). */
+
 /* Portable GL system header for M0 basics + version/vendor strings.
  * NOTE (Windows/MSVC): <GL/gl.h> requires WINGDIAPI/APIENTRY from <windows.h>.
  * It must be included first, otherwise MSVC fails with C2054/C2085. */
@@ -87,13 +89,22 @@ MinecPFN_glUniform1i minec_glUniform1i = NULL;
 MinecPFN_glUniform1f minec_glUniform1f = NULL;
 MinecPFN_glUniform3f minec_glUniform3f = NULL;
 
-/* Helper macro: load one symbol, count failures. */
+/* Function-pointer slots must be memcpy-compatible with void* on every
+ * platform we ship (Windows/Linux/macOS, x86_64/ARM64). */
+_Static_assert(sizeof(void *) == sizeof(minec_glUseProgram),
+               "GL function pointer size must match void* size");
+
+/* Helper macro: load one symbol, count failures. The address travels
+ * through memcpy because ISO C forbids casting void* to a function
+ * pointer type (GCC -Wpedantic flags the direct cast). */
 #define MINEC_LOAD_GL(sym)                                                                                        \
     do {                                                                                                          \
-        minec_##sym = (MinecPFN_##sym)SDL_GL_GetProcAddress(#sym);                                                \
-        if (minec_##sym == NULL) {                                                                                \
+        void *proc_addr_ = SDL_GL_GetProcAddress(#sym);                                                           \
+        if (proc_addr_ == NULL) {                                                                                 \
             LOG_WARN("SDL_GL_GetProcAddress(\"%s\") returned NULL", #sym);                                        \
             missing++;                                                                                            \
+        } else {                                                                                                  \
+            memcpy(&minec_##sym, &proc_addr_, sizeof(proc_addr_));                                                 \
         }                                                                                                         \
     } while (0)
 
