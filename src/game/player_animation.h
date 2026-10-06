@@ -12,6 +12,7 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* Total time from the start of a punch to its resting pose. */
 #define PLAYER_SWING_DURATION 0.42f
