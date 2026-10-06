@@ -60,6 +60,7 @@ int test_meta_roundtrip(void)
     memcpy(m.name, "Test World", 11);
     m.seed = 123456LL;
     m.mode = WORLD_MODE_CREATIVE;
+    m.terrain_version = 2;
     m.px = 1.5f;
     m.py = 70.25f;
     m.pz = -3.75f;
@@ -76,6 +77,7 @@ int test_meta_roundtrip(void)
     TEST_ASSERT(strcmp(back.name, "Test World") == 0);
     TEST_ASSERT(back.seed == 123456LL);
     TEST_ASSERT(back.mode == WORLD_MODE_CREATIVE);
+    TEST_ASSERT(back.terrain_version == 2);
     TEST_ASSERT_FLOAT_EQ(back.px, 1.5f, 1e-3f);
     TEST_ASSERT_FLOAT_EQ(back.py, 70.25f, 1e-3f);
     TEST_ASSERT_FLOAT_EQ(back.pz, -3.75f, 1e-3f);
@@ -112,6 +114,9 @@ int test_meta_corrupt(void)
     TEST_ASSERT(world_meta_parse("# comment\nformat_version=1\nworld_name=Y\nseed=-7\njunkline\n", &m) == 0);
     TEST_ASSERT(strcmp(m.name, "Y") == 0);
     TEST_ASSERT(m.seed == -7LL);
+    TEST_ASSERT(m.terrain_version == 1); /* Missing key pins old terrain. */
+    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=3\n",
+                                 &m) != 0);
     /* Missing directory fails. */
     TEST_ASSERT(world_meta_read("test_tmp_m5_no_such_dir_xyz", &m) != 0);
     TEST_ASSERT(world_meta_read(NULL, &m) != 0);
@@ -177,6 +182,53 @@ int test_chunk_roundtrip(void)
         TEST_ASSERT(back->save_dirty == false); /* On-disk state is current. */
         chunk_destroy(back);
     }
+    save_tmp_cleanup(dir);
+    path_remove_dir(SAVE_TMP);
+    return failures;
+}
+
+/* Version 2 preserves flowing-water IDs, while a version 1 payload still
+ * migrates unsupported post-v1 IDs to the established safe fallback. */
+int test_chunk_water_version_compat(void)
+{
+    int failures = 0;
+    char dir[256], chunks[512], file[512];
+    path_join(dir, sizeof(dir), SAVE_TMP, "water_compat");
+    save_tmp_cleanup(dir);
+    Chunk *src = chunk_create(0, 0);
+    Chunk *dst = chunk_create(0, 0);
+    TEST_ASSERT(src != NULL && dst != NULL);
+    if (src == NULL || dst == NULL) {
+        chunk_destroy(src);
+        chunk_destroy(dst);
+        return failures + 1;
+    }
+    chunk_set_block(src, 1, 10, 1, BLOCK_WATER);
+    chunk_set_block(src, 2, 10, 1, BLOCK_WATER_FLOW_1);
+    TEST_ASSERT(world_save_write_chunk(dir, src) == 0);
+    TEST_ASSERT(path_join(chunks, sizeof(chunks), dir, "chunks") == 0);
+    TEST_ASSERT(path_join(file, sizeof(file), chunks, "c_0_0.bin") == 0);
+    TEST_ASSERT(world_save_read_chunk(dir, dst) == 0);
+    TEST_ASSERT(chunk_get_block(dst, 1, 10, 1) == BLOCK_WATER);
+    TEST_ASSERT(chunk_get_block(dst, 2, 10, 1) == BLOCK_WATER_FLOW_1);
+
+    FILE *f = fopen(file, "r+b");
+    TEST_ASSERT(f != NULL);
+    if (f != NULL) {
+        TEST_ASSERT(fseek(f, 4, SEEK_SET) == 0);
+        TEST_ASSERT(fputc(1, f) != EOF && fputc(0, f) != EOF);
+        long flow_offset = 16L + (long)chunk_index(2, 10, 1) * 2L;
+        TEST_ASSERT(fseek(f, flow_offset, SEEK_SET) == 0);
+        TEST_ASSERT(fputc((int)(BLOCK_WATER_FLOW_1 & 0xffu), f) != EOF);
+        TEST_ASSERT(fputc((int)(BLOCK_WATER_FLOW_1 >> 8), f) != EOF);
+        TEST_ASSERT(fclose(f) == 0);
+    }
+    chunk_fill(dst, BLOCK_AIR);
+    TEST_ASSERT(world_save_read_chunk(dir, dst) == 0);
+    TEST_ASSERT(chunk_get_block(dst, 1, 10, 1) == BLOCK_WATER);
+    TEST_ASSERT(chunk_get_block(dst, 2, 10, 1) == BLOCK_STONE);
+    chunk_destroy(dst);
+    chunk_destroy(src);
     save_tmp_cleanup(dir);
     path_remove_dir(SAVE_TMP);
     return failures;

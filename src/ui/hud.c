@@ -3,6 +3,7 @@
 #include "game/item.h"
 #include "render/texture_atlas.h"
 
+#include <math.h>
 #include <stddef.h>
 
 /* Icon size is local (visual detail); slot geometry comes from hud.h so
@@ -112,49 +113,141 @@ void hud_build(HudFrame *f, int width, int height, const ItemStack *hotbar, int 
     }
 }
 
-/* Append survival vitals: health bar (red/green) + hunger bar (orange)
- * above the hotbar strip. Fill fractions clamp to [0,1]; non-positive
- * maxima render empty bars.
- *
- * Args:
- *   f: frame to append to.
- *   width, height: viewport.
- *   health, max_health, hunger, max_hunger: vital values.
- */
-void hud_build_vitals(HudFrame *f, int width, int height, float health, float max_health, float hunger,
-                      float max_hunger)
+static const char *const HEART_OUTER[9] = {
+    ".##..##..", "####.####", "#########", "#########", ".#######.",
+    "..#####..", "...###...", "....#....", ".........",
+};
+static const char *const HEART_INNER[9] = {
+    ".........", "..#...#..", ".###.###.", ".#######.", "..#####..",
+    "...###...", "....#....", ".........", ".........",
+};
+static const char *const FOOD_OUTER[9] = {
+    "...####..", "..######.", ".########", "########.", "########.",
+    ".######..", "..####...", "...###...", "....###..",
+};
+static const char *const FOOD_INNER[9] = {
+    ".........", "...###...", "..#####..", ".######..", ".######..",
+    "..####...", "...##....", ".........", ".........",
+};
+
+/* Pixel-art colors: outline, empty interior, filled interior, highlight,
+ * and the pale bone at the end of the food icon. */
+static void hud_vital_color(int code, bool food, float *r, float *g, float *b)
+{
+    static const float HEART_COLORS[4][3] = {
+        {0.10f, 0.035f, 0.035f}, {0.36f, 0.13f, 0.14f}, {0.82f, 0.12f, 0.16f}, {1.00f, 0.48f, 0.48f},
+    };
+    static const float FOOD_COLORS[5][3] = {
+        {0.12f, 0.075f, 0.035f}, {0.34f, 0.25f, 0.13f}, {0.88f, 0.55f, 0.12f},
+        {1.00f, 0.78f, 0.32f}, {0.88f, 0.85f, 0.71f},
+    };
+    int idx = code - 1;
+    if (food) {
+        if (idx < 0 || idx >= 5) {
+            idx = 0;
+        }
+        *r = FOOD_COLORS[idx][0];
+        *g = FOOD_COLORS[idx][1];
+        *b = FOOD_COLORS[idx][2];
+    } else {
+        if (idx < 0 || idx >= 4) {
+            idx = 0;
+        }
+        *r = HEART_COLORS[idx][0];
+        *g = HEART_COLORS[idx][1];
+        *b = HEART_COLORS[idx][2];
+    }
+}
+
+/* Draw one nine-pixel HUD icon as horizontal pixel runs. This keeps the
+ * classic pixel edges crisp at every viewport size without a GUI texture
+ * asset or per-pixel 3D work. */
+static void hud_vital_icon(HudFrame *f, float x, float y, float scale,
+                           const char *const outer[9], const char *const inner[9],
+                           bool food, int fill)
+{
+    for (int row = 0; row < 9; ++row) {
+        int run_code = 0;
+        int run_start = 0;
+        for (int col = 0; col <= 9; ++col) {
+            int code = 0;
+            if (col < 9 && outer[row][col] == '#') {
+                code = 1; /* Dark silhouette and edge. */
+                if (inner[row][col] == '#') {
+                    bool is_fill = fill == 2 || (fill == 1 && col < 4);
+                    code = is_fill ? 3 : 2;
+                    if (is_fill && row <= 2 && col <= 2) {
+                        code = 4; /* Small glossy highlight. */
+                    }
+                }
+                if (food && fill > 0 && row >= 7 && col >= 5) {
+                    code = 5; /* Bone tip. */
+                }
+            }
+            if (code != run_code) {
+                if (run_code != 0) {
+                    float cr, cg, cb;
+                    hud_vital_color(run_code, food, &cr, &cg, &cb);
+                    hud_quad(f, x + (float)run_start * scale, y + (float)row * scale,
+                             x + (float)col * scale, y + (float)(row + 1) * scale,
+                             cr, cg, cb, 1.0f);
+                }
+                run_code = code;
+                run_start = col;
+            }
+        }
+    }
+}
+
+static int hud_vital_fill(float value, float maximum, int index)
+{
+    if (!(maximum > 0.0f) || !isfinite(maximum) || !isfinite(value)) {
+        return 0;
+    }
+    float fraction = value / maximum;
+    if (!(fraction > 0.0f)) {
+        return 0;
+    }
+    if (fraction > 1.0f) {
+        fraction = 1.0f;
+    }
+    float points = fraction * 10.0f - (float)index;
+    if (points >= 1.0f) {
+        return 2;
+    }
+    return points >= 0.5f ? 1 : 0;
+}
+
+/* Append ten health hearts and ten hunger icons above the hotbar. A half
+ * icon represents one health/food point; values stay continuous in the
+ * simulation and are only quantized for display. */
+void hud_build_vitals(HudFrame *f, int width, int height, float health, float max_health,
+                      float hunger, float max_hunger)
 {
     if (f == NULL || width <= 0 || height <= 0) {
         return;
     }
-    float total = (float)(HUD_HOTBAR_SLOTS * HUD_SLOT + (HUD_HOTBAR_SLOTS - 1) * HUD_GAP);
-    float x0 = ((float)width - total) * 0.5f;
-    float y0 = (float)height - (float)HUD_BOTTOM_MARGIN - (float)HUD_SLOT;
-    const float bw = 120.0f;
-    const float bh = 8.0f;
-    float hf = (max_health > 0.0f) ? health / max_health : 0.0f;
-    float gf = (max_hunger > 0.0f) ? hunger / max_hunger : 0.0f;
-    if (!(hf >= 0.0f)) {
-        hf = 0.0f;
+    float scale = fminf(2.0f, ((float)width - 16.0f) / 202.0f);
+    if (!(scale > 0.0f) || !isfinite(scale)) {
+        return;
     }
-    if (hf > 1.0f) {
-        hf = 1.0f;
+    float icon_width = 9.0f * scale;
+    float stride = 10.0f * scale;
+    float span = 9.0f * stride + icon_width;
+    float center = (float)width * 0.5f;
+    float gap = 4.0f * scale;
+    float hx = center - gap * 0.5f - span;
+    float fx = center + gap * 0.5f;
+    float y = (float)height - (float)HUD_BOTTOM_MARGIN - (float)HUD_SLOT - 9.0f * scale - 5.0f * scale;
+    if (y < 1.0f) {
+        y = 1.0f;
     }
-    if (!(gf >= 0.0f)) {
-        gf = 0.0f;
+    for (int i = 0; i < 10; ++i) {
+        hud_vital_icon(f, hx + (float)i * stride, y, scale, HEART_OUTER, HEART_INNER,
+                       false, hud_vital_fill(health, max_health, i));
+        hud_vital_icon(f, fx + (float)i * stride, y, scale, FOOD_OUTER, FOOD_INNER,
+                       true, hud_vital_fill(hunger, max_hunger, i));
     }
-    if (gf > 1.0f) {
-        gf = 1.0f;
-    }
-    /* Health bar (left half). */
-    hud_quad(f, x0, y0 - bh - 4.0f, x0 + bw, y0 - 4.0f, 0.08f, 0.08f, 0.08f, 0.55f);
-    hud_quad(f, x0 + 1.0f, y0 - bh - 3.0f, x0 + 1.0f + (bw - 2.0f) * hf, y0 - 5.0f, 0.75f, 0.15f, 0.15f,
-             1.0f);
-    /* Hunger bar (right half). */
-    float hx = x0 + total - bw;
-    hud_quad(f, hx, y0 - bh - 4.0f, hx + bw, y0 - 4.0f, 0.08f, 0.08f, 0.08f, 0.55f);
-    hud_quad(f, hx + 1.0f, y0 - bh - 3.0f, hx + 1.0f + (bw - 2.0f) * gf, y0 - 5.0f, 0.90f, 0.55f,
-             0.15f, 1.0f);
 }
 
 /* Top-left corner of a hotbar slot cell (matches hud_build layout).

@@ -26,8 +26,11 @@ int main(void)
     RUN_TEST(test_block_ids);
     RUN_TEST(test_world_gen);
     RUN_TEST(test_world_gen_determinism);
+    RUN_TEST(test_water_simulation);
+    RUN_TEST(test_water_queue_bound);
     RUN_TEST(test_mesher_empty);
     RUN_TEST(test_mesher_single_block);
+    RUN_TEST(test_mesher_water_height);
     RUN_TEST(test_mesher_two_adjacent);
     RUN_TEST(test_mesher_hidden_faces);
     RUN_TEST(test_mesher_cross_sprite);
@@ -45,6 +48,7 @@ int main(void)
     RUN_TEST(test_physics_high_drop);
     RUN_TEST(test_physics_wall_slide);
     RUN_TEST(test_physics_jump);
+    RUN_TEST(test_physics_water_motion);
     RUN_TEST(test_physics_spawn);
     RUN_TEST(test_interaction_break_place);
     RUN_TEST(test_raycast_down);
@@ -74,12 +78,14 @@ int main(void)
     RUN_TEST(test_meta_roundtrip);
     RUN_TEST(test_meta_corrupt);
     RUN_TEST(test_chunk_roundtrip);
+    RUN_TEST(test_chunk_water_version_compat);
     RUN_TEST(test_chunk_corrupt);
     RUN_TEST(test_sanitize);
     RUN_TEST(test_world_delete);
     RUN_TEST(test_session_persist);
     RUN_TEST(test_biome_determinism);
     RUN_TEST(test_biome_coverage);
+    RUN_TEST(test_world_gen_terrain_v2);
     RUN_TEST(test_tree_determinism);
     RUN_TEST(test_vegetation);
     RUN_TEST(test_caves);
@@ -95,6 +101,7 @@ int main(void)
     RUN_TEST(test_ui_text_field);
     RUN_TEST(test_ui_slider);
     RUN_TEST(test_ui_icons);
+    RUN_TEST(test_hud_vitals_icons);
     RUN_TEST(test_survival_mine_time);
     RUN_TEST(test_survival_drops);
     RUN_TEST(test_survival_mining);

@@ -36,6 +36,14 @@ typedef enum BlockType {
     BLOCK_TORCH = 17,
     BLOCK_WORKBENCH = 18, /* M7 crafting station (axe-preferred, drops itself). */
     BLOCK_PLANKS = 19,    /* M7 processed wood (axe-preferred, drops itself). */
+    BLOCK_WATER_FLOW_1 = 20, /* Flowing-water depth states, persisted as block IDs. */
+    BLOCK_WATER_FLOW_2 = 21,
+    BLOCK_WATER_FLOW_3 = 22,
+    BLOCK_WATER_FLOW_4 = 23,
+    BLOCK_WATER_FLOW_5 = 24,
+    BLOCK_WATER_FLOW_6 = 25,
+    BLOCK_WATER_FLOW_7 = 26,
+    BLOCK_WATER_FALLING = 27,
     BLOCK_COUNT /* Sentinel: number of block types. */
 } BlockType;
 
@@ -94,6 +102,14 @@ bool block_is_transparent(uint16_t type);
  * Returns: true for blended-pass blocks.
  */
 bool block_is_blended(uint16_t type);
+
+/* Fluid-state helpers. BLOCK_WATER is a source; horizontal flow is level
+ * 1..7 and falling water keeps full height while fed from above. */
+bool block_is_water(uint16_t type);
+int block_water_level(uint16_t type);
+bool block_water_is_falling(uint16_t type);
+uint16_t block_water_flowing(int level, bool falling);
+float block_water_height(uint16_t type);
 
 /* Check whether a block renders as crossed sprite quads (plants, flowers,
  * torches) instead of a full cube. Sprites are always cutout-opaque and

@@ -68,6 +68,10 @@ int test_chunk_index(void);
 int test_block_ids(void);
 int test_world_gen(void);
 int test_world_gen_determinism(void);
+int test_water_simulation(void);
+int test_water_queue_bound(void);
+int test_chunk_water_version_compat(void);
+int test_mesher_water_height(void);
 
 /* Mesher tests (defined in test_mesher.c). */
 int test_mesher_empty(void);
@@ -92,6 +96,7 @@ int test_physics_fall_land(void);
 int test_physics_high_drop(void);
 int test_physics_wall_slide(void);
 int test_physics_jump(void);
+int test_physics_water_motion(void);
 int test_physics_spawn(void);
 int test_interaction_break_place(void);
 
@@ -141,6 +146,7 @@ int test_session_persist(void);
 /* Biome/terrain tests (defined in test_biome.c). */
 int test_biome_determinism(void);
 int test_biome_coverage(void);
+int test_world_gen_terrain_v2(void);
 int test_tree_determinism(void);
 int test_vegetation(void);
 int test_caves(void);
@@ -160,6 +166,7 @@ int test_ui_button(void);
 int test_ui_text_field(void);
 int test_ui_slider(void);
 int test_ui_icons(void);
+int test_hud_vitals_icons(void);
 
 /* Survival/entity/persistence tests (defined in test_gameplay.c). */
 int test_survival_mine_time(void);

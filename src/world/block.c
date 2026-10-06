@@ -1,5 +1,9 @@
 #include "world/block.h"
 
+#define WATER_VARIANT_INFO(label) \
+    {.name = label, .solid = false, .transparent = true, .color_r = 0.25f, .color_g = 0.45f, .color_b = 0.9f, \
+     .hardness = 0.0f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = true}
+
 /* Static lookup table, indexed by BlockType. Must stay in sync with the enum.
  * M1 visualization colors (spec):
  *   Grass (0.2,0.8,0.2), Dirt (0.5,0.3,0.1), Stone (0.5,0.5,0.5),
@@ -31,7 +35,17 @@ static const BlockInfo BLOCK_TABLE[BLOCK_COUNT] = {
     [BLOCK_TORCH] = {.name = "torch", .solid = false, .transparent = true, .color_r = 0.95f, .color_g = 0.75f, .color_b = 0.3f, .hardness = 0.0f, .tool = 0, .min_tier = 0, .drop = 17, .drop_count = 1, .unbreakable = false},
     [BLOCK_WORKBENCH] = {.name = "workbench", .solid = true, .transparent = false, .color_r = 0.55f, .color_g = 0.40f, .color_b = 0.22f, .hardness = 2.5f, .tool = 2, .min_tier = 1, .drop = 18, .drop_count = 1, .unbreakable = false},
     [BLOCK_PLANKS] = {.name = "planks", .solid = true, .transparent = false, .color_r = 0.62f, .color_g = 0.47f, .color_b = 0.26f, .hardness = 2.0f, .tool = 2, .min_tier = 1, .drop = 19, .drop_count = 1, .unbreakable = false},
+    [BLOCK_WATER_FLOW_1] = WATER_VARIANT_INFO("water_flow_1"),
+    [BLOCK_WATER_FLOW_2] = WATER_VARIANT_INFO("water_flow_2"),
+    [BLOCK_WATER_FLOW_3] = WATER_VARIANT_INFO("water_flow_3"),
+    [BLOCK_WATER_FLOW_4] = WATER_VARIANT_INFO("water_flow_4"),
+    [BLOCK_WATER_FLOW_5] = WATER_VARIANT_INFO("water_flow_5"),
+    [BLOCK_WATER_FLOW_6] = WATER_VARIANT_INFO("water_flow_6"),
+    [BLOCK_WATER_FLOW_7] = WATER_VARIANT_INFO("water_flow_7"),
+    [BLOCK_WATER_FALLING] = WATER_VARIANT_INFO("water_falling"),
 };
+
+#undef WATER_VARIANT_INFO
 
 /* Fallback entry for invalid IDs (aliases AIR). */
 static const BlockInfo BLOCK_INVALID = {.name = "air", .solid = false, .transparent = true, .color_r = 0.0f, .color_g = 0.0f, .color_b = 0.0f};
@@ -84,7 +98,50 @@ bool block_is_transparent(uint16_t type)
  */
 bool block_is_blended(uint16_t type)
 {
-    return type == BLOCK_WATER || type == BLOCK_GLASS;
+    return block_is_water(type) || type == BLOCK_GLASS;
+}
+
+bool block_is_water(uint16_t type)
+{
+    return type == BLOCK_WATER ||
+           (type >= BLOCK_WATER_FLOW_1 && type <= BLOCK_WATER_FLOW_7) ||
+           type == BLOCK_WATER_FALLING;
+}
+
+int block_water_level(uint16_t type)
+{
+    if (type >= BLOCK_WATER_FLOW_1 && type <= BLOCK_WATER_FLOW_7) {
+        return (int)(type - BLOCK_WATER_FLOW_1) + 1;
+    }
+    return block_is_water(type) ? 0 : -1;
+}
+
+bool block_water_is_falling(uint16_t type)
+{
+    return type == BLOCK_WATER_FALLING;
+}
+
+uint16_t block_water_flowing(int level, bool falling)
+{
+    if (falling) {
+        return BLOCK_WATER_FALLING;
+    }
+    if (level < 1) {
+        return BLOCK_WATER;
+    }
+    if (level > 7) {
+        level = 7;
+    }
+    return (uint16_t)(BLOCK_WATER_FLOW_1 + level - 1);
+}
+
+float block_water_height(uint16_t type)
+{
+    int level = block_water_level(type);
+    if (level <= 0 || block_water_is_falling(type)) {
+        return 1.0f;
+    }
+    return (float)(8 - level) / 8.0f;
 }
 
 /* Cross-sprite blocks (non-solid decor rendered as X quads). */
@@ -108,6 +165,9 @@ bool block_is_face_visible(uint16_t current, uint16_t neighbor)
     }
     if (neighbor == BLOCK_AIR) {
         return true;
+    }
+    if (block_is_water(current) && block_is_water(neighbor)) {
+        return false;
     }
     /* Opaque current vs transparent neighbor: visible (e.g. stone next to
      * water/leaves). Transparent current vs opaque neighbor: handled from the

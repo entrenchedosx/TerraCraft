@@ -52,6 +52,9 @@ and rendering all affect what a player observes.
 - Standing body dimensions are 0.6×1.8 blocks and eye height is 1.62
   (`player_init()` in `src/game/player.c`). Sneaking changes the speed and
   flag only. There are no crouch/swim/crawl dimensions or headroom checks.
+  Water detection samples the standing collision body; movement slows in
+  water and jump/sneak add upward/downward buoyancy, but it does not switch
+  to Minecraft's swimming pose or compact collision shape.
 - Walk and sprint speed values match the reference targets. The controller
   assigns horizontal velocity directly from input and applies drag only
   when input is released (`player_step()` in `src/game/player.c`); this
@@ -111,6 +114,10 @@ and rendering all affect what a player observes.
 - Hunger and exhaustion exist, but there is no saturation value or saturation
   refill path. Exhaustion directly removes hunger. Sprint input is not yet
   blocked at low hunger, and regeneration is a simplified fixed timer.
+- Survival HUD vitals draw ten pixel-art hearts and ten food icons. Each icon
+  represents two health/food points and renders full, half, or empty; the
+  underlying values remain continuous. These shapes come from small pixel
+  masks rather than Minecraft's native GUI atlas.
 - Dropped items age for 300 seconds and wait 0.5 seconds before pickup
   (`src/game/entity.h`). Their lifetime now spans 6,000 world ticks. Item
   motion uses small substeps and gravity; item stack merging is not
@@ -122,7 +129,7 @@ and rendering all affect what a player observes.
 ### Rendering, lighting, and fluids
 
 - The atlas combines procedural pixels with optional owner-local or user
-  pack tiles. All 32 registered item types map to a named atlas tile. A
+  pack tiles. All 33 registered item types map to a named atlas tile. A
   confirmed custom-pack path alias prevented pack discovery and item texture
   overrides; the path builder and live settings reload are fixed, with
   coverage in `test_atlas_resource_pack_paths`. The user-reported visual
@@ -139,8 +146,21 @@ and rendering all affect what a player observes.
 - Lighting uses a global day/night value, a per-column occlusion heuristic,
   and ambient occlusion. It has no separate propagated sky-light and
   block-light channels, cross-chunk light queue, or torch emission.
-- Water is a static non-solid block. Fluid flow, swimming/crawling, and
-  oxygen are not implemented.
+- New worlds use terrain profile 2: warped continental noise, broad rolling
+  terrain, ridge-shaped highlands, and carved meandering river valleys. The
+  surface is still a 2D column field rather than Minecraft's full 3D density
+  system. Worlds with no `terrain_version` key stay on profile 1, so newly
+  generated chunks do not create seams in old saves.
+- Water has a source, seven horizontal flow-depth states, and a falling state.
+  It attempts downward flow first, then spreads horizontally up to seven
+  cells, can refill between two sources over a solid floor, and retracts
+  orphaned flow. Only loaded chunks are simulated; the deduplicated work
+  queue is bounded and uses an incremental recovery scan at capacity. Flow
+  meshes use partial heights, and newly loaded chunk borders wake adjacent
+  water. Chunk format v2 preserves the new IDs while v1 chunks retain their
+  legacy interpretation. This remains simplified: waterlogged blocks,
+  underwater breathing/drowning, a swim pose, and current-driven movement are
+  absent.
 
 ## Confirmed fixes in this audit
 
@@ -168,7 +188,8 @@ and rendering all affect what a player observes.
 2. Direct-velocity movement, no player pose geometry, and no edge-safe
    sneaking or step-up behavior.
 3. Hunger has no saturation, and sprint hunger gating is absent.
-4. Lighting has no propagated sky/block channels; water does not flow.
+4. Lighting has no propagated sky/block channels. Fluid timing and player
+   buoyancy are simplified, and underwater breathing/drowning are absent.
 5. A hands-on fidelity playtest and visual comparison against a live 26.3
    reference remain outstanding.
 

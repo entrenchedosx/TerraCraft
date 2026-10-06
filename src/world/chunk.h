@@ -27,6 +27,7 @@ typedef struct Chunk {
     int cx; /* Chunk X coordinate (in chunks). */
     int cz; /* Chunk Z coordinate (in chunks). */
     uint16_t blocks[CHUNK_VOLUME]; /* Block IDs, see BlockType. */
+    uint8_t water_queued[(CHUNK_VOLUME + 7) / 8]; /* Bounded-fluid queue dedupe bits. */
     bool dirty; /* True when blocks changed since last mesh. */
     bool save_dirty; /* True when edited since last disk save. */
     float aabb_min[3]; /* Cached world-space AABB minimum. */

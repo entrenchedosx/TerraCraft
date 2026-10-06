@@ -27,6 +27,10 @@ typedef struct World World;
  */
 int world_gen_height(long seed, int wx, int wz);
 
+/* Versioned surface field used by saved sessions. Version 1 preserves the
+ * original terrain; version 2 adds broad warped landforms and river valleys. */
+int world_gen_height_version(long seed, int wx, int wz, int terrain_version);
+
 /* Surface block for a column of height h at (wx,wz): biome-driven
  * (ocean floor, sand, snow, rock, grass).
  *
@@ -38,6 +42,7 @@ int world_gen_height(long seed, int wx, int wz);
  * Returns: surface block ID.
  */
 uint16_t world_gen_surface(long seed, int wx, int wz, int h);
+uint16_t world_gen_surface_version(long seed, int wx, int wz, int h, int terrain_version);
 
 /* Tree decision for a trunk column (pure function of world coords:
  * height, biome, density lottery, trunk height 4..6). Order-independent.
@@ -50,6 +55,7 @@ uint16_t world_gen_surface(long seed, int wx, int wz, int h);
  * Returns: true when a tree grows here.
  */
 bool world_gen_tree(long seed, int tx, int tz, int *out_trunk);
+bool world_gen_tree_version(long seed, int tx, int tz, int terrain_version, int *out_trunk);
 
 /* Vegetation for a surface column (pure function): grass plant, flower,
  * or AIR. Only above sea level in vegetated biomes.
@@ -62,6 +68,7 @@ bool world_gen_tree(long seed, int tx, int tz, int *out_trunk);
  * Returns: block ID to place at h+1 (or AIR for none).
  */
 uint16_t world_gen_vegetation(long seed, int wx, int wz, int h);
+uint16_t world_gen_vegetation_version(long seed, int wx, int wz, int h, int terrain_version);
 
 /* Fill one chunk's columns: bedrock at y=0, stone core with ore sprinkle,
  * dirt subsurface (3 deep), surface block at h, water fill (h,SEA] when

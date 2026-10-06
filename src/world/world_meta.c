@@ -18,6 +18,7 @@ void world_meta_defaults(WorldMeta *m)
     memcpy(m->name, "World", 6);
     m->seed = 0;
     m->mode = WORLD_MODE_SURVIVAL;
+    m->terrain_version = WORLD_TERRAIN_VERSION_CURRENT;
     m->px = 8.5f;
     m->py = 80.0f;
     m->pz = 8.5f;
@@ -64,6 +65,10 @@ int world_meta_parse(const char *text, WorldMeta *out)
     }
     WorldMeta m;
     world_meta_defaults(&m);
+    /* Pre-versioned saves must keep producing the original shape when an
+     * unvisited chunk is generated later; terrain_version is optional in
+     * metadata v1, so absence selects the legacy generator. */
+    m.terrain_version = 1;
     bool have_version = false;
     bool have_name = false;
     bool have_seed = false;
@@ -125,6 +130,14 @@ int world_meta_parse(const char *text, WorldMeta *out)
                 m.mode = WORLD_MODE_CREATIVE;
             } else {
                 m.mode = WORLD_MODE_SURVIVAL;
+            }
+        } else if (strcmp(key, "terrain_version") == 0) {
+            char *end = NULL;
+            long v = strtol(val, &end, 10);
+            if (end != val && *end == '\0' && v >= 1 && v <= WORLD_TERRAIN_VERSION_CURRENT) {
+                m.terrain_version = (int)v;
+            } else {
+                return -4; /* Never silently blend an unknown generator. */
             }
         } else if (strcmp(key, "player_x") == 0) {
             float v = strtof(val, NULL);
@@ -317,6 +330,7 @@ int world_meta_write(const char *dir, const WorldMeta *m)
     fprintf(f, "world_name=%s\n", stamped.name);
     fprintf(f, "seed=%lld\n", (long long)stamped.seed);
     fprintf(f, "game_mode=%s\n", stamped.mode == WORLD_MODE_CREATIVE ? "creative" : "survival");
+    fprintf(f, "terrain_version=%d\n", stamped.terrain_version);
     /* Player/spawn triples are optional: omitted when invalid so a fresh
      * world never fabricates a position or spawn on reload (has_player /
      * has_spawn derive from key presence). */

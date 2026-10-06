@@ -197,6 +197,14 @@ static int mesh_emit_face(MeshData *m, const FaceDef *f, int face_idx, const Chu
     int t2 = (naxis == 2) ? 1 : 2;
 
     unsigned int base = (unsigned int)m->vertex_count;
+    float fluid_height = block_is_water(block) ? block_water_height(block) : 1.0f;
+    float fluid_bottom = 0.0f;
+    if (block_is_water(block) && f->ny_o == 0) {
+        uint16_t side = mesher_neighbor(c, w, ex, ey, ez);
+        if (block_is_water(side)) {
+            fluid_bottom = block_water_height(side);
+        }
+    }
     for (int i = 0; i < 4; ++i) {
         /* Corner offset sign per tangent axis: 0-offset -> -1, 1-offset -> +1. */
         int c1 = (int)f->corners[i][t1];
@@ -215,7 +223,11 @@ static int mesh_emit_face(MeshData *m, const FaceDef *f, int face_idx, const Chu
 
         float *v = m->vertices + (m->vertex_count * MESHER_FLOATS_PER_VERTEX);
         v[0] = wx + f->corners[i][0];
-        v[1] = wy + f->corners[i][1];
+        float local_y = f->corners[i][1] * fluid_height;
+        if (f->ny_o == 0 && f->corners[i][1] == 0.0f && fluid_bottom > 0.0f) {
+            local_y = fluid_bottom;
+        }
+        v[1] = wy + local_y;
         v[2] = wz + f->corners[i][2];
         v[3] = f->nx;
         v[4] = f->ny;
@@ -407,7 +419,14 @@ static MeshData *mesher_build_filtered(const Chunk *c, const World *w, bool tran
                 for (int f = 0; f < 6; ++f) {
                     const FaceDef *fd = &FACES[f];
                     uint16_t nb = mesher_neighbor(c, w, x + fd->nx_o, y + fd->ny_o, z + fd->nz_o);
-                    if (!block_is_face_visible(id, nb)) {
+                    bool visible = block_is_face_visible(id, nb);
+                    if (!visible && block_is_water(id) && block_is_water(nb) && fd->ny_o == 0 &&
+                        block_water_height(id) > block_water_height(nb)) {
+                        /* Expose only the step above a lower neighboring
+                         * fluid surface; equal-height water stays culled. */
+                        visible = true;
+                    }
+                    if (!visible) {
                         continue;
                     }
                     if (mesh_emit_face(m, fd, f, c, w, x, y, z, wx, wy, wz, id) != 0) {

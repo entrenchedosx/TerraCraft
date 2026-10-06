@@ -1164,7 +1164,7 @@ static int mob_surface_y(const World *w, int x, int z)
 {
     for (int y = CHUNK_Y - 3; y >= 1; --y) {
         uint16_t ground = world_get_block(w, x, y, z);
-        if (ground == BLOCK_AIR || ground == BLOCK_WATER || !block_is_solid(ground)) {
+        if (ground == BLOCK_AIR || !block_is_solid(ground)) {
             continue;
         }
         uint16_t feet = world_get_block(w, x, y + 1, z);

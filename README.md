@@ -15,17 +15,24 @@ playable; optional local assets and user resource packs are described in
 
 The current milestone is M9 (v0.9.0). This is a playable prototype, and its
 core rules are still being refined for familiar voxel-game movement and
-interaction. See [Java Fidelity](docs/JAVA_FIDELITY.md) for measured
-behavior and known differences. New content work is paused while that pass
-is in progress.
+interaction. The active fidelity pass now includes pixel-art survival
+vitals, versioned terrain profiles, and bounded water flow. See
+[Java Fidelity](docs/JAVA_FIDELITY.md) for behavior targets and known
+differences; the project's documented parity and visual checklist remains
+open.
 
 ## Features
 
 - Seeded terrain with seven biomes, caves, ores, trees, and vegetation.
+- Versioned terrain profiles for legacy-save continuity and new warped hills,
+  ridged highlands, and river-like valleys.
+- Bounded source/flow/falling water with partial-height rendering and basic
+  player buoyancy.
 - Chunk streaming, block editing, lighting, ambient occlusion, fog, and a
   day/night cycle.
 - Creative flight and Survival health, hunger, mining, tool wear, food,
   crafting, item drops, and death recovery.
+- Pixel-art full/half/empty heart and hunger icons in Survival.
 - Cows, zombies, and skeletons with real skins, pathfinding, melee, bows,
   and arrows.
 - Persistent named worlds with versioned block, player, inventory, and
@@ -33,7 +40,7 @@ is in progress.
 - A resource-pack system with procedural fallback art and sound.
 - A 60 ticks/second world simulation; inventory and crafting keep the world
   moving, while pause and death stop it.
-- 154 registered headless test functions in the custom test runner.
+- 167 registered headless test functions in the custom test runner.
 
 ## Controls
 
@@ -137,7 +144,9 @@ in [docs/FIDELITY_BUGS.md](docs/FIDELITY_BUGS.md).
 ## Documentation
 
 - [Java behavior targets and current differences](docs/JAVA_FIDELITY.md)
+- [Terrain profiles, water states, and save compatibility](docs/TERRAIN_AND_WATER.md)
 - [Fidelity bug log and playtest checklist](docs/FIDELITY_BUGS.md)
+- [Gauntlet review procedure and round notes](docs/GAUNTLET.md)
 - [Gauntlet Loop research and review protocol](docs/GAUNTLET.md)
 - [Build and test decisions](docs/DECISIONS.md)
 - [Milestone history and backlog](docs/BACKLOG.md)

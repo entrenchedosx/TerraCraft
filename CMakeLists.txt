@@ -80,6 +80,7 @@ set(TERRACRAFT_SOURCES
   src/world/block.c
   src/world/chunk.c
   src/world/world.c
+  src/world/water.c
   src/world/world_gen.c
   src/world/streamer.c
   src/world/biome.c

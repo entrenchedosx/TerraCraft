@@ -10,6 +10,7 @@
 
 #include "core/hashmap.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -19,12 +20,14 @@
 /* Maximum simultaneously loaded chunks. 1024 covers render distance 15
  * ((2*15+1)^2 = 961); the M2 default distance is far smaller. */
 #define WORLD_MAX_CHUNKS 1024
+#define WORLD_WATER_QUEUE_CAP 32768
 
 /* Sea level for water fill (M2 terrain fills water up to this height). */
 #define WORLD_SEA_LEVEL 64
 
 /* Forward declaration (full type in chunk.h). */
 typedef struct Chunk Chunk;
+typedef struct WorldWaterUpdate WorldWaterUpdate;
 
 /* World: owns up to WORLD_MAX_CHUNKS heap chunks. The dense array is the
  * iteration order; chunk_map mirrors it for O(1) lookup by chunk key.
@@ -35,6 +38,15 @@ typedef struct World {
     Chunk *chunks[WORLD_MAX_CHUNKS]; /* Owned chunk pointers (NULL = empty slot). */
     size_t count;                    /* Number of live chunks. */
     long seed;                       /* Generation seed. */
+    int terrain_version;             /* 1 = legacy, 2 = warped landforms/rivers. */
+    WorldWaterUpdate *water_updates;  /* Bounded coordinate queue; no chunk pointers. */
+    size_t water_head;
+    size_t water_count;
+    float water_accumulator;
+    size_t water_scan_chunk;
+    size_t water_scan_cell;
+    bool water_rescan_needed;
+    bool water_rescan_repeat;
     HashMap chunk_map;               /* Maps hashmap_chunk_key(cx,cz) -> Chunk*. */
     char name[WORLD_NAME_LEN];        /* Session display name. */
     int mode;                        /* Session game mode (WorldMode value). */
@@ -117,6 +129,11 @@ void world_set_save_dir(World *w, const char *dir);
  * Returns: block ID.
  */
 uint16_t world_get_block(const World *w, int wx, int wy, int wz);
+
+/* Change a block by world coordinates. The owning mesh and any adjacent
+ * chunk meshes are dirtied; nearby fluid cells are scheduled for reevaluation.
+ * Returns true only when a loaded cell changed. */
+bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id);
 
 /* Legacy M1 terrain height for a world (x,z) column (deterministic,
  * seed-aware). FROZEN for test determinism; new code prefers world_gen.

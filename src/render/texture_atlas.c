@@ -89,6 +89,9 @@ static void tile_speckle(unsigned char *px, int tile, uint32_t salt, float dark_
  */
 int block_tile_for_face(uint16_t block, int face)
 {
+    if (block_is_water(block)) {
+        return TILE_WATER;
+    }
     switch (block) {
     case BLOCK_GRASS:
         if (face == ATLAS_FACE_POS_Y) {

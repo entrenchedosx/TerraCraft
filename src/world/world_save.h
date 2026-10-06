@@ -5,7 +5,7 @@
  * untouched terrain regenerates deterministically from the seed.
  *
  * Chunk file layout (all integers little-endian, no struct padding):
- *   magic[4] = "MNC1", u16 version = 1, i32 cx, i32 cz,
+ *   magic[4] = "MNC1", u16 version (1 legacy, 2 fluid-state IDs), i32 cx, i32 cz,
  *   65536 x u16 block IDs (y-major chunk_index order).
  * Files live at <world>/chunks/c_<cx>_<cz>.bin.
  */
@@ -16,8 +16,9 @@
 
 #include "math/mmath.h"
 
-/* Chunk file format version. Bump on ANY layout change. */
-#define WORLD_CHUNK_VERSION 1
+/* Current chunk format version. Version 2 keeps the v1 bytes but reserves
+ * appended block IDs for persistent water flow states. */
+#define WORLD_CHUNK_VERSION 2
 
 /* Chunk file magic bytes. */
 #define WORLD_CHUNK_MAGIC_0 'M'

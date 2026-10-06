@@ -1,8 +1,8 @@
 #pragma once
 
 /* 2D HUD geometry builder (M6): crosshair + 9-slot hotbar with selection
- * highlight, item-color icons, health/hunger bars. Pure CPU (y-down pixel
- * space); the renderer uploads and draws the produced vertices.
+ * highlight, item-color icons, pixel-art health/hunger icons. Pure CPU
+ * (y-down pixel space); the renderer uploads and draws the produced vertices.
  * Headless-testable.
  *
  * Vertex format: x, y, r, g, b, a (6 floats, non-indexed triangles).
@@ -15,13 +15,13 @@
 typedef struct ItemStack ItemStack;
 
 #define HUD_FLOATS_PER_VERT 6
-#define HUD_MAX_VERTS 512
+#define HUD_MAX_VERTS 4096
 #define HUD_HOTBAR_SLOTS 9
 #define HUD_SLOT_PX 40
 #define HUD_SLOT_GAP 4
 #define HUD_BOTTOM_MARGIN 12
 
-/* One frame of HUD vertices (stack-allocatable, ~12 KiB). */
+/* One frame of HUD vertices (stack-allocatable, 96 KiB). */
 typedef struct HudFrame {
     float verts[HUD_MAX_VERTS * HUD_FLOATS_PER_VERT];
     size_t count; /* Vertices stored (always a multiple of 3). */
@@ -39,15 +39,16 @@ typedef struct HudFrame {
  */
 void hud_build(HudFrame *f, int width, int height, const ItemStack *hotbar, int hotbar_sel);
 
-/* Append health + hunger bars above the hotbar (survival only; callers
- * skip this in creative). Each bar: dark backing + fill proportional to
- * value/max (clamped). No-op on bad args; silently drops on overflow.
+/* Append ten Minecraft-style heart and food icons above the hotbar (survival
+ * only; callers skip this in creative). Each icon represents two points and
+ * renders as empty, half, or full; simulation values remain unchanged.
+ * No-op on bad args; silently drops on overflow.
  *
  * Args:
  *   f: frame to append to (must not be NULL).
  *   width, height: viewport in pixels (> 0).
- *   health, max_health: hearts value (bar full at max).
- *   hunger, max_hunger: food value.
+ *   health, max_health: health points (20 points = ten hearts).
+ *   hunger, max_hunger: food points (20 points = ten food icons).
  */
 void hud_build_vitals(HudFrame *f, int width, int height, float health, float max_health, float hunger,
                       float max_hunger);

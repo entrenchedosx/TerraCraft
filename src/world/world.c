@@ -2,6 +2,7 @@
 #include "core/log.h"
 #include "world/block.h"
 #include "world/chunk.h"
+#include "world/water.h"
 #include "world/world_save.h"
 
 #include <string.h>
@@ -43,10 +44,17 @@ World *world_create(void)
     }
     w->count = 0;
     w->seed = 1337;
+    w->terrain_version = 1;
+    w->water_updates = (WorldWaterUpdate *)calloc(WORLD_WATER_QUEUE_CAP, sizeof(*w->water_updates));
+    if (w->water_updates == NULL) {
+        free(w);
+        return NULL;
+    }
     w->name[0] = '\0';
     w->mode = 0; /* WORLD_MODE_SURVIVAL without pulling world_meta.h here. */
     if (hashmap_init(&w->chunk_map, WORLD_MAX_CHUNKS) != 0) {
         LOG_ERROR("world_create: chunk map init failed");
+        free(w->water_updates);
         free(w);
         return NULL;
     }
@@ -68,6 +76,8 @@ void world_destroy(World *w)
         w->chunks[i] = NULL;
     }
     hashmap_free(&w->chunk_map);
+    free(w->water_updates);
+    w->water_updates = NULL;
     w->count = 0;
     free(w);
 }
@@ -126,6 +136,8 @@ int world_add_chunk(World *w, Chunk *c)
             }
             w->chunks[i] = c;
             w->count++;
+            world_water_seed_chunk(w, c->cx, c->cz);
+            world_water_seed_chunk_edges(w, c->cx, c->cz);
             return 0;
         }
     }
@@ -216,6 +228,52 @@ uint16_t world_get_block(const World *w, int wx, int wy, int wz)
         return BLOCK_AIR;
     }
     return chunk_get_block(c, mod_16(wx), wy, mod_16(wz));
+}
+
+/* Write a block by world coordinates and invalidate both sides of chunk
+ * seams, since neighboring meshes query across those borders. */
+bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id)
+{
+    if (w == NULL || wy < 0 || wy >= CHUNK_Y) {
+        return false;
+    }
+    int cx = floor_div_16(wx);
+    int cz = floor_div_16(wz);
+    Chunk *c = world_get_chunk(w, cx, cz);
+    if (c == NULL) {
+        return false;
+    }
+    int lx = mod_16(wx);
+    int lz = mod_16(wz);
+    uint16_t old = chunk_get_block(c, lx, wy, lz);
+    if (old == id) {
+        return false;
+    }
+    chunk_set_block(c, lx, wy, lz, id);
+    if (lx == 0) {
+        Chunk *neighbor = world_get_chunk(w, cx - 1, cz);
+        if (neighbor != NULL) {
+            neighbor->dirty = true;
+        }
+    } else if (lx == CHUNK_X - 1) {
+        Chunk *neighbor = world_get_chunk(w, cx + 1, cz);
+        if (neighbor != NULL) {
+            neighbor->dirty = true;
+        }
+    }
+    if (lz == 0) {
+        Chunk *neighbor = world_get_chunk(w, cx, cz - 1);
+        if (neighbor != NULL) {
+            neighbor->dirty = true;
+        }
+    } else if (lz == CHUNK_Z - 1) {
+        Chunk *neighbor = world_get_chunk(w, cx, cz + 1);
+        if (neighbor != NULL) {
+            neighbor->dirty = true;
+        }
+    }
+    world_water_notify_block_changed(w, wx, wy, wz);
+    return true;
 }
 
 /* Legacy deterministic column height (frozen for tests).

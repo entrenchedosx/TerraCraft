@@ -24,6 +24,7 @@
 #include "world/chunk.h"
 #include "world/streamer.h"
 #include "world/world.h"
+#include "world/water.h"
 #include "world/world_save.h"
 
 /* Portable SDL include for scancodes (app polls keyboard state directly;
@@ -1232,6 +1233,7 @@ static void app_tick_playing(AppContext *app, float dt)
     bool controllable = app->state == GAME_STATE_PLAYING;
 
     time_system_update(&app->clock, dt);
+    world_water_tick(app->world, dt);
 
     PlayerInput in;
     if (controllable) {

@@ -40,6 +40,12 @@ static const MobSkinPart PLAYER_SKIN_PARTS[] = {
     {{{0, 20, 4, 12}, {8, 20, 4, 12}, {8, 16, 4, 4}, {4, 16, 4, 4}, {12, 20, 4, 12}, {4, 20, 4, 12}}},
 };
 
+/* A first-person camera sits behind the moving arm and sees its -Z face.
+ * Exchange the front/back strips for this one viewmodel part so that side
+ * carries the same authored face as the third-person +Z surface. */
+static const MobSkinPart PLAYER_VIEWMODEL_ARM = {{{40, 20, 4, 12}, {48, 20, 4, 12}, {48, 16, 4, 4}, {44, 16, 4, 4},
+                                                   {44, 20, 4, 12}, {52, 20, 4, 12}}};
+
 static const MobSkin PLAYER_SKIN = {"player", 64, 64, PLAYER_SKIN_PARTS, PLAYER_PART_COUNT};
 
 const MobModel *player_body_model(void)
@@ -50,4 +56,9 @@ const MobModel *player_body_model(void)
 const MobSkin *player_body_skin(void)
 {
     return &PLAYER_SKIN;
+}
+
+const MobSkinPart *player_viewmodel_arm_skin_part(void)
+{
+    return &PLAYER_VIEWMODEL_ARM;
 }

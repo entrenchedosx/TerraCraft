@@ -47,6 +47,7 @@ void chunk_init(Chunk *c, int cx, int cz)
     for (size_t i = 0; i < CHUNK_VOLUME; ++i) {
         c->blocks[i] = BLOCK_AIR;
     }
+    memset(c->water_queued, 0, sizeof(c->water_queued));
     c->dirty = true;
     c->save_dirty = false;
     /* Cache the full-column AABB for frustum culling (M2). */

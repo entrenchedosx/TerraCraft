@@ -65,6 +65,40 @@ int test_biome_coverage(void)
     return failures;
 }
 
+/* Test: versioned terrain is deterministic and has both sea basins and
+ * elevated ridges without changing the frozen v1 field. */
+int test_world_gen_terrain_v2(void)
+{
+    int failures = 0;
+    int min_h = CHUNK_Y;
+    int max_h = 0;
+    int low = 0;
+    int high = 0;
+    int changed = 0;
+    for (int x = -768; x <= 768; x += 16) {
+        for (int z = -768; z <= 768; z += 16) {
+            int old_h = world_gen_height(481516L, x, z);
+            int h = world_gen_height_version(481516L, x, z, 2);
+            TEST_ASSERT(h == world_gen_height_version(481516L, x, z, 2));
+            TEST_ASSERT(old_h == world_gen_height_version(481516L, x, z, 1));
+            TEST_ASSERT(h >= 4 && h <= 200);
+            if (h < min_h) {
+                min_h = h;
+            }
+            if (h > max_h) {
+                max_h = h;
+            }
+            low += h < WORLD_SEA_LEVEL;
+            high += h > 100;
+            changed += h != old_h;
+        }
+    }
+    TEST_ASSERT(min_h < WORLD_SEA_LEVEL);
+    TEST_ASSERT(max_h > 100);
+    TEST_ASSERT(low > 0 && high > 0 && changed > 100);
+    return failures;
+}
+
 /* Test: trees are deterministic, bounded, and order-independent.
  *
  * Returns: failure count.

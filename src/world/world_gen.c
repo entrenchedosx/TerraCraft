@@ -7,6 +7,7 @@
 #include "world/world.h"
 #include "world/world_save.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 /* Floor division for negative-friendly cell math. */
@@ -21,7 +22,24 @@ static int floor_div(int v, int d)
     return -((-v + d - 1) / d);
 }
 
-/* Column height (M5): continental base + mountain lift + hills + detail.
+static float gen_clamp01(float v)
+{
+    if (v < 0.0f) {
+        return 0.0f;
+    }
+    if (v > 1.0f) {
+        return 1.0f;
+    }
+    return v;
+}
+
+static float gen_smoothstep(float edge0, float edge1, float x)
+{
+    float t = gen_clamp01((x - edge0) / (edge1 - edge0));
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/* Version 1 column height (M5): continental base + mountain lift + hills + detail.
  * Base 70 keeps most land above the sea (64) with real ocean basins where
  * the continent field dips; mountains spike via the squared mask.
  * Typical range roughly [25..160]; clamped to [4..200] (test-pinned).
@@ -32,7 +50,7 @@ static int floor_div(int v, int d)
  *
  * Returns: clamped column height.
  */
-int world_gen_height(long seed, int wx, int wz)
+static int world_gen_height_v1(long seed, int wx, int wz)
 {
     uint32_t s = (uint32_t)seed;
     float fx = (float)wx;
@@ -52,6 +70,65 @@ int world_gen_height(long seed, int wx, int wz)
     return hi;
 }
 
+/* Version 2 terrain: warp the continent field before sampling it, build
+ * broad connected highlands around sharper ridges, then carve meandering
+ * lowlands. This remains a deterministic 2D surface model; it does not
+ * claim to reproduce Minecraft's full 3D density router. */
+static int world_gen_height_v2(long seed, int wx, int wz)
+{
+    uint32_t s = (uint32_t)seed;
+    float fx = (float)wx;
+    float fz = (float)wz;
+    float warp_x = noise_fbm2(fx * 0.0014f, fz * 0.0014f, 3, 2.0f, 0.5f,
+                              s ^ 0x57415250u) * 104.0f;
+    float warp_z = noise_fbm2(fx * 0.0014f + 731.0f, fz * 0.0014f - 419.0f, 3, 2.0f, 0.5f,
+                              s ^ 0x57415251u) * 104.0f;
+    float x = fx + warp_x;
+    float z = fz + warp_z;
+    float continent = noise_fbm2(x * 0.0017f, z * 0.0017f, 5, 2.0f, 0.5f, s ^ 0x434F4E54u);
+    float broad_hills = noise_fbm2(x * 0.0065f, z * 0.0065f, 4, 2.0f, 0.5f,
+                                   s ^ 0x48494C4Cu) * 8.0f;
+    float rolling = noise_fbm2(x * 0.018f + 93.0f, z * 0.018f - 157.0f, 3, 2.0f, 0.5f,
+                               s ^ 0x524F4C4Cu) * 4.0f;
+    float ridge_noise = noise_fbm2(x * 0.0044f - 127.0f, z * 0.0044f + 311.0f, 4, 2.0f,
+                                  0.5f, s ^ 0x52494447u);
+    float ridge = 1.0f - fabsf(ridge_noise);
+    float mountain_mask = gen_smoothstep(0.58f, 0.82f, ridge);
+    float peak_noise = noise_fbm2(x * 0.012f + 17.0f, z * 0.012f - 83.0f, 3, 2.0f,
+                                  0.5f, s ^ 0x5045414Bu);
+    float sharp_peaks = 1.0f - fabsf(peak_noise);
+    float base = 66.0f + continent * 31.0f + broad_hills + rolling +
+                 mountain_mask * (16.0f + sharp_peaks * 43.0f);
+
+    /* A warped zero-contour becomes a broad river network. Carve more
+     * strongly through raised ground and taper out in deep ocean basins. */
+    float river_field = noise_fbm2(x * 0.00145f + 811.0f, z * 0.00145f + 227.0f,
+                                   3, 2.0f, 0.5f, s ^ 0x52495652u);
+    float river = 1.0f - gen_smoothstep(0.018f, 0.105f, fabsf(river_field));
+    float inland = gen_smoothstep(58.0f, 74.0f, base);
+    float river_depth = 7.0f + gen_clamp01((base - 66.0f) / 55.0f) * 11.0f;
+    float h = base - river * inland * river_depth;
+    h += noise_value2(x * 0.055f, z * 0.055f, s ^ 0x44455441u) * 1.4f;
+    int hi = (int)floorf(h);
+    if (hi < 4) {
+        hi = 4;
+    }
+    if (hi > 200) {
+        hi = 200;
+    }
+    return hi;
+}
+
+int world_gen_height_version(long seed, int wx, int wz, int terrain_version)
+{
+    return terrain_version >= 2 ? world_gen_height_v2(seed, wx, wz) : world_gen_height_v1(seed, wx, wz);
+}
+
+int world_gen_height(long seed, int wx, int wz)
+{
+    return world_gen_height_version(seed, wx, wz, 1);
+}
+
 /* Surface block for a column (biome-driven).
  *
  * Args:
@@ -61,7 +138,7 @@ int world_gen_height(long seed, int wx, int wz)
  *
  * Returns: surface block ID.
  */
-uint16_t world_gen_surface(long seed, int wx, int wz, int h)
+uint16_t world_gen_surface_version(long seed, int wx, int wz, int h, int terrain_version)
 {
     int b = biome_at(seed, wx, wz, h);
     switch (b) {
@@ -80,13 +157,18 @@ uint16_t world_gen_surface(long seed, int wx, int wz, int h)
         break;
     }
     /* Slope estimate via forward differences; steep faces expose stone. */
-    int hx = world_gen_height(seed, wx + 1, wz);
-    int hz = world_gen_height(seed, wx, wz + 1);
+    int hx = world_gen_height_version(seed, wx + 1, wz, terrain_version);
+    int hz = world_gen_height_version(seed, wx, wz + 1, terrain_version);
     int slope = abs(hx - h) + abs(hz - h);
     if (slope >= 6) {
         return BLOCK_STONE;
     }
     return BLOCK_GRASS;
+}
+
+uint16_t world_gen_surface(long seed, int wx, int wz, int h)
+{
+    return world_gen_surface_version(seed, wx, wz, h, 1);
 }
 
 /* Cave carve test (pure function of world coords): fBm chambers plus
@@ -140,9 +222,9 @@ static uint16_t gen_ore(long seed, int wx, int y, int wz)
 /* Tree decision for a trunk column (pure function, order-independent).
  * Trunk height 4..6 written to out_trunk on success.
  */
-bool world_gen_tree(long seed, int tx, int tz, int *out_trunk)
+bool world_gen_tree_version(long seed, int tx, int tz, int terrain_version, int *out_trunk)
 {
-    int h = world_gen_height(seed, tx, tz);
+    int h = world_gen_height_version(seed, tx, tz, terrain_version);
     if (h <= WORLD_SEA_LEVEL + 1 || h >= 120) {
         return false;
     }
@@ -165,9 +247,15 @@ bool world_gen_tree(long seed, int tx, int tz, int *out_trunk)
     return true;
 }
 
-/* Vegetation for a surface column: plant/flower or AIR (pure function). */
-uint16_t world_gen_vegetation(long seed, int wx, int wz, int h)
+bool world_gen_tree(long seed, int tx, int tz, int *out_trunk)
 {
+    return world_gen_tree_version(seed, tx, tz, 1, out_trunk);
+}
+
+/* Vegetation for a surface column: plant/flower or AIR (pure function). */
+uint16_t world_gen_vegetation_version(long seed, int wx, int wz, int h, int terrain_version)
+{
+    (void)terrain_version; /* Biome thresholds are shared by both terrain profiles. */
     if (h <= WORLD_SEA_LEVEL + 1) {
         return BLOCK_AIR;
     }
@@ -187,6 +275,11 @@ uint16_t world_gen_vegetation(long seed, int wx, int wz, int h)
         return BLOCK_FLOWER;
     }
     return BLOCK_AIR;
+}
+
+uint16_t world_gen_vegetation(long seed, int wx, int wz, int h)
+{
+    return world_gen_vegetation_version(seed, wx, wz, h, 1);
 }
 
 /* Write one cell of a tree stamp when it falls inside chunk c.
@@ -215,7 +308,7 @@ static void stamp_cell(Chunk *c, int wx, int wy, int wz, uint16_t id, bool is_tr
  * over the chunk expanded by 2 (leaf radius); everything is a pure function
  * of world coords, so generation order across chunks cannot matter.
  */
-static void stamp_trees(Chunk *c, long seed)
+static void stamp_trees(Chunk *c, long seed, int terrain_version)
 {
     int x0 = c->cx * CHUNK_X - 2;
     int x1 = c->cx * CHUNK_X + CHUNK_X + 1;
@@ -224,10 +317,10 @@ static void stamp_trees(Chunk *c, long seed)
     for (int tx = x0; tx <= x1; ++tx) {
         for (int tz = z0; tz <= z1; ++tz) {
             int th = 0;
-            if (!world_gen_tree(seed, tx, tz, &th)) {
+            if (!world_gen_tree_version(seed, tx, tz, terrain_version, &th)) {
                 continue;
             }
-            int h = world_gen_height(seed, tx, tz);
+            int h = world_gen_height_version(seed, tx, tz, terrain_version);
             /* Trunk. */
             for (int y = h + 1; y <= h + th; ++y) {
                 stamp_cell(c, tx, y, tz, BLOCK_WOOD, true);
@@ -297,17 +390,18 @@ int world_generate_chunk(World *w, int cx, int cz)
         return 0;
     }
     long seed = w->seed;
+    int terrain_version = w->terrain_version >= 2 ? 2 : 1;
     int heights[CHUNK_X][CHUNK_Z];
     int biomes[CHUNK_X][CHUNK_Z];
     for (int lx = 0; lx < CHUNK_X; ++lx) {
         for (int lz = 0; lz < CHUNK_Z; ++lz) {
             int wx = cx * CHUNK_X + lx;
             int wz = cz * CHUNK_Z + lz;
-            int h = world_gen_height(seed, wx, wz);
+            int h = world_gen_height_version(seed, wx, wz, terrain_version);
             int b = biome_at(seed, wx, wz, h);
             heights[lx][lz] = h;
             biomes[lx][lz] = b;
-            uint16_t surface = world_gen_surface(seed, wx, wz, h);
+            uint16_t surface = world_gen_surface_version(seed, wx, wz, h, terrain_version);
             uint16_t subsurface =
                 (b == BIOME_OCEAN || b == BIOME_BEACH || b == BIOME_DESERT) ? BLOCK_SAND : BLOCK_DIRT;
             if (b == BIOME_MOUNTAINS) {
@@ -337,11 +431,12 @@ int world_generate_chunk(World *w, int cx, int cz)
         }
     }
     /* Trees (order-independent stamps), then surface vegetation. */
-    stamp_trees(c, seed);
+    stamp_trees(c, seed, terrain_version);
     for (int lx = 0; lx < CHUNK_X; ++lx) {
         for (int lz = 0; lz < CHUNK_Z; ++lz) {
             int h = heights[lx][lz];
-            uint16_t veg = world_gen_vegetation(seed, cx * CHUNK_X + lx, cz * CHUNK_Z + lz, h);
+            uint16_t veg = world_gen_vegetation_version(seed, cx * CHUNK_X + lx,
+                                                        cz * CHUNK_Z + lz, h, terrain_version);
             if (veg != BLOCK_AIR && h + 1 < CHUNK_Y &&
                 chunk_get_block(c, lx, h + 1, lz) == BLOCK_AIR) {
                 chunk_set_block(c, lx, h + 1, lz, veg);

@@ -7,8 +7,8 @@
 #include "ui/ui.h"
 
 #include <stdint.h>
-#include <string.h>
-
+#include <stdbool.h>
+#include <math.h>
 #include <string.h>
 
 /* Test: state names, transition table, live/world tick predicates.
@@ -304,5 +304,45 @@ int test_ui_icons(void)
     TEST_ASSERT(b.quads == ICON_MAX_QUADS);
     icons_clear(&b);
     TEST_ASSERT(b.quads == 0);
+    return failures;
+}
+
+/* Test: survival vitals render as bounded half-step heart/food icons. */
+int test_hud_vitals_icons(void)
+{
+    int failures = 0;
+    HudFrame f;
+    f.count = 0;
+    hud_build_vitals(&f, 1280, 720, 9.0f, 20.0f, 1.0f, 20.0f);
+    TEST_ASSERT(f.count > 0 && f.count < HUD_MAX_VERTS);
+    bool saw_heart = false;
+    bool saw_food = false;
+    float min_x = 1280.0f;
+    float max_x = 0.0f;
+    for (size_t i = 0; i < f.count; i += 6) {
+        float x = f.verts[i];
+        if (x < min_x) {
+            min_x = x;
+        }
+        if (x > max_x) {
+            max_x = x;
+        }
+        if (f.verts[i + 2] > 0.80f && f.verts[i + 3] < 0.20f && f.verts[i + 4] < 0.20f) {
+            saw_heart = true;
+        }
+        if (f.verts[i + 2] > 0.80f && f.verts[i + 3] > 0.45f && f.verts[i + 4] < 0.20f) {
+            saw_food = true;
+        }
+    }
+    TEST_ASSERT(saw_heart && saw_food);
+    TEST_ASSERT(min_x >= 0.0f && max_x <= 1280.0f);
+
+    /* Empty vitals still draw silhouettes; zero maxima and NaNs are safe. */
+    f.count = 0;
+    hud_build_vitals(&f, 1280, 720, 0.0f, 20.0f, 0.0f, 0.0f);
+    TEST_ASSERT(f.count > 0 && f.count < HUD_MAX_VERTS);
+    f.count = 0;
+    hud_build_vitals(&f, 1, 1, NAN, 0.0f, NAN, 0.0f);
+    TEST_ASSERT(f.count < HUD_MAX_VERTS);
     return failures;
 }

@@ -24,7 +24,7 @@ static Vec3 ray_dir(float yaw, float pitch)
  */
 static bool raycast_targetable(uint16_t id)
 {
-    return id != (uint16_t)BLOCK_AIR && id != (uint16_t)BLOCK_WATER;
+    return id != (uint16_t)BLOCK_AIR && !block_is_water(id);
 }
 
 /* Cast a ray with Amanatides & Woo traversal.

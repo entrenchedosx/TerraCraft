@@ -241,6 +241,7 @@ static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPar
 /* Forward: mob batch helpers (defined below draw_mobs). */
 static void mob_tile_uvs(const MobModelPart *part, float fuv[6][4]);
 static void mob_skin_uvs(const MobSkin *skin, int part, float fuv[6][4]);
+static void mob_skin_part_uvs(const MobSkin *skin, const MobSkinPart *part, float fuv[6][4]);
 static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4],
                              float anim_time, int model_filter, const MobSkin *skin, size_t o,
                              int *drawn, int *culled);
@@ -306,10 +307,21 @@ static void mob_tile_uvs(const MobModelPart *part, float fuv[6][4])
  */
 static void mob_skin_uvs(const MobSkin *skin, int part, float fuv[6][4])
 {
+    if (skin == NULL || part < 0 || part >= skin->nparts) {
+        return;
+    }
+    mob_skin_part_uvs(skin, &skin->parts[part], fuv);
+}
+
+static void mob_skin_part_uvs(const MobSkin *skin, const MobSkinPart *part, float fuv[6][4])
+{
+    if (skin == NULL || part == NULL || skin->width <= 0 || skin->height <= 0) {
+        return;
+    }
     float w = (float)skin->width;
     float h = (float)skin->height;
     for (int f = 0; f < 6; ++f) {
-        MobSkinRect rc = skin->parts[part].faces[f];
+        MobSkinRect rc = part->faces[f];
         fuv[f][0] = ((float)rc.x + 0.5f) / w;
         fuv[f][1] = 1.0f - ((float)(rc.y + rc.h) - 0.5f) / h;
         fuv[f][2] = ((float)(rc.x + rc.w) - 0.5f) / w;
@@ -593,17 +605,17 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     int item_part = arm_parts;
     int count = arm_parts + (has_item ? 1 : 0);
     MobModelPart parts[3];
-    /* Rest pose sits in the lower-right corner, mostly below the view. A
-     * complete 64x64 right-arm skin region replaces both procedural pieces
-     * when the owner skin is available. */
-    parts[0] = (MobModelPart){{0.76f, -0.53f, 0.92f}, {0.12f, 0.36f, 0.12f},
+    /* Keep the authored 4:12:4 arm proportions. The stronger inward cant
+     * carries the wrist toward the crosshair, like the vanilla first-person
+     * arm, instead of leaving a vertical post at screen right. */
+    parts[0] = (MobModelPart){{0.76f, -0.52f, 0.92f}, {0.16f, 0.48f, 0.16f},
                               TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE};
     if (!has_skin) {
-        parts[1] = (MobModelPart){{0.76f, -0.57f, 0.88f}, {0.12f, 0.10f, 0.12f},
+        parts[1] = (MobModelPart){{0.76f, -0.58f, 0.88f}, {0.16f, 0.12f, 0.16f},
                                   TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE};
     }
     if (has_item) {
-        parts[item_part] = (MobModelPart){{0.60f, -0.52f, held_block != 0 ? 0.82f : 0.87f},
+        parts[item_part] = (MobModelPart){{0.76f, -0.48f, held_block != 0 ? 0.82f : 0.87f},
                                           held_block != 0 ? mmath_vec3(0.10f, 0.10f, 0.10f)
                                                           : mmath_vec3(0.11f, 0.11f, 0.04f),
                                           held_tile, -1, 0.0f, MOB_ANIM_NONE};
@@ -623,8 +635,8 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
         punch = pose->punch;
     }
     Vec3 pose_offset = {bob_x - raise * 0.5f, bob_y - dip + raise * 0.7f, raise * 0.3f};
-    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.83f, -0.17f, 0.98f), pose_offset);
-    const float rest_roll = -0.18f;
+    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.84f, -0.10f, 0.98f), pose_offset);
+    const float rest_roll = -0.62f;
     float swing_x = 0.70f * punch;
     float swing_y = 0.06f * punch + bob_x * 0.8f;
     Vec3 eye = camera_get_position(cam);
@@ -637,7 +649,7 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     for (int p = 0; p < count; ++p) {
         float fuv[6][4];
         if (has_skin && p == 0) {
-            mob_skin_uvs(player_skin, PLAYER_PART_ARM_R, fuv);
+            mob_skin_part_uvs(player_skin, player_viewmodel_arm_skin_part(), fuv);
         } else if (has_item && p == item_part && held_block != 0) {
             for (int face = 0; face < 6; ++face) {
                 int tile = block_tile_for_face(held_block, face);

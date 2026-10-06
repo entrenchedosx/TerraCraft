@@ -193,6 +193,7 @@ int session_open_world(AppContext *app, const char *world_dir)
         return -4;
     }
     w->seed = (long)m.seed;
+    w->terrain_version = m.terrain_version;
     size_t nl = strlen(m.name);
     if (nl >= sizeof(w->name)) {
         nl = sizeof(w->name) - 1;

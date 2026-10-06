@@ -9,6 +9,8 @@
 #include "world/chunk.h"
 #include "world/world.h"
 
+#include <math.h>
+
 /* Test-local flat floor: chunk (0,0), stone y in [60..64], air above.
  * Top surface at y=65 (feet level). */
 
@@ -184,6 +186,36 @@ int test_physics_jump(void)
     TEST_ASSERT(p.grounded == true);
     TEST_ASSERT_FLOAT_EQ(p.pos.y, 65.0f, 0.02f);
     world_destroy(w);
+    return failures;
+}
+
+/* Test: water reduces horizontal movement and jump adds buoyancy. */
+int test_physics_water_motion(void)
+{
+    int failures = 0;
+    World *dry = make_floor_world();
+    World *wet = make_floor_world();
+    TEST_ASSERT(dry != NULL && wet != NULL);
+    if (dry == NULL || wet == NULL) {
+        world_destroy(dry);
+        world_destroy(wet);
+        return failures + 1;
+    }
+    TEST_ASSERT(world_set_block(wet, 8, 65, 8, BLOCK_WATER));
+    Player dry_player, wet_player;
+    player_init(&dry_player);
+    player_init(&wet_player);
+    dry_player.pos = wet_player.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    dry_player.grounded = wet_player.grounded = true;
+    PlayerInput in = no_input();
+    in.fwd = 1.0f;
+    in.jump = true;
+    player_update(&dry_player, &in, dry, PLAYER_STEP_DT);
+    player_update(&wet_player, &in, wet, PLAYER_STEP_DT);
+    TEST_ASSERT(fabsf(wet_player.vel.z) < fabsf(dry_player.vel.z));
+    TEST_ASSERT(wet_player.vel.y > 2.0f);
+    world_destroy(dry);
+    world_destroy(wet);
     return failures;
 }
 

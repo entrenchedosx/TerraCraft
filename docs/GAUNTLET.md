@@ -215,6 +215,36 @@ triaged against the user's report.
   found no remaining code-level blocker. A new live screenshot is still
   needed to accept the arm's appearance.
 
+### Round 7 — Arm-facing UV, survival icons, terrain profiles, and water
+
+- Corrected the viewmodel's camera-facing arm UV region and increased its
+  sleeve/hand proportions; added a direct mapping regression check. A live
+  screenshot is still needed to confirm the arm's appearance in motion.
+- Replaced survival health and hunger bars with ten pixel-art hearts and ten
+  food icons. Full, half, and empty states represent 20 total points; source
+  values remain continuous.
+- Added deterministic terrain profile 2 for new worlds: warped continental
+  noise, broad hills, ridge-shaped highlands, and meandering carved valleys.
+  It remains a 2D height field rather than a full 3D density router. A saved
+  `terrain_version` leaves unversioned worlds on profile 1 and prevents
+  generation seams when untouched chunks are visited.
+- Added persistent source, flow-level, and falling-water IDs; downward-first
+  flow, seven-step horizontal decay, two-source refill, orphan retraction,
+  and loaded-chunk-only updates. The deduplicated queue is capped at 32,768
+  cells and triggers a bounded incremental scan at capacity. Chunk loading
+  wakes fluid on shared edges; transparent meshes use partial water heights
+  and expose only the visible step between different levels.
+  Chunk format v2 preserves flow states and v1 chunks retain their legacy
+  block interpretation. Player water movement has reduced speed, drag, and
+  jump/sneak buoyancy, without oxygen or a swimming pose.
+- Added regression coverage for finite flow and retraction, cross-chunk flow
+  wakeup, partial-height meshes, old/new chunk-save compatibility, and water
+  movement.
+- Visual Studio Debug and Release game builds both succeeded. Debug and
+  Release CTest pass; the direct Release runner reports 167 tests, 0 failures.
+  A hands-on visual check remains outstanding; automated coverage does not
+  prove Minecraft visual or mechanical parity.
+
 ## Research
 
 - [Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) — original

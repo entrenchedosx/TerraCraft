@@ -66,7 +66,7 @@ static void mark_saved(World *w, int wx, int wz)
  */
 static bool interaction_replaceable(uint16_t block)
 {
-    return block == BLOCK_AIR || block == BLOCK_WATER || block_is_cross(block);
+    return block == BLOCK_AIR || block_is_water(block) || block_is_cross(block);
 }
 
 /* Flowers and grass plants need a valid ground surface. A cross-sprite plant
@@ -90,17 +90,7 @@ static bool interaction_plant_supported(const World *w, int wx, int wy, int wz)
  */
 static bool write_world_block(World *w, int wx, int wy, int wz, uint16_t id)
 {
-    if (wy < 0 || wy >= CHUNK_Y) {
-        return false;
-    }
-    int ccx = wx >= 0 ? wx / 16 : -((-wx + 15) / 16);
-    int ccz = wz >= 0 ? wz / 16 : -((-wz + 15) / 16);
-    Chunk *c = world_get_chunk(w, ccx, ccz);
-    if (c == NULL) {
-        return false;
-    }
-    chunk_set_block(c, wx - ccx * 16, wy, wz - ccz * 16, id);
-    return true;
+    return world_set_block(w, wx, wy, wz, id);
 }
 
 /* Break the targeted block.

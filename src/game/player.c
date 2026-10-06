@@ -199,6 +199,32 @@ bool player_aabb_solid(const World *w, Vec3 mn, Vec3 mx)
     return false;
 }
 
+/* A small block-space sample of the player's collision body is enough for
+ * movement drag and buoyancy; water remains non-colliding. */
+static bool player_in_water(const World *w, const Player *p)
+{
+    if (w == NULL || p == NULL) {
+        return false;
+    }
+    float half = p->width * 0.5f;
+    int x0 = (int)floorf(p->pos.x - half + PLAYER_EPS);
+    int x1 = (int)floorf(p->pos.x + half - PLAYER_EPS);
+    int z0 = (int)floorf(p->pos.z - half + PLAYER_EPS);
+    int z1 = (int)floorf(p->pos.z + half - PLAYER_EPS);
+    int y0 = (int)floorf(p->pos.y + 0.05f);
+    int y1 = (int)floorf(p->pos.y + p->height - 0.05f);
+    for (int y = y0; y <= y1; ++y) {
+        for (int z = z0; z <= z1; ++z) {
+            for (int x = x0; x <= x1; ++x) {
+                if (block_is_water(world_get_block(w, x, y, z))) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 /* Resolve one axis after moving: snap out and zero velocity on hit.
  * is_y_down selects landing logic (sets grounded).
  */
@@ -250,6 +276,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     bool sneak = in ? in->sneak : false;
     bool sprint = in ? in->sprint : false;
     const float dt = PLAYER_STEP_DT;
+    bool swimming = player_in_water(w, p);
 
     p->sprinting = sprint && !sneak;
     p->sneaking = sneak && !p->flying;
@@ -279,13 +306,16 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     if (sneak) {
         speed *= 0.3f;
     }
+    if (swimming) {
+        speed *= 0.55f;
+    }
     Vec3 wish = player_wish_dir(p->yaw, fwd, strafe);
     if (mmath_vec3_length_sq(wish) > 1e-8f) {
         p->vel.x = wish.x * speed;
         p->vel.z = wish.z * speed;
     } else {
         /* No input: decay horizontal velocity (MC-style per-step retention). */
-        float d = p->grounded ? p->drag_ground : p->drag_air;
+        float d = swimming ? 0.80f : (p->grounded ? p->drag_ground : p->drag_air);
         p->vel.x *= d;
         p->vel.z *= d;
         if (fabsf(p->vel.x) < 1e-4f) {
@@ -297,14 +327,26 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     }
 
     /* Vertical: gravity integrate, terminal clamp, jump on grounded. */
-    p->acc = mmath_vec3(0.0f, -p->gravity, 0.0f);
-    p->vel.y -= p->gravity * dt;
+    float gravity = swimming ? p->gravity * 0.12f : p->gravity;
+    p->acc = mmath_vec3(0.0f, -gravity, 0.0f);
+    p->vel.y -= gravity * dt;
     if (p->vel.y < PLAYER_TERMINAL_VEL) {
         p->vel.y = PLAYER_TERMINAL_VEL;
     }
     if (jump && p->grounded) {
         p->vel.y = p->jump_vel;
         p->grounded = false;
+    }
+    if (swimming) {
+        if (jump) {
+            p->vel.y = 2.4f;
+        } else if (sneak) {
+            p->vel.y = -2.4f;
+        } else {
+            p->vel.y *= 0.80f;
+        }
+        p->vel.x *= 0.92f;
+        p->vel.z *= 0.92f;
     }
 
     if (w == NULL) {

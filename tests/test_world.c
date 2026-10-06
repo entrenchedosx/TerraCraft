@@ -3,6 +3,7 @@
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/world.h"
+#include "world/water.h"
 
 /* Test: chunk_index formula (y*256 + z*16 + x).
  *
@@ -155,5 +156,140 @@ int test_world_gen_determinism(void)
     }
     world_destroy(a);
     world_destroy(b);
+    return failures;
+}
+
+/* Test: water flows with finite levels, crosses chunk borders, retracts
+ * after source removal, and dirties both affected chunk meshes. */
+int test_water_simulation(void)
+{
+    int failures = 0;
+    World *w = world_create();
+    Chunk *a = chunk_create(0, 0);
+    Chunk *b = chunk_create(1, 0);
+    TEST_ASSERT(w != NULL && a != NULL && b != NULL);
+    if (w == NULL || a == NULL || b == NULL) {
+        world_destroy(w);
+        chunk_destroy(a);
+        chunk_destroy(b);
+        return failures + 1;
+    }
+    for (int x = 0; x < 32; ++x) {
+        Chunk *c = x < 16 ? a : b;
+        for (int z = 0; z < 16; ++z) {
+            chunk_set_block(c, x % 16, 11, z, BLOCK_STONE);
+        }
+    }
+    chunk_set_block(a, 14, 12, 8, BLOCK_WATER);
+    TEST_ASSERT(world_add_chunk(w, a) == 0);
+    TEST_ASSERT(world_add_chunk(w, b) == 0);
+    a->dirty = false;
+    b->dirty = false;
+    TEST_ASSERT(world_water_pending(w) > 0);
+    for (int i = 0; i < 12; ++i) {
+        world_water_tick(w, 0.25f);
+    }
+    TEST_ASSERT(world_get_block(w, 14, 12, 8) == BLOCK_WATER);
+    TEST_ASSERT(world_get_block(w, 15, 12, 8) == BLOCK_WATER_FLOW_1);
+    TEST_ASSERT(world_get_block(w, 16, 12, 8) == BLOCK_WATER_FLOW_2);
+    TEST_ASSERT(world_get_block(w, 21, 12, 8) == BLOCK_WATER_FLOW_7);
+    TEST_ASSERT(world_get_block(w, 22, 12, 8) == BLOCK_AIR);
+    TEST_ASSERT(a->dirty && b->dirty);
+    TEST_ASSERT(block_water_height(BLOCK_WATER_FLOW_4) < 1.0f);
+    TEST_ASSERT(block_water_height(BLOCK_WATER_FALLING) == 1.0f);
+
+    TEST_ASSERT(world_set_block(w, 14, 12, 8, BLOCK_AIR));
+    for (int i = 0; i < 12; ++i) {
+        world_water_tick(w, 0.25f);
+    }
+    TEST_ASSERT(world_get_block(w, 15, 12, 8) == BLOCK_AIR);
+    TEST_ASSERT(world_get_block(w, 16, 12, 8) == BLOCK_AIR);
+    TEST_ASSERT(world_get_block(w, 21, 12, 8) == BLOCK_AIR);
+    world_destroy(w);
+
+    /* Water at a loaded edge waits while the adjacent chunk is absent, then
+     * resumes spreading as soon as that chunk streams in. */
+    w = world_create();
+    a = chunk_create(0, 0);
+    b = chunk_create(1, 0);
+    TEST_ASSERT(w != NULL && a != NULL && b != NULL);
+    if (w == NULL || a == NULL || b == NULL) {
+        world_destroy(w);
+        chunk_destroy(a);
+        chunk_destroy(b);
+        return failures + 1;
+    }
+    for (int z = 0; z < CHUNK_Z; ++z) {
+        chunk_set_block(a, CHUNK_X - 1, 11, z, BLOCK_STONE);
+        chunk_set_block(b, 0, 11, z, BLOCK_STONE);
+    }
+    chunk_set_block(a, CHUNK_X - 1, 12, 8, BLOCK_WATER);
+    TEST_ASSERT(world_add_chunk(w, a) == 0);
+    world_water_tick(w, 0.25f);
+    TEST_ASSERT(world_get_block(w, CHUNK_X, 12, 8) == BLOCK_AIR);
+    TEST_ASSERT(world_add_chunk(w, b) == 0);
+    for (int i = 0; i < 4; ++i) {
+        world_water_tick(w, 0.25f);
+    }
+    TEST_ASSERT(block_is_water(world_get_block(w, CHUNK_X, 12, 8)));
+    world_destroy(w);
+
+    /* Water falls through open cells, and two sources over a solid floor
+     * restore an empty cell between them. */
+    w = world_create();
+    a = chunk_create(0, 0);
+    TEST_ASSERT(w != NULL && a != NULL);
+    if (w == NULL || a == NULL) {
+        world_destroy(w);
+        chunk_destroy(a);
+        return failures + 1;
+    }
+    for (int z = 0; z < CHUNK_Z; ++z) {
+        for (int x = 0; x < CHUNK_X; ++x) {
+            chunk_set_block(a, x, 8, z, BLOCK_STONE);
+            chunk_set_block(a, x, 11, z, BLOCK_STONE);
+        }
+    }
+    chunk_set_block(a, 8, 11, 8, BLOCK_AIR); /* A shaft beneath the first source. */
+    chunk_set_block(a, 8, 12, 8, BLOCK_WATER);
+    chunk_set_block(a, 8, 12, 10, BLOCK_WATER);
+    TEST_ASSERT(world_add_chunk(w, a) == 0);
+    for (int i = 0; i < 4; ++i) {
+        world_water_tick(w, 0.25f);
+    }
+    TEST_ASSERT(block_water_is_falling(world_get_block(w, 8, 10, 8)));
+    TEST_ASSERT(block_water_is_falling(world_get_block(w, 8, 9, 8)));
+    TEST_ASSERT(world_get_block(w, 8, 12, 9) == BLOCK_WATER);
+    world_destroy(w);
+    return failures;
+}
+
+/* Saturating the fluid work queue never exceeds its fixed capacity; a loaded
+ * world scan advances to discover fluid that could not be enqueued. */
+int test_water_queue_bound(void)
+{
+    int failures = 0;
+    World *w = world_create();
+    Chunk *c = chunk_create(0, 0);
+    TEST_ASSERT(w != NULL && c != NULL);
+    if (w == NULL || c == NULL) {
+        world_destroy(w);
+        chunk_destroy(c);
+        return failures + 1;
+    }
+    TEST_ASSERT(world_add_chunk(w, c) == 0);
+    for (int y = 0; y < CHUNK_Y; ++y) {
+        for (int z = 0; z < CHUNK_Z; ++z) {
+            for (int x = 0; x < CHUNK_X; ++x) {
+                (void)world_set_block(w, x, y, z, BLOCK_WATER);
+            }
+        }
+    }
+    TEST_ASSERT(world_water_pending(w) == WORLD_WATER_QUEUE_CAP);
+    TEST_ASSERT(w->water_rescan_needed);
+    world_water_tick(w, 0.25f);
+    TEST_ASSERT(world_water_pending(w) <= WORLD_WATER_QUEUE_CAP);
+    TEST_ASSERT(w->water_scan_cell > 0 || w->water_scan_chunk > 0);
+    world_destroy(w);
     return failures;
 }

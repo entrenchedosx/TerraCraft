@@ -1396,6 +1396,13 @@ int test_player_body_model(void)
     TEST_ASSERT(tf.x == 20 && tf.y == 20 && tf.w == 8 && tf.h == 12);
     MobSkinRect af = s->parts[PLAYER_PART_ARM_R].faces[5];
     TEST_ASSERT(af.x == 44 && af.y == 20 && af.w == 4 && af.h == 12);
+    const MobSkinPart *vm = player_viewmodel_arm_skin_part();
+    TEST_ASSERT(vm != NULL);
+    if (vm != NULL) {
+        TEST_ASSERT(vm->faces[4].x == 44 && vm->faces[4].y == 20);
+        TEST_ASSERT(vm->faces[5].x == 52 && vm->faces[5].y == 20);
+        TEST_ASSERT(vm->faces[4].w == 4 && vm->faces[4].h == 12);
+    }
     return failures;
 }
 

@@ -218,7 +218,8 @@ int world_save_read_chunk(const char *dir, Chunk *c)
         free(buf);
         return -7;
     }
-    if (get_u16(buf + 4) != (uint16_t)WORLD_CHUNK_VERSION) {
+    uint16_t file_version = get_u16(buf + 4);
+    if (file_version != 1 && file_version != (uint16_t)WORLD_CHUNK_VERSION) {
         free(buf);
         return -8; /* Unknown version: refuse, don't guess. */
     }
@@ -230,7 +231,7 @@ int world_save_read_chunk(const char *dir, Chunk *c)
         uint16_t id = get_u16(buf + 16 + i * 2);
         /* Clamp unknown future IDs to stone (never crash on new blocks);
          * AIR..TORCH range is authoritative, anything else is suspect. */
-        if (id >= (uint16_t)BLOCK_COUNT) {
+        if ((file_version == 1 && id > (uint16_t)BLOCK_PLANKS) || id >= (uint16_t)BLOCK_COUNT) {
             id = BLOCK_STONE;
         }
         c->blocks[i] = id;
@@ -257,6 +258,7 @@ int world_save_all(const char *dir, World *w, const Player *p, Vec3 spawn, bool 
     m.name[nl] = '\0';
     m.seed = (int64_t)w->seed;
     m.mode = w->mode;
+    m.terrain_version = w->terrain_version >= 2 ? 2 : 1;
     m.px = p->pos.x;
     m.py = p->pos.y;
     m.pz = p->pos.z;

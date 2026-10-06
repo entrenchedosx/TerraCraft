@@ -100,19 +100,25 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 ## Fidelity pass — current verification round (ACTIVE)
 - [x] Record Java Edition 26.3 behavior targets and measured TerraCraft differences in `docs/JAVA_FIDELITY.md`.
 - [x] Open a persistent reproduction log and manual playtest checklist in `docs/FIDELITY_BUGS.md`.
-- [x] Add coverage for all 32 item registry-to-atlas mappings and nonempty procedural fallback tiles; correct entity interaction reach and replaceable decor placement with Survival drops.
+- [x] Add coverage for all 33 item registry-to-atlas mappings and nonempty procedural fallback tiles; correct entity interaction reach and replaceable decor placement with Survival drops.
 - [x] Refresh the resource-pack reference to the current 46 atlas tiles and sound events.
 - [x] Fix custom resource-pack path construction/discovery and reload the live atlas when the selected pack changes; headless tests cover pack listing and item-tile application.
-- [x] Add a tested 20 TPS scheduler with bounded catch-up, dropped-time accounting, event-latched input edges, and world simulation during inventory/workbench screens.
+- [x] Add a tested 60 TPS scheduler with bounded catch-up, dropped-time accounting, event-latched input edges, and world simulation during inventory/workbench screens.
 - [x] Replace the stretched cow skin mapping with per-face box-net UVs and skin-proportioned cuboids; align melee ray bounds to yawed rendered models, allow hits from inside, and retry held attacks after cooldown.
 - [x] Add a procedural first-person sleeve and hand, held-item sprite, and independently timed swing; Debug and Release CTest both pass with 155 registered cases.
 - [x] Prevent stacked flowers and grass plants: clicking decor replaces its cell, and new vegetation requires grass, dirt, or snow support.
 - [ ] Reproduce the user's item texture report with the affected item names, render location, selected pack, and screenshot; verify the custom-pack fix in-game or identify another runtime cause.
 - [ ] Add render interpolation, then validate ticked movement/collision, survival, lighting, and fluid behaviors before claiming the fidelity pass complete.
 - [ ] Complete a hands-on Survival/Creative playtest against a running Java Edition 26.3 reference.
-- [x] Latest code round: plant placement is supported/non-stacking; first-person arm skin, scale/framing, grip, and FOV behavior are corrected. Debug and Release builds and CTest pass (160 tests); independent source review is complete. Keep `AI_MEMORY` and `mcassets/` excluded from Git.
+- [x] Round 6 verification (historical): plant placement is supported/non-stacking; first-person arm skin, scale/framing, grip, and FOV behavior were corrected. Debug and Release builds and CTest passed (160 tests); independent source review was complete.
 - [x] Audit max stack sizes against Java Edition behavior for every registered item; all seven tools/bow are already single-stack, with regression checks covering inventory and save sanitization.
+- [x] Correct first-person arm camera-facing skin UVs and grip; replace survival vitals bars with full/half/empty pixel-art hearts and food icons.
+- [x] Add terrain profile 2 with warped landforms, ridged highlands, and carved valleys, while keeping existing unversioned worlds on profile 1.
+- [x] Add source/flow/falling water, down-first flow and horizontal decay, two-source refill, stream retraction, loaded-chunk boundary wakeups, bounded updates, partial-height meshes, and simple buoyancy.
+- [x] Add regression coverage for fluid simulation/rendering, chunk v1/v2 compatibility, and water movement.
+- [x] Round 7 verification: Debug and Release builds and CTest pass (167 tests); independent source review found no code-level blocker. Keep `AI_MEMORY` and `mcassets/` excluded from Git.
 - [ ] Manual game verification remains open for plant replacement/support, cow targeting and appearance, and first-person hand/swing at low and high FOV. The reported item texture issue also needs the item, screen path, and resource pack to reproduce.
+- [ ] Inspect the updated HUD, arm, terrain, and water in a running build; automated checks cannot verify visual quality or Minecraft parity.
 - Gauntlet procedure and round notes: `docs/GAUNTLET.md`.
 
 ## Milestone 8 — Entity Framework + Creatures + Combat (DONE)
@@ -131,7 +137,7 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 - `world.meta`: `format_version` integer, current = 1. Readers reject
   `version <= 0` and `version > 1` (never migrate silently). Unknown keys
   within v1 are ignored (forward tolerant). Missing required fields fail.
-- `chunks/c_X_Z.bin`: magic `MNC1`, u16 version = 1, i32 coords, 65536 LE u16
+- `chunks/c_X_Z.bin`: magic `MNC1`, u16 version = 2 (v1 remains readable), i32 coords, 65536 LE u16
   block IDs. Wrong magic/version/coords/size truncations are rejected;
   unknown block IDs clamp to stone (never crash).
 - Block IDs are append-only forever: existing values never change meaning

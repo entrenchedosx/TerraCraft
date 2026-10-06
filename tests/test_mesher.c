@@ -141,6 +141,58 @@ int test_mesher_single_block(void)
     return failures;
 }
 
+/* Flow levels render at fractional heights and adjacent fluid states hide
+ * the shared face, regardless of whether one cell is a source. */
+int test_mesher_water_height(void)
+{
+    int failures = 0;
+    Chunk *c = chunk_create(0, 0);
+    TEST_ASSERT(c != NULL);
+    if (c == NULL) {
+        return failures + 1;
+    }
+    chunk_set_block(c, 3, 4, 3, BLOCK_WATER_FLOW_4);
+    chunk_set_block(c, 4, 4, 3, BLOCK_WATER);
+    TEST_ASSERT(block_is_face_visible(BLOCK_WATER_FLOW_4, BLOCK_WATER) == false);
+    TEST_ASSERT(block_is_face_visible(BLOCK_WATER, BLOCK_WATER_FLOW_4) == false);
+    MeshData *m = mesher_build_transparent_mesh(c, NULL);
+    TEST_ASSERT(m != NULL);
+    if (m != NULL) {
+        TEST_ASSERT(m->vertex_count == 44); /* Ten faces plus the water-height step. */
+        float max_y = 0.0f;
+        bool step_bottom = false;
+        for (size_t i = 0; i < m->vertex_count; ++i) {
+            const float *v = m->vertices + i * MESHER_FLOATS_PER_VERTEX;
+            if (v[1] > max_y) {
+                max_y = v[1];
+            }
+            if (v[0] == 4.0f && v[1] == 4.5f) {
+                step_bottom = true;
+            }
+        }
+        TEST_ASSERT(max_y == 5.0f); /* Adjacent source keeps the top full. */
+        TEST_ASSERT(step_bottom);
+        mesher_free(m);
+    }
+    chunk_set_block(c, 4, 4, 3, BLOCK_WATER_FLOW_4);
+    m = mesher_build_transparent_mesh(c, NULL);
+    TEST_ASSERT(m != NULL);
+    if (m != NULL) {
+        TEST_ASSERT(m->vertex_count == 40);
+        float max_y = 0.0f;
+        for (size_t i = 0; i < m->vertex_count; ++i) {
+            const float *v = m->vertices + i * MESHER_FLOATS_PER_VERTEX;
+            if (v[1] > max_y) {
+                max_y = v[1];
+            }
+        }
+        TEST_ASSERT(max_y == 4.5f);
+        mesher_free(m);
+    }
+    chunk_destroy(c);
+    return failures;
+}
+
 /* Test: two adjacent cubes share a face (10 exposed faces).
  *
  * Returns: failure count.

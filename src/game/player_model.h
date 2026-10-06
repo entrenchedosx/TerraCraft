@@ -32,3 +32,7 @@ const MobModel *player_body_model(void);
  * Always valid.
  */
 const MobSkin *player_body_skin(void);
+
+/* First-person arm mapping: same skin texels as the body model, with the
+ * camera-facing side mapped to Steve's front arm face. */
+const MobSkinPart *player_viewmodel_arm_skin_part(void);
