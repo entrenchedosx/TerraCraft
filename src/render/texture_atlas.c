@@ -720,9 +720,11 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         int col = TILE_PLAYER_SLEEVE % ATLAS_TILES;
         int row = TILE_PLAYER_SLEEVE / ATLAS_TILES;
         tile_speckle(out_px, TILE_PLAYER_SLEEVE, 23u, 0.10f, 0.06f);
+        /* Wrist cuff at the painter-bottom rows (= face bottoms = the
+         * wrist end of the sleeve; a cuff at the top reads upside-down). */
         for (int x = 0; x < ATLAS_TILE_PX; ++x) {
-            put_px(out_px, col, row, x, 13, 35, 70, 130, 255);
-            put_px(out_px, col, row, x, 14, 216, 219, 221, 255);
+            put_px(out_px, col, row, x, 2, 35, 70, 130, 255);
+            put_px(out_px, col, row, x, 1, 216, 219, 221, 255);
         }
     }
 

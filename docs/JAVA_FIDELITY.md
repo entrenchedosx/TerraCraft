@@ -23,7 +23,7 @@ change.
 | Block reach | 4.5 blocks in Survival; 5 in Creative |
 | Entity reach | 3 blocks for ordinary interaction |
 | Day length | 24,000 ticks (20 real minutes at 20 TPS) |
-| Dropped item lifetime | 6,000 ticks (5 real minutes at 20 TPS) |
+ | Dropped item lifetime | 18,000 ticks (5 real minutes at 60 TPS) |
 | GUI timing | Inventory/workbench continue single-player simulation; pause menu freezes it |
 
 These values are useful targets, but a matching constant alone does not
@@ -35,19 +35,20 @@ and rendering all affect what a player observes.
 ### Simulation and movement
 
 - `app_run()` schedules authoritative world updates through
-  `SimulationClock` at 20 TPS (`src/game/simulation_clock.c`). It runs at most
+  `SimulationClock` at 60 TPS (`src/game/simulation_clock.c`). It runs at most
   five catch-up ticks per rendered frame, preserves the fractional remainder,
   and logs any whole ticks dropped after a long stall. Rendering and chunk
   refresh run once per frame. Movement input is sampled per tick; discrete
   key/button presses are latched across down/up events until consumed. Quick
   jump taps use the same buffer. Time spanning a frozen-to-live state change
   is discarded so pause/death time does not advance on resume.
-- Player collision still subdivides each 0.05 s world tick into 1/60 s
-  `PLAYER_STEP_DT` steps, with its existing five-step cap. This preserves the
-  current collision integration while the surrounding world becomes ticked.
-  Render interpolation between authoritative positions is not implemented.
+- Player collision still subdivides each 1/60 s world tick into 1/60 s
+  `PLAYER_STEP_DT` steps (one-to-one at full rate), with its existing
+  five-step cap. Render positions track the sim exactly each frame
+  (no smoothing lag); the old damped chase that hid 20 Hz stair-steps
+  was removed with the rate change.
 - Player physics subdivides each authoritative world tick into smaller
-  collision steps; those steps do not replace the 20 TPS world scheduler.
+  collision steps; those steps do not replace the 60 TPS world scheduler.
 - Standing body dimensions are 0.6×1.8 blocks and eye height is 1.62
   (`player_init()` in `src/game/player.c`). Sneaking changes the speed and
   flag only. There are no crouch/swim/crawl dimensions or headroom checks.
@@ -88,7 +89,7 @@ and rendering all affect what a player observes.
 
 ### Inventory and survival
 
-- Inventory and workbench screens continue advancing the world at 20 TPS
+- Inventory and workbench screens continue advancing the world at 60 TPS
   with player movement and actions disabled. Pause and death freeze it
   (`game_state_ticks_world()` in `src/game/game_state.c`). Loading continues
   chunk streaming without advancing gameplay ticks.
@@ -100,7 +101,7 @@ and rendering all affect what a player observes.
   motion uses small substeps and gravity; item stack merging is not
   implemented.
 - The day cycle is 1,200 seconds (`TIME_DEFAULT_SPEED` in
-  `src/game/time_system.h`), equivalent to 24,000 ticks at 20 TPS. It advances
+  `src/game/time_system.h`), equivalent to 72,000 ticks at 60 TPS. It advances
   through the fixed world tick and freezes with pause and death.
 
 ### Rendering, lighting, and fluids
@@ -133,7 +134,7 @@ and rendering all affect what a player observes.
   now have explicit test coverage.
 - Resource-pack documentation now lists all 46 current tile names and the
   current sound event stems.
-- A fixed 20 TPS simulation clock now drives the world and logs dropped
+- A fixed 60 TPS simulation clock now drives the world and logs dropped
   catch-up ticks; inventory/workbench continue world simulation while pause
   and death freeze it.
 - Custom resource-pack discovery and tile loading now build paths through
@@ -143,9 +144,9 @@ and rendering all affect what a player observes.
 
 ## Known deviations
 
-1. The simulation clock is fixed at 20 TPS, but gameplay movement is not
-   yet frame-rate independence tested, and rendering lacks position
-   interpolation. Discrete toggles and hotbar changes still process after
+1. The simulation clock is fixed at 60 TPS so rendered motion advances
+   every frame; render positions track the sim exactly (no smoothing
+   lag). Discrete toggles and hotbar changes still process after
    each event drain rather than inside a world tick.
 2. Direct-velocity movement, no player pose geometry, and no edge-safe
    sneaking or step-up behavior.

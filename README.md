@@ -31,7 +31,7 @@ is in progress.
 - Persistent named worlds with versioned block, player, inventory, and
   entity data.
 - A resource-pack system with procedural fallback art and sound.
-- A 20 ticks/second world simulation; inventory and crafting keep the world
+- A 60 ticks/second world simulation; inventory and crafting keep the world
   moving, while pause and death stop it.
 - 154 registered headless test functions in the custom test runner.
 

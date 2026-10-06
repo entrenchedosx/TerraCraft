@@ -1528,46 +1528,20 @@ static void app_prepare_world_render(AppContext *app)
     if (app == NULL || !app->world_open) {
         return;
     }
-    /* Render smoothing (critically damped, 60 Hz frame-rate independent):
-     * render_pos chases the authoritative sim pos with zero overshoot.
-     * Snap on teleports (respawn/load > 4 blocks) so fast-travel never
-     * smears across the world. */
+    /* Render positions track the sim exactly: at 60 Hz ticks the steps
+     * are frame-sized, so no smoothing lag is needed (the old damped
+     * chase added ~80 ms of floaty lag to hide 20 Hz stair-steps). Snap
+     * on teleports is now the only special case, handled by the same
+     * assignment. */
+    app->player.render_pos = app->player.pos;
+    /* Mob render positions track the sim exactly (see player note). */
     {
-        Vec3 rp = app->player.render_pos;
-        Vec3 sp = app->player.pos;
-        float dx = sp.x - rp.x;
-        float dy = sp.y - rp.y;
-        float dz = sp.z - rp.z;
-        float d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 > 16.0f) {
-            app->player.render_pos = sp;
-        } else if (d2 > 0.0f) {
-            float k = 1.0f - expf(-12.0f / 60.0f);
-            app->player.render_pos =
-                mmath_vec3(rp.x + dx * k, rp.y + dy * k, rp.z + dz * k);
-        }
-    }
-    /* Smooth mob rendering toward authoritative simulation positions, just
-     * as the player view is smoothed. Snap large teleports rather than
-     * interpolating across the world. */
-    {
-        const float k = 1.0f - expf(-12.0f / 60.0f);
         for (int i = 0; i < MOB_MAX; ++i) {
             Mob *mob = &app->mobs.mobs[i];
             if (!mob->active) {
                 continue;
             }
-            Vec3 rp = mob->render_pos;
-            Vec3 sp = mob->pos;
-            float dx = sp.x - rp.x;
-            float dy = sp.y - rp.y;
-            float dz = sp.z - rp.z;
-            float d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > 16.0f) {
-                mob->render_pos = sp;
-            } else if (d2 > 0.0f) {
-                mob->render_pos = mmath_vec3(rp.x + dx * k, rp.y + dy * k, rp.z + dz * k);
-            }
+            mob->render_pos = mob->pos;
         }
     }
     camera_set_position(app->camera, player_eye_pos(&app->player));

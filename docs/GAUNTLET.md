@@ -88,11 +88,11 @@ playtest. A code-reading claim is not treated as visual verification.
 - Fixed pack directory construction and discovery. Settings now reload the
   atlas when the selected pack changes. A headless test creates a local pack,
   confirms it is discovered, and verifies its item tile reaches the atlas.
-- Added a pure 20 TPS scheduler with a five-tick catch-up cap, fractional
+- Added a pure 60 TPS scheduler with a five-tick catch-up cap, fractional
   remainder preservation, dropped-time accounting, and one-second tick-count
   checks at 30/60/144/240 FPS partitions.
 - Routed gameplay, inventory, and crafting world updates through fixed
-  0.05-second ticks. Pause and death freeze the clock. Mouse/key press edges
+  1/60-second ticks. Pause and death freeze the clock. Mouse/key press edges
   are held across down/up events until consumed; look and rendering remain
   frame-rate driven. Streaming and drawing happen once per rendered frame.
 - The independent critic found a quick jump-tap gap and a frozen-to-live
