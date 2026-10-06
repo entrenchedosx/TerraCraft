@@ -88,6 +88,7 @@ set(TERRACRAFT_SOURCES
   src/world/entity_save.c
   src/game/player.c
   src/game/player_animation.c
+  src/game/player_model.c
   src/game/simulation_clock.c
   src/game/raycast.c
   src/game/interaction.c

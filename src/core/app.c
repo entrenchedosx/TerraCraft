@@ -227,6 +227,8 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->prev_menu_click = false;
     app->prev_fly_key = false;
     app->prev_f3_key = false;
+    app->prev_f5_key = false;
+    app->third_person = false;
     app->prev_e_key = false;
     app->prev_f6_key = false;
     app->prev_f8_key = false;
@@ -365,6 +367,8 @@ static void app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock
 static void app_start_arm_swing(AppContext *app);
 static bool app_try_attack(AppContext *app);
 static void app_debug_spawn_mob(AppContext *app, EntityType type);
+static void app_position_camera(AppContext *app);
+static void app_draw_player_third(AppContext *app, float aspect);
 static void app_poll_discrete_input(AppContext *app)
 {
     bool creative = survival_is_creative(&app->player);
@@ -387,6 +391,15 @@ static void app_poll_discrete_input(AppContext *app)
         LOG_INFO("Debug overlay: %s", app->show_debug ? "on" : "off");
     }
     app->prev_f3_key = f3_down;
+
+    /* F5 third-person toggle (chase camera + visible Steve body). */
+    bool f5_down = window_is_key_down(SDL_SCANCODE_F5);
+    bool f5_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F5);
+    if (f5_pressed) {
+        app->third_person = !app->third_person;
+        LOG_INFO("Camera: %s", app->third_person ? "third-person" : "first-person");
+    }
+    app->prev_f5_key = f5_down;
 
     /* E toggles the inventory (pauses sim; cursor resolved on close). */
     bool e_down = window_is_key_down(SDL_SCANCODE_E);
@@ -436,6 +449,7 @@ static void app_poll_discrete_input(AppContext *app)
     bool f8_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F8);
     if (f8_pressed && !creative) {
         survival_damage_player(&app->player, 5.0f);
+        player_anim_notify_hurt(&app->panim);
         audio_play(&app->audio, AUDIO_PLAYER_HURT);
         LOG_INFO("Dev hurt: 5 damage (HP %.1f)", (double)app->player.health);
     }
@@ -622,6 +636,7 @@ static void app_start_arm_swing(AppContext *app)
     app->arm_swing_started = app->last_frame_time;
     app->arm_swing_active = true;
     app->arm_swing_repeat_t = PLAYER_SWING_DURATION;
+    player_anim_notify_attacked(&app->panim);
 }
 
 /* Resolve a melee click against mobs before blocks. Returns true whenever a
@@ -1274,6 +1289,20 @@ static void app_tick_playing(AppContext *app, float dt)
         app->arm_swing_repeat_t -= dt;
     }
 
+    /* First-person hand controller: locomotion facts in, events latched
+     * at their gameplay sites, one update per play tick. */
+    {
+        PlayerAnimInput pai;
+        float hspeed =
+            sqrtf(app->player.vel.x * app->player.vel.x + app->player.vel.z * app->player.vel.z);
+        pai.moving = hspeed > 0.5f;
+        pai.sprinting = app->player.sprinting && pai.moving;
+        pai.grounded = app->player.grounded;
+        pai.sneaking = app->player.sneaking;
+        pai.use_hold = app->player.eat_active || app->player.bow_drawing;
+        player_anim_update(&app->panim, &pai, dt);
+    }
+
     /* Footsteps: distance cadence on ground (either mode, never flying,
      * never sneaking — Minecraft stays silent while sneaking). */
     if (controllable && app->player.grounded && !app->player.flying && !app->player.sneaking &&
@@ -1293,9 +1322,11 @@ static void app_tick_playing(AppContext *app, float dt)
     if (!survival_is_creative(&app->player) && !app->player.flying && app->player.last_fall >= 0.0f) {
         float dist = app->player.last_fall;
         app->player.last_fall = -1.0f;
+        player_anim_notify_landed(&app->panim, dist);
         float dmg = survival_fall_damage(dist);
         if (dmg > 0.0f) {
             survival_damage_player(&app->player, dmg);
+            player_anim_notify_hurt(&app->panim);
             audio_play(&app->audio, AUDIO_PLAYER_HURT);
             LOG_INFO("fall: %.1f blocks -> %.1f damage (HP %.1f)", (double)dist, (double)dmg,
                      (double)app->player.health);
@@ -1348,6 +1379,7 @@ static void app_tick_playing(AppContext *app, float dt)
         }
         if (mev.player_hits > 0 && !app->player.dead && !creative && app->player.hurt_t <= 0.0f) {
             survival_damage_player(&app->player, mev.player_damage);
+            player_anim_notify_hurt(&app->panim);
             app->player.vel.x += mev.player_knock.x;
             app->player.vel.y += mev.player_knock.y;
             app->player.vel.z += mev.player_knock.z;
@@ -1377,6 +1409,7 @@ static void app_tick_playing(AppContext *app, float dt)
         projectile_update(&app->projectiles, &app->mobs, &app->entities, app->world, &pp, dt, &pev);
         if (pev.player_hits > 0 && !app->player.dead && !creative && app->player.hurt_t <= 0.0f) {
             survival_damage_player(&app->player, pev.player_damage);
+            player_anim_notify_hurt(&app->panim);
             app->player.vel.x += pev.player_knock.x;
             app->player.vel.y += pev.player_knock.y;
             app->player.vel.z += pev.player_knock.z;
@@ -1470,6 +1503,7 @@ static void app_render_playing(AppContext *app)
     renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
     renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                        (float)(app->last_frame_time - app->start_time), &app->mobs_drawn, &app->mobs_culled);
+    app_draw_player_third(app, aspect);
     renderer_draw_projectiles(app->renderer, &app->projectiles, app->camera, aspect, &app->clock,
                               &app->arrows_drawn);
     renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);
@@ -1501,11 +1535,15 @@ static void app_render_playing(AppContext *app)
         const ItemStack *held = &app->player.inv.slots[app->player.hotbar_sel];
         int held_tile = stack_is_empty(held) ? -1 : item_get_info(held->item)->tile;
         uint16_t held_block = stack_is_empty(held) ? 0 : item_to_block(held->item);
-        float swing_phase = app->arm_swing_active
-                                ? player_swing_phase((float)(app->last_frame_time - app->arm_swing_started))
-                                : 1.0f;
-        renderer_draw_player_arm(app->renderer, app->camera, aspect, &app->clock, held_tile,
-                                 held_block, swing_phase);
+        /* No floating arm in third-person: the real body is visible. */
+        if (!app->third_person) {
+            float swing_phase = app->arm_swing_active
+                                    ? player_swing_phase((float)(app->last_frame_time - app->arm_swing_started))
+                                    : 1.0f;
+            PlayerAnimPose pose = player_anim_pose(&app->panim);
+            renderer_draw_player_arm(app->renderer, app->camera, aspect, &app->clock, held_tile,
+                                     held_block, swing_phase, &pose);
+        }
     }
     bool vitals = !survival_is_creative(&app->player);
     float eat_frac = app->player.eat_active ? app->player.eat_t / SURVIVAL_EAT_TIME : -1.0f;
@@ -1523,6 +1561,49 @@ static void app_render_playing(AppContext *app)
  * 60 Hz smoothed render position (player_eye_pos reads render_pos):
  * simulation still steps at 20 Hz, but the view never stair-steps.
  */
+#define APP_THIRD_PERSON_DIST 4.0f
+
+/* Place the camera: first-person sits at the eye; third-person pulls
+ * back along the view direction, clipped 0.3 short of any wall so the
+ * camera never embeds in terrain. Same yaw/pitch either way, so the
+ * crosshair ray still starts at the eye (gameplay never reads the
+ * camera position for targeting). */
+static void app_position_camera(AppContext *app)
+{
+    Vec3 eye = player_eye_pos(&app->player);
+    if (!app->third_person) {
+        camera_set_position(app->camera, eye);
+    } else {
+        HitResult back = raycast_from_eye(eye, app->player.yaw + MMATH_PI, -app->player.pitch,
+                                          app->world, APP_THIRD_PERSON_DIST);
+        float d = back.hit ? back.dist - 0.3f : APP_THIRD_PERSON_DIST;
+        if (d < 0.5f) {
+            d = 0.5f;
+        }
+        float cp = cosf(app->player.pitch);
+        Vec3 fwd = mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch),
+                                    -cosf(app->player.yaw) * cp);
+        camera_set_position(app->camera, mmath_vec3_sub(eye, mmath_vec3_scale(fwd, d)));
+    }
+    camera_set_yaw_pitch(app->camera, app->player.yaw, app->player.pitch);
+}
+
+/* Draw the visible Steve body in third-person (all world-view states).
+ * Stride blend follows ground speed so limbs rest when still. */
+static void app_draw_player_third(AppContext *app, float aspect)
+{
+    if (!app->third_person) {
+        return;
+    }
+    float hspeed =
+        sqrtf(app->player.vel.x * app->player.vel.x + app->player.vel.z * app->player.vel.z);
+    float blend = hspeed / 4.0f;
+    if (blend > 1.0f) {
+        blend = 1.0f;
+    }
+    renderer_draw_player(app->renderer, app->camera, aspect, &app->clock, &app->player, blend);
+}
+
 static void app_prepare_world_render(AppContext *app)
 {
     if (app == NULL || !app->world_open) {
@@ -1544,8 +1625,7 @@ static void app_prepare_world_render(AppContext *app)
             mob->render_pos = mob->pos;
         }
     }
-    camera_set_position(app->camera, player_eye_pos(&app->player));
-    camera_set_yaw_pitch(app->camera, app->player.yaw, app->player.pitch);
+    app_position_camera(app);
     streamer_update(&app->streamer, app->player.pos, MINEC_STREAM_BUDGET);
     renderer_prune_world(app->renderer, app->world);
     renderer_refresh_world(app->renderer, app->world);
@@ -1712,14 +1792,15 @@ int app_run(AppContext *app)
                 renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                                    (float)(app->last_frame_time - app->start_time), NULL, NULL);
+                app_draw_player_third(app, aspect);
                 renderer_draw_projectiles(app->renderer, &app->projectiles, app->camera, aspect,
                                           &app->clock, NULL);
                 renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);
                 renderer_draw_particles(app->renderer, &app->particles, app->camera, aspect, &app->clock);
                 screens_update(app, &ui);
                 /* E closes the inventory too (cursor resolved first). The E
-                 * edge here shares prev_e_key with PLAYING so a held key
-                 * from opening never double-triggers. */
+                * edge here shares prev_e_key with PLAYING so a held key
+                * from opening never double-triggers. */
                 bool e_down = window_is_key_down(SDL_SCANCODE_E);
                 bool e_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_E);
                 if (e_pressed && app->state == GAME_STATE_INVENTORY) {
@@ -1744,6 +1825,7 @@ int app_run(AppContext *app)
                 renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                                    (float)(app->last_frame_time - app->start_time), NULL, NULL);
+                app_draw_player_third(app, aspect);
                 renderer_draw_projectiles(app->renderer, &app->projectiles, app->camera, aspect,
                                           &app->clock, NULL);
                 renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);

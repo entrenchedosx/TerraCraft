@@ -188,8 +188,8 @@ int test_atlas_mcfaces(void)
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_BEEF), "beef") == 0);
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_LEATHER), "leather") == 0);
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_FLESH), "flesh") == 0);
-    TEST_ASSERT(texture_atlas_tile_file(TILE_PLAYER_SKIN) == NULL);
-    TEST_ASSERT(texture_atlas_tile_file(TILE_PLAYER_SLEEVE) == NULL);
+    TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_PLAYER_SKIN), "player_skin") == 0);
+    TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_PLAYER_SLEEVE), "player_sleeve") == 0);
     TEST_ASSERT(texture_atlas_tile_file(49) == NULL);
     TEST_ASSERT(texture_atlas_tile_file(-1) == NULL);
     return failures;

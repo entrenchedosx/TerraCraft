@@ -227,6 +227,9 @@ int test_save_mob_corrupt(void);
 int test_save_mob_dead_excluded(void);
 int test_mob_models(void);
 int test_player_swing_animation(void);
+int test_player_anim_states(void);
+int test_player_body_model(void);
+int test_mob_strike_pitch(void);
 
 /* Pathfinding tests (defined in test_path.c). */
 int test_path_flat(void);

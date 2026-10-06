@@ -151,14 +151,15 @@ int block_tile_for_face(uint16_t block, int face)
 }
 
 /* Overridable tile file names (index = tile; keep in sync with AtlasTile).
- * Player tiles stay procedural (NULL = no override file). */
+ * Player tiles load Steve-sourced crops (converter) when present and keep
+ * the procedural art as fallback (e.g. CI without mcassets). */
 static const char *TILE_FILES[] = {
     "grass_top", "grass_side", "dirt", "stone", "sand", "wood", "leaves", "glass", "water", "bedrock",
     "coal_ore", "iron_ore", "gold_ore", "diamond_ore", "snow", "grass_bottom", "plant", "flower", "torch",
     "tool_pickaxe", "tool_axe", "tool_shovel", "coal", "crack0", "crack1", "crack2", "crack3", "crack4",
     "workbench", "planks", "apple", "stick", "wood_top", "workbench_top", "workbench_side", "wood_pickaxe",
     "stone_pickaxe", "wood_axe", "stone_axe", "wood_shovel", "stone_shovel", "bow", "arrow",
-    "bone", "beef", "leather", NULL, NULL, "flesh",
+    "bone", "beef", "leather", "player_skin", "player_sleeve", "flesh",
 };
 #define TILE_FILE_COUNT 49
 
@@ -698,8 +699,9 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         }
     }
 
-    /* Original first-person player palette: pixel-shaded skin and a blue
-     * sleeve with a small light cuff. These tiles remain procedural. */
+    /* First-person player palette (procedural fallback under the Steve-
+     * sourced generated tiles): pixel-shaded skin and a blue sleeve
+     * with a small light cuff. */
     {
         int col = TILE_PLAYER_SKIN % ATLAS_TILES;
         int row = TILE_PLAYER_SKIN / ATLAS_TILES;

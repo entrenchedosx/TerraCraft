@@ -7,8 +7,12 @@
 #include "game/mob.h"
 #include "game/mob_model.h"
 #include "game/particle.h"
+
+#include "game/player.h"
 #include "game/projectile.h"
 #include "game/player_animation.h"
+
+#include "game/player_model.h"
 #include "game/time_system.h"
 #include "platform/gl_ctx.h"
 #include "render/camera.h"
@@ -86,6 +90,7 @@ struct Renderer {
     float *mob_verts; /* Owned mob vertex scratch (NULL when OOM). */
     unsigned int *mob_idx; /* Owned identity indices for mob_verts. */
     unsigned int mob_skin_tex[3]; /* Per-model skin GL textures (0 = tile path). */
+    unsigned int player_skin_tex; /* Steve skin GL texture (0 = tile path). */
     RendererPerf perf; /* Last-frame counters. */
     char atlas_pack[64]; /* Active pack name ("Default" = procedural). */
 };
@@ -376,14 +381,31 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4
         Vec3 base = mmath_vec3(m->render_pos.x + hurt_shake,
                                m->render_pos.y - sink + (m->grounded ? idle_bob : 0.0f),
                                m->render_pos.z);
+        /* Stride blend: full swing underfoot, stagger through HURT,
+         * frozen rest once dead (no mid-stride corpses). */
+        float stride_blend = 1.0f;
+        if (m->dead) {
+            stride_blend = 0.0f;
+        } else if (m->state == MOB_STATE_HURT) {
+            stride_blend = 0.3f;
+        }
         for (int p = 0; p < model->nparts; ++p) {
             const MobModelPart *part = &model->parts[p];
             float pitch = 0.0f;
             if (part->anim == MOB_ANIM_LEG) {
                 float phase = m->walk_phase + ((p % 2) ? 3.14159265f : 0.0f);
-                pitch = sinf(phase) * 0.6f;
+                pitch = sinf(phase) * 0.6f * stride_blend;
             } else if (part->anim == MOB_ANIM_HEAD) {
-                pitch = sinf(m->walk_phase * 0.5f) * 0.08f;
+                pitch = sinf(m->walk_phase * 0.5f) * 0.08f * stride_blend;
+            } else if (part->anim == MOB_ANIM_STRIKE_ARM) {
+                /* Melee swipe reads the AI state clock; damage itself
+                 * stays on the attack cooldown (never on a frame). */
+                if (m->state == MOB_STATE_ATTACK && !m->dead) {
+                    pitch = mob_strike_pitch(m->state_t);
+                } else {
+                    float phase = m->walk_phase + ((p % 2) ? 3.14159265f : 0.0f);
+                    pitch = sinf(phase) * 0.6f * stride_blend;
+                }
             } else if (part->anim == MOB_ANIM_AIM_ARM) {
                 /* Bow arm: raised forward while aiming/firing, swings
                  * with the walk like any arm otherwise. */
@@ -391,7 +413,7 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4
                     pitch = -1.3f;
                 } else {
                     float phase = m->walk_phase + ((p % 2) ? 3.14159265f : 0.0f);
-                    pitch = sinf(phase) * 0.6f;
+                    pitch = sinf(phase) * 0.6f * stride_blend;
                 }
             }
             float fuv[6][4];
@@ -432,6 +454,63 @@ static void mob_draw_batch(Renderer *r, const Camera *cam, float aspect, const T
     renderer_end_voxel(r);
 }
 
+/* Draw the third-person player body (Steve skin when loaded, atlas tile
+ * fallback otherwise). Limbs swing distance-paced off walk_phase scaled
+ * by move_blend (0 still .. 1 full stride); the head carries the look
+ * pitch (clamped +/-89 deg upstream, so no impossible rotations).
+ * Frustum-culled like mobs; no-op on bad args. */
+void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts,
+                          const Player *p, float move_blend)
+{
+    if (r == NULL || cam == NULL || p == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
+        return;
+    }
+    const MobModel *model = player_body_model();
+    const MobSkin *skin = player_body_skin();
+    if (!mob_model_validate(model) || !mob_skin_validate(skin, model->nparts)) {
+        return;
+    }
+    float blend = isfinite(move_blend) ? move_blend : 0.0f;
+    if (blend < 0.0f) {
+        blend = 0.0f;
+    }
+    if (blend > 1.0f) {
+        blend = 1.0f;
+    }
+    float planes[6][4];
+    camera_get_frustum_planes(cam, aspect, planes);
+    Vec3 mn = mmath_vec3(p->render_pos.x - 0.5f, p->render_pos.y, p->render_pos.z - 0.5f);
+    Vec3 mx = mmath_vec3(p->render_pos.x + 0.5f, p->render_pos.y + p->height, p->render_pos.z + 0.5f);
+    if (!camera_aabb_visible(planes, mn, mx)) {
+        return;
+    }
+    bool skinned = r->player_skin_tex != 0;
+    float crouch = p->sneaking ? 0.08f : 0.0f;
+    Vec3 base = mmath_vec3(p->render_pos.x, p->render_pos.y - crouch, p->render_pos.z);
+    size_t o = 0;
+    for (int i = 0; i < model->nparts; ++i) {
+        const MobModelPart *part = &model->parts[i];
+        float pitch = 0.0f;
+        if (i == PLAYER_PART_HEAD) {
+            /* Negative: the emitter's +pitch tips faces down. */
+            pitch = -p->pitch;
+        } else if (part->anim == MOB_ANIM_LEG) {
+            float phase = p->walk_phase + ((i % 2) ? 3.14159265f : 0.0f);
+            pitch = sinf(phase) * 0.6f * blend;
+        }
+        float fuv[6][4];
+        if (skinned) {
+            mob_skin_uvs(skin, i, fuv);
+        } else {
+            mob_tile_uvs(part, fuv);
+        }
+        mob_emit_part(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, p->yaw, part, pitch,
+                      false, fuv);
+        o += 36;
+    }
+    mob_draw_batch(r, cam, aspect, ts, o, skinned ? r->player_skin_tex : r->atlas);
+}
+
 /* Rebase one view-model vertex from camera-local coordinates into world
  * space after applying the shared shoulder swing. */
 static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up, Vec3 forward,
@@ -460,7 +539,7 @@ static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up,
  * the HUD still renders afterward. */
 void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
                               const TimeSystem *ts, int held_tile, uint16_t held_block,
-                              float swing_phase)
+                              float swing_phase, const PlayerAnimPose *pose)
 {
     if (r == NULL || cam == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
         return;
@@ -479,10 +558,24 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
          held_tile, -1, 0.0f, MOB_ANIM_NONE},
     };
     int count = held_tile >= 0 && held_tile <= 255 ? 3 : 2;
-    const Vec3 shoulder = {0.37f, 0.02f, 0.60f};
-    float swing = player_swing_weight(swing_phase);
-    float swing_x = -0.70f * swing;
-    float swing_y = 0.06f * swing;
+    /* Controller pose: stride bob, landing dip, use raise, punch envelope.
+     * NULL pose falls back to the legacy swing-phase drive. */
+    float bob_x = 0.0f;
+    float bob_y = 0.0f;
+    float dip = 0.0f;
+    float raise = 0.0f;
+    float punch = player_swing_weight(swing_phase);
+    if (pose != NULL) {
+        bob_x = pose->bob_x;
+        bob_y = pose->bob_y;
+        dip = pose->dip;
+        raise = pose->raise;
+        punch = pose->punch;
+    }
+    Vec3 shoulder = {0.37f + bob_x - raise * 0.5f, 0.02f + bob_y - dip + raise * 0.7f,
+                     0.60f + raise * 0.3f};
+    float swing_x = -0.70f * punch;
+    float swing_y = 0.06f * punch + bob_x * 0.8f;
     Vec3 eye = camera_get_position(cam);
     Vec3 forward = camera_get_forward(cam);
     Vec3 right = camera_get_right(cam);
@@ -729,6 +822,22 @@ Renderer *renderer_create(GlContext *gl)
             texture_atlas_delete(tex);
         }
     }
+    /* Steve skin for the third-person body (same fallback contract). */
+    r->player_skin_tex = 0;
+    {
+        const MobSkin *pskin = player_body_skin();
+        const MobModel *pmodel = player_body_model();
+        if (pskin != NULL && pmodel != NULL && mob_skin_validate(pskin, pmodel->nparts)) {
+            int sw = 0;
+            int sh = 0;
+            unsigned int tex = mob_skin_load(pskin->file, &sw, &sh);
+            if (tex != 0 && sw == pskin->width && sh == pskin->height) {
+                r->player_skin_tex = tex;
+            } else {
+                texture_atlas_delete(tex);
+            }
+        }
+    }
 
     /* Particle scratch: one allocation for the process lifetime (no
      * per-frame heap churn for transient cubes). NULL on OOM degrades
@@ -895,6 +1004,8 @@ void renderer_destroy(Renderer *r)
         texture_atlas_delete(r->mob_skin_tex[i]);
         r->mob_skin_tex[i] = 0;
     }
+    texture_atlas_delete(r->player_skin_tex);
+    r->player_skin_tex = 0;
     shader_destroy(r->shader);
     free(r->part_verts);
     free(r->part_idx);

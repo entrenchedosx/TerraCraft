@@ -31,6 +31,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "game/player_animation.h"
+
 /* Forward declarations. */
 typedef struct GlContext GlContext;
 typedef struct World World;
@@ -238,13 +240,23 @@ void renderer_draw_particles(Renderer *r, const ParticlePool *pool, const Camera
 void renderer_draw_mobs(Renderer *r, const MobPool *pool, const Camera *cam, float aspect,
                         const TimeSystem *ts, float anim_time, int *out_drawn, int *out_culled);
 
+/* Forward declaration (full type in game/player.h). */
+typedef struct Player Player;
+
+/* Draw the third-person player body after mobs (Steve skin when loaded,
+ * atlas tile fallback otherwise; frustum-culled). move_blend scales the
+ * stride swing (0 still, 1 full). No-op on bad args. */
+void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts,
+                          const Player *p, float move_blend);
+
 /* Draw the original blocky first-person sleeve and hand after world effects
  * but before the HUD. held_tile is -1 for an empty hand; held_block is 0 for
  * a non-block item and otherwise supplies its per-face block textures.
- * swing_phase is 0..1. */
+ * swing_phase is 0..1 (legacy punch drive; ignored when pose is set).
+ * pose carries the animation controller output (NULL reads as no offset). */
 void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
                               const TimeSystem *ts, int held_tile, uint16_t held_block,
-                              float swing_phase);
+                              float swing_phase, const PlayerAnimPose *pose);
 
 /* Draw live projectiles as small oriented shafts (one transient upload
  * per call from renderer-owned scratch: no per-frame heap churn).

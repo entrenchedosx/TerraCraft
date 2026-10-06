@@ -19,13 +19,14 @@ static const MobModelPart COW_PARTS[] = {
 };
 
 /* Zombie (model 1): classic humanoid — box torso, cube head, hanging
- * arms, straight legs. Collision 0.6 x 1.9 (+Z faces forward).
+ * arms, straight legs. Collision 0.6 x 1.9 (+Z faces forward). Arms
+ * swipe on ATTACK (STRIKE_ARM), swing with the stride otherwise.
  */
 static const MobModelPart ZOMBIE_PARTS[] = {
     {{-0.25f, 0.70f, -0.125f}, {0.50f, 0.70f, 0.25f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_NONE},
     {{-0.25f, 1.40f, -0.25f}, {0.50f, 0.50f, 0.50f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_HEAD},
-    {{-0.50f, 0.70f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 1.40f, MOB_ANIM_LEG},
-    {{0.25f, 0.70f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 1.40f, MOB_ANIM_LEG},
+    {{-0.50f, 0.70f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 1.40f, MOB_ANIM_STRIKE_ARM},
+    {{0.25f, 0.70f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 1.40f, MOB_ANIM_STRIKE_ARM},
     {{-0.25f, 0.00f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
     {{0.00f, 0.00f, -0.125f}, {0.25f, 0.70f, 0.25f}, TILE_LEATHER, -1, 0.70f, MOB_ANIM_LEG},
 };
@@ -232,7 +233,7 @@ bool mob_model_validate(const MobModel *m)
         if (p->tile < 0 || p->tile > 255) {
             return false;
         }
-        if (p->anim < MOB_ANIM_NONE || p->anim > MOB_ANIM_AIM_ARM) {
+        if (p->anim < MOB_ANIM_NONE || p->anim > MOB_ANIM_STRIKE_ARM) {
             return false;
         }
         if (p->offset.y + p->size.y > m->height + 0.01f) {
@@ -272,4 +273,20 @@ bool mob_skin_validate(const MobSkin *s, int nparts)
         }
     }
     return true;
+}
+
+/* Swipe pitch for STRIKE_ARM parts. */
+float mob_strike_pitch(float state_t)
+{
+    float t = isfinite(state_t) ? state_t : 0.0f;
+    if (t <= 0.0f) {
+        return 0.0f;
+    }
+    if (t < 0.25f) {
+        return -1.2f * (t / 0.25f);
+    }
+    if (t < 0.65f) {
+        return -1.2f * (1.0f - (t - 0.25f) / 0.4f);
+    }
+    return 0.0f;
 }

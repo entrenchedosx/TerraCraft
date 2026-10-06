@@ -93,6 +93,7 @@ void player_init(Player *p)
     p->bow_full = false;
     p->fall_peak = -1.0f;
     p->last_fall = -1.0f;
+    p->walk_phase = 0.0f;
     p->mine_active = false;
     p->mine_bx = 0;
     p->mine_by = 0;
@@ -332,6 +333,10 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
             }
         }
         p->fall_peak = -1.0f;
+        /* Stride phase for third-person limb swing (same cadence as mobs:
+         * distance-paced, so the swing matches ground speed at any rate). */
+        float hspeed = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
+        p->walk_phase += hspeed * dt * 4.0f;
     } else if (p->fall_peak < p->pos.y) {
         p->fall_peak = p->pos.y;
     }

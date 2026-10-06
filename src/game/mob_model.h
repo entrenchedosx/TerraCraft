@@ -17,7 +17,8 @@ typedef enum MobPartAnim {
     MOB_ANIM_NONE = 0, /* Static part (body, head base). */
     MOB_ANIM_LEG,      /* Limb swing: pitch = sin(walk_phase) * 0.6. */
     MOB_ANIM_HEAD,     /* Head bob: slight pitch with walk phase. */
-    MOB_ANIM_AIM_ARM   /* Bow arm: raised forward in AIM/ATTACK, swings else. */
+    MOB_ANIM_AIM_ARM,  /* Bow arm: raised forward in AIM/ATTACK, swings else. */
+    MOB_ANIM_STRIKE_ARM /* Melee arm: windup swipe in ATTACK (mob_strike_pitch), swings else. */
 } MobPartAnim;
 
 /* One cuboid part (units are blocks, origin at the mob feet center). */
@@ -70,19 +71,18 @@ typedef struct MobModel {
 /* Model for a mob definition index (see MobDefinition.model).
  *
  * Args:
- *   index: 0 = cow, 1 = gloomstalker, 2 = skeleton.
+ *   index: 0 = cow, 1 = zombie, 2 = skeleton.
  *
  * Returns: model, or NULL on bad index.
  */
 const MobModel *mob_model_for(int index);
 
 /* Skin for a mob definition index (same indexing as mob_model_for).
- * Only mobs with a real Minecraft counterpart have skins (cow,
- * skeleton); original creatures return NULL and render with atlas
- * tiles.
+ * Only mobs with a real Minecraft counterpart have skins (cow, zombie,
+ * skeleton); anything else renders with atlas tiles.
  *
  * Args:
- *   index: 0 = cow, 1 = gloomstalker, 2 = skeleton.
+ *   index: 0 = cow, 1 = zombie, 2 = skeleton.
  *
  * Returns: skin, or NULL (tile path) on bad index or unskinned model.
  */
@@ -119,3 +119,15 @@ bool mob_skin_validate(const MobSkin *s, int nparts);
  * Returns: true when usable.
  */
 bool mob_model_validate(const MobModel *m);
+
+/* Swipe pitch for STRIKE_ARM parts (radians, <= 0): 0.25 s windup to
+ * -1.2, 0.4 s release back to rest. Pure function of time-in-attack so
+ * the animation never drives the damage event (that stays on the AI
+ * cooldown). Headless-testable.
+ *
+ * Args:
+ *   state_t: seconds in MOB_STATE_ATTACK (NaN/negative reads as 0).
+ *
+ * Returns: pitch (0 at rest).
+ */
+float mob_strike_pitch(float state_t);

@@ -116,7 +116,7 @@ int main(void)
                (unsigned)pool.ai_thinks);
     }
 
-    /* Case 2: chasing gloomstalkers east of a gapped wall, player west in
+    /* Case 2: chasing zombies east of a gapped wall, player west in
      * range and visible through the gap (paths + follow + physics). */
     {
         MobPool pool;

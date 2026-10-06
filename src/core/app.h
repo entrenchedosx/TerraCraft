@@ -21,6 +21,7 @@
 #include "game/game_state.h"
 #include "game/inventory.h"
 #include "game/player.h"
+#include "game/player_animation.h"
 #include "game/session.h"
 #include "game/simulation_clock.h"
 #include "game/time_system.h"
@@ -104,6 +105,7 @@ typedef struct AppContext {
     double arm_swing_started; /* Start time of the current first-person punch. */
     float arm_swing_repeat_t; /* Repeat gate for held mining/attacking. */
     bool arm_swing_active; /* A first-person swing has been triggered. */
+    PlayerAnim panim;    /* First-person hand animation controller. */
     ItemStack cursor;     /* Inventory cursor-held stack (UI drag). */
     Vec3 spawn_point;     /* Stable world spawn feet (persisted). */
     bool has_spawn_point; /* True once a spawn was recorded. */
@@ -121,6 +123,7 @@ typedef struct AppContext {
     int frame_count;      /* Frames since last FPS log. */
     float fps_smooth;     /* Last logged FPS (for the F3 overlay). */
     bool show_debug;      /* F3 debug overlay toggle. */
+    bool third_person;    /* F5 camera: chase view + visible player body. */
     double autosave_timer; /* Seconds since last autosave (PLAYING only). */
     int load_done;        /* LOADING progress: chunks resident. */
     int load_total;       /* LOADING progress: chunks expected. */
@@ -131,6 +134,7 @@ typedef struct AppContext {
     bool prev_menu_click; /* Menu click edge state last frame. */
     bool prev_fly_key;    /* F key state last frame. */
     bool prev_f3_key;     /* F3 key state last frame. */
+    bool prev_f5_key;     /* F5 camera-toggle key state last frame. */
     bool prev_e_key;      /* E key state last frame (inventory toggle). */
     bool prev_f6_key;     /* F6 dev-give key state last frame. */
     bool prev_f8_key;     /* F8 dev-hurt key state last frame. */

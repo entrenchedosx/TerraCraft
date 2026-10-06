@@ -6,6 +6,7 @@
 #include "game/mob.h"
 #include "game/mob_model.h"
 #include "game/player_animation.h"
+#include "game/player_model.h"
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/entity_save.h"
@@ -1228,5 +1229,212 @@ int test_player_swing_animation(void)
     TEST_ASSERT_FLOAT_EQ(player_swing_weight(0.5f), 1.0f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(player_swing_weight(1.0f), 0.0f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(player_swing_weight(2.0f), 0.0f, 1e-6f);
+    return failures;
+}
+
+/* Drive a controller with a fixed input for n 1/60 s steps. */
+static void test_anim_drive(PlayerAnim *a, const PlayerAnimInput *in, int n)
+{
+    for (int i = 0; i < n; ++i) {
+        player_anim_update(a, in, 1.0f / 60.0f);
+    }
+}
+
+/* Test: hand controller states, priorities, and one-shot expiry. */
+int test_player_anim_states(void)
+{
+    int failures = 0;
+    PlayerAnim a;
+    player_anim_init(&a);
+    TEST_ASSERT(a.state == PLAYER_ANIM_IDLE);
+    PlayerAnimPose zp = player_anim_pose(&a);
+    TEST_ASSERT_FLOAT_EQ(zp.bob_x, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(zp.punch, 0.0f, 1e-6f);
+
+    PlayerAnimInput walk = {true, false, true, false, false};
+    test_anim_drive(&a, &walk, 30);
+    TEST_ASSERT(a.state == PLAYER_ANIM_WALK);
+    TEST_ASSERT(a.stride > 0.0f);
+    float peak = 0.0f;
+    for (int i = 0; i < 120; ++i) {
+        player_anim_update(&a, &walk, 1.0f / 60.0f);
+        PlayerAnimPose p = player_anim_pose(&a);
+        float m = p.bob_x < 0.0f ? -p.bob_x : p.bob_x;
+        if (m > peak) {
+            peak = m;
+        }
+    }
+    TEST_ASSERT(peak > PLAYER_ANIM_BOB_WALK * 0.9f);
+
+    PlayerAnimInput sprint = {true, true, true, false, false};
+    player_anim_update(&a, &sprint, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_SPRINT);
+
+    PlayerAnimInput air = {true, false, false, false, false};
+    player_anim_update(&a, &air, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_AIR);
+
+    /* Small hop settles straight to base (no dip theatre). */
+    player_anim_notify_landed(&a, 0.5f);
+    player_anim_update(&a, &walk, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_WALK);
+
+    /* Real fall dips, then releases to base. */
+    player_anim_notify_landed(&a, 4.0f);
+    player_anim_update(&a, &walk, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_LAND);
+    TEST_ASSERT_FLOAT_EQ(a.land_mag, 4.0f / PLAYER_ANIM_LAND_FULL_DIST, 1e-5f);
+    float dip_peak = 0.0f;
+    for (int i = 0; i < 30; ++i) {
+        player_anim_update(&a, &walk, 1.0f / 60.0f);
+        PlayerAnimPose p = player_anim_pose(&a);
+        if (p.dip > dip_peak) {
+            dip_peak = p.dip;
+        }
+    }
+    TEST_ASSERT(dip_peak > 0.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_WALK);
+
+    /* Attack punches with the swing envelope, then releases. */
+    player_anim_notify_attacked(&a);
+    player_anim_update(&a, &walk, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_ATTACK);
+    float punch_peak = 0.0f;
+    for (int i = 0; i < 30; ++i) {
+        player_anim_update(&a, &walk, 1.0f / 60.0f);
+        PlayerAnimPose p = player_anim_pose(&a);
+        if (p.punch > punch_peak) {
+            punch_peak = p.punch;
+        }
+    }
+    TEST_ASSERT(punch_peak > 0.9f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_WALK);
+    TEST_ASSERT_FLOAT_EQ(player_anim_pose(&a).punch, 0.0f, 1e-6f);
+
+    /* Hurt interrupts the swing and lifts the hand. */
+    player_anim_notify_attacked(&a);
+    player_anim_update(&a, &walk, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_ATTACK);
+    player_anim_notify_hurt(&a);
+    player_anim_update(&a, &walk, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_HURT);
+    float lift = 0.0f;
+    for (int i = 0; i < 25; ++i) {
+        player_anim_update(&a, &walk, 1.0f / 60.0f);
+        PlayerAnimPose p = player_anim_pose(&a);
+        if (p.dip < lift) {
+            lift = p.dip;
+        }
+    }
+    TEST_ASSERT(lift < 0.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_WALK);
+
+    /* Held use raises the hand; sneak crouches it. */
+    PlayerAnimInput use = {false, false, true, false, true};
+    player_anim_update(&a, &use, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_USE);
+    TEST_ASSERT_FLOAT_EQ(player_anim_pose(&a).raise, 0.10f, 1e-6f);
+    PlayerAnimInput sneak_idle = {false, false, true, true, false};
+    player_anim_update(&a, &sneak_idle, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_IDLE);
+    TEST_ASSERT_FLOAT_EQ(player_anim_pose(&a).dip, 0.025f, 1e-6f);
+
+    /* Deterministic: same drive, same result. */
+    PlayerAnim b;
+    player_anim_init(&b);
+    player_anim_notify_landed(&b, 4.0f);
+    test_anim_drive(&b, &walk, 10);
+    PlayerAnim c;
+    player_anim_init(&c);
+    player_anim_notify_landed(&c, 4.0f);
+    test_anim_drive(&c, &walk, 10);
+    TEST_ASSERT(b.state == c.state);
+    TEST_ASSERT_FLOAT_EQ(b.stride, c.stride, 1e-6f);
+
+    /* Bad inputs never crash. */
+    player_anim_init(NULL);
+    player_anim_notify_attacked(NULL);
+    player_anim_notify_hurt(NULL);
+    player_anim_notify_landed(NULL, 3.0f);
+    player_anim_notify_landed(&a, NAN);
+    player_anim_update(NULL, &walk, 0.05f);
+    player_anim_update(&a, NULL, 0.05f);
+    player_anim_update(&a, &walk, NAN);
+    player_anim_update(&a, &walk, -1.0f);
+    player_anim_update(&a, &walk, 100.0f);
+    PlayerAnimPose np = player_anim_pose(NULL);
+    TEST_ASSERT_FLOAT_EQ(np.punch, 0.0f, 1e-6f);
+    return failures;
+}
+
+/* Test: third-person body model + skin are valid, Steve-mapped, 1.8 m. */
+int test_player_body_model(void)
+{
+    int failures = 0;
+    const MobModel *m = player_body_model();
+    TEST_ASSERT(m != NULL);
+    TEST_ASSERT(mob_model_validate(m));
+    TEST_ASSERT(m->nparts == PLAYER_PART_COUNT);
+    TEST_ASSERT_FLOAT_EQ(m->height, 1.8f, 1e-6f);
+    /* Head sits on top, limbs pivot at shoulder/hip, feet at zero. */
+    TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_HEAD].offset.y, 1.35f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_ARM_L].pivot_y, 1.35f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_LEG_L].pivot_y, 0.675f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_LEG_R].offset.y, 0.0f, 1e-6f);
+    /* Left limbs sit on +X (model's left facing +Z), right on -X. */
+    TEST_ASSERT(m->parts[PLAYER_PART_ARM_L].offset.x > 0.0f);
+    TEST_ASSERT(m->parts[PLAYER_PART_ARM_R].offset.x < 0.0f);
+    const MobSkin *s = player_body_skin();
+    TEST_ASSERT(s != NULL);
+    TEST_ASSERT(mob_skin_validate(s, m->nparts));
+    TEST_ASSERT(strcmp(s->file, "player") == 0);
+    TEST_ASSERT(s->width == 64 && s->height == 64);
+    /* Spot-check Steve net regions: head front, torso front, arm front. */
+    MobSkinRect hf = s->parts[PLAYER_PART_HEAD].faces[5];
+    TEST_ASSERT(hf.x == 8 && hf.y == 8 && hf.w == 8 && hf.h == 8);
+    MobSkinRect tf = s->parts[PLAYER_PART_TORSO].faces[5];
+    TEST_ASSERT(tf.x == 20 && tf.y == 20 && tf.w == 8 && tf.h == 12);
+    MobSkinRect af = s->parts[PLAYER_PART_ARM_R].faces[5];
+    TEST_ASSERT(af.x == 44 && af.y == 20 && af.w == 4 && af.h == 12);
+    return failures;
+}
+
+/* Test: melee swipe curve (windup, release, rest) + zombie arm roles. */
+int test_mob_strike_pitch(void)
+{
+    int failures = 0;
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(0.0f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(-1.0f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(NAN), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(0.125f), -0.6f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(0.25f), -1.2f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(0.45f), -0.6f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(0.65f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(mob_strike_pitch(5.0f), 0.0f, 1e-6f);
+    /* Monotonic windup, monotonic release (no mid-swing pops). */
+    float prev = 0.0f;
+    for (int i = 1; i <= 10; ++i) {
+        float v = mob_strike_pitch((float)i * 0.025f);
+        TEST_ASSERT(v <= prev + 1e-6f);
+        prev = v;
+    }
+    for (int i = 1; i <= 8; ++i) {
+        float v = mob_strike_pitch(0.25f + (float)i * 0.05f);
+        TEST_ASSERT(v >= prev - 1e-6f);
+        prev = v;
+    }
+    /* Zombie arms swipe; validator accepts the new role. */
+    const MobModel *z = mob_model_for(1);
+    TEST_ASSERT(z != NULL);
+    TEST_ASSERT(mob_model_validate(z));
+    TEST_ASSERT(z->parts[2].anim == MOB_ANIM_STRIKE_ARM);
+    TEST_ASSERT(z->parts[3].anim == MOB_ANIM_STRIKE_ARM);
+    TEST_ASSERT(z->parts[4].anim == MOB_ANIM_LEG);
+    MobModelPart copy[6];
+    memcpy(copy, z->parts, sizeof(copy));
+    MobModel bad = {copy, z->nparts, z->height};
+    TEST_ASSERT(mob_model_validate(&bad));
+    copy[0].anim = 99;
+    TEST_ASSERT(mob_model_validate(&bad) == false);
     return failures;
 }

@@ -129,7 +129,7 @@ typedef struct MobDefinition {
 typedef struct Mob {
     bool active;        /* True while in the world. */
     uint32_t gen;       /* Generation (handle validation). */
-    EntityType type;    /* Cow / gloomstalker / skeleton. */
+    EntityType type;    /* Cow / zombie / skeleton. */
     Vec3 pos;           /* Feet position (world). */
     Vec3 render_pos;    /* Interpolated feet for rendering (smoothed). */
     Vec3 prev_pos;      /* Previous tick position (stuck detect + interp). */
@@ -249,7 +249,7 @@ const MobDefinition *mob_definition(EntityType type);
  *
  * Args:
  *   pool: pool (must not be NULL).
- *   type: a tabled living type (cow/gloomstalker/skeleton;
+ *   type: a tabled living type (cow/zombie/skeleton;
  *     others rejected).
  *   pos: feet spawn position.
  *   yaw: initial facing.

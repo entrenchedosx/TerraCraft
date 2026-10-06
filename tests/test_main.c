@@ -152,6 +152,9 @@ int main(void)
     RUN_TEST(test_save_mob_dead_excluded);
     RUN_TEST(test_mob_models);
     RUN_TEST(test_player_swing_animation);
+    RUN_TEST(test_player_anim_states);
+    RUN_TEST(test_player_body_model);
+    RUN_TEST(test_mob_strike_pitch);
     RUN_TEST(test_path_flat);
     RUN_TEST(test_path_wall);
     RUN_TEST(test_path_steps);

@@ -82,6 +82,7 @@ typedef struct Player {
     bool bow_full;      /* Full-draw feedback already played this draw. */
     float fall_peak;    /* Highest feet Y while airborne (<0 = none). */
     float last_fall;    /* Fall distance of the last landing (<0 = none). */
+    float walk_phase;   /* Stride phase for limb swing (distance-paced). */
     bool mine_active;   /* Survival mining in progress. */
     int mine_bx, mine_by, mine_bz; /* Mining target cell. */
     uint16_t mine_block; /* Block ID at target when started. */

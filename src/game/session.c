@@ -225,6 +225,7 @@ int session_open_world(AppContext *app, const char *world_dir)
     app->streamer_ready = true;
 
     player_init(&app->player);
+    player_anim_init(&app->panim);
     if (m.mode == WORLD_MODE_CREATIVE) {
         app->player.flying = true;
     }

@@ -3,6 +3,8 @@
 
 Reads:  mcassets/assets/minecraft/{textures,sounds}/... (owner's local files)
 Writes: mcassets/generated/tiles/<stem>.bmp   (16x16 32-bit BMP, alpha kept)
+        mcassets/generated/tiles/player_{sleeve,skin}.bmp (crops from the
+            Steve skin for the first-person arm, same BMP layout)
         mcassets/generated/sounds/<name>.wav  (22050 Hz mono 16-bit WAV)
         mcassets/generated/mobs/<name>.bmp    (native-size 32-bit BMP: mob
             skins keep their 64x32/64x64 layout so part UVs map 1:1)
@@ -86,12 +88,23 @@ TILES = {
 
 # Mob skins: generated name -> (source, keep-native-size). Skins keep
 # their exact pixel layout (64x32 legacy or 64x64) so engine part UVs
-# map 1:1 onto Mojang's regions. Only mobs with a real counterpart get
-# entries: the gloomstalker is an original creature with no MC skin.
+# map 1:1 onto Mojang's regions. "player" stages Steve for the
+# first-person arm tiles and the third-person model.
 SKINS = {
     "skeleton": "entity/skeleton/skeleton.png",
     "cow": "entity/cow/temperate_cow.png",
     "zombie": "entity/zombie/zombie.png",
+    "player": "entity/player/wide/steve.png",
+}
+
+# First-person arm tiles: (output stem, crop box on the player skin).
+# Classic 64x64 layout, origin top-left: the right-arm front face carries
+# the cyan sleeve over a skin hand (bottom rows are bare hand pixels,
+# verified flat skin tone with light noise shading).
+PLAYER_SKIN_SRC = "entity/player/wide/steve.png"
+PLAYER_ARM_CROPS = {
+    "player_sleeve": (44, 20, 48, 32),
+    "player_skin": (44, 28, 48, 32),
 }
 
 
@@ -215,6 +228,36 @@ def convert_skins():
     return ok, missing
 
 
+def convert_player_arm():
+    """Crop first-person arm tiles from the player skin (NEAREST upscale)."""
+    from PIL import Image
+    import struct
+    src = os.path.join(TEX, *PLAYER_SKIN_SRC.split("/"))
+    if not os.path.isfile(src):
+        return 0, [PLAYER_SKIN_SRC]
+    img = Image.open(src).convert("RGBA")
+    if img.size != (64, 64):
+        print("  bad player skin size %s: %s" % (PLAYER_SKIN_SRC, img.size))
+        return 0, [PLAYER_SKIN_SRC]
+    ok = 0
+    missing = []
+    for stem, box in sorted(PLAYER_ARM_CROPS.items()):
+        crop = img.crop(box).resize((TILE_SIZE, TILE_SIZE), Image.NEAREST)
+        px = crop.tobytes()
+        body = bytearray()
+        for y in range(TILE_SIZE - 1, -1, -1):
+            row = px[y * TILE_SIZE * 4:(y + 1) * TILE_SIZE * 4]
+            for i in range(0, len(row), 4):
+                body += bytes((row[i + 2], row[i + 1], row[i], row[i + 3]))
+        hdr = struct.pack("<2sIHHI", b"BM", 54 + len(body), 0, 0, 54)
+        dib = struct.pack("<IIIHHIIIIII", 40, TILE_SIZE, TILE_SIZE, 1, 32, 0,
+                          len(body), 0, 0, 0, 0)
+        with open(os.path.join(GEN_TILES, stem + ".bmp"), "wb") as f:
+            f.write(hdr + dib + bytes(body))
+        ok += 1
+    return ok, missing
+
+
 def convert_sounds():
     import numpy as np
     import soundfile as sf
@@ -253,18 +296,22 @@ def main():
     os.makedirs(GEN_SOUNDS, exist_ok=True)
     os.makedirs(GEN_MOBS, exist_ok=True)
     tiles_ok, tiles_missing = convert_tiles()
+    arm_ok, arm_missing = convert_player_arm()
     sounds_ok, sounds_missing = convert_sounds()
     skins_ok, skins_missing = convert_skins()
     print("tiles: %d converted, %d missing" % (tiles_ok, len(tiles_missing)))
     for m in tiles_missing:
         print("  missing tile source: %s" % m)
+    print("player arm: %d converted, %d missing" % (arm_ok, len(arm_missing)))
+    for m in arm_missing:
+        print("  missing player arm source: %s" % m)
     print("sounds: %d converted, %d missing" % (sounds_ok, len(sounds_missing)))
     for m in sounds_missing:
         print("  missing sound source: %s" % m)
     print("skins: %d converted, %d missing" % (skins_ok, len(skins_missing)))
     for m in skins_missing:
         print("  missing skin source: %s" % m)
-    bad = tiles_missing + sounds_missing + skins_missing
+    bad = tiles_missing + arm_missing + sounds_missing + skins_missing
     return 0 if not bad else 1
 
 
