@@ -39,6 +39,7 @@ typedef struct LanDiscover LanDiscover;
 
 #define MINEC_LAN_MAX_PLAYERS 8
 #define MINEC_LAN_BLOCK_QUEUE 4096
+#define APP_CHAT_HISTORY_LINES 64
 
 typedef struct LanRemotePlayer {
     bool active;
@@ -159,9 +160,11 @@ typedef struct AppContext {
     uint16_t lan_gravity_echo_block_id;
     bool chat_open;       /* Chat owns keyboard/mouse input while true. */
     char chat_input[192]; /* UTF-8 outgoing chat draft. */
-    char chat_lines[8][224]; /* Recent local/LAN chat history. */
+    char chat_lines[APP_CHAT_HISTORY_LINES][224]; /* Current-world local/LAN chat history. */
+    double chat_line_times[APP_CHAT_HISTORY_LINES]; /* Monotonic arrival times for fade-out. */
     unsigned chat_line_count;
     unsigned chat_line_head;
+    unsigned chat_scroll; /* Older-line offset while the expanded chat is open. */
     bool world_open;      /* True while a session is open. */
     bool player_ready;    /* True once the player was spawned. */
     bool streamer_ready;  /* True once streamer_init succeeded. */

@@ -13,7 +13,10 @@ service, or internet relay is used.
 4. On each joining computer, choose **Multiplayer (LAN)** from the title
    menu and enter the host computer's local IPv4 address.
 5. Press `T` to open chat, type a message, and press `Enter` to send. Press
-   `Esc` to close chat without sending.
+   `Esc` to close chat without sending. Recent messages fade away after about
+   five seconds while chat is closed. Opening chat shows the conversation
+   history kept in memory for the current world session; use the mouse wheel
+   or `Page Up` and `Page Down` to scroll through it.
 
 All computers must be on the same local network and able to reach the host.
 The game listens on TCP port `25566`. Enter the address assigned to the host
@@ -29,7 +32,9 @@ is saved in `config/profile.cfg`; it is not tied to a world save.
 ## What is shared
 
 - Player position, facing direction, and simple walk/sneak state.
-- Chat messages, sent with `T` and displayed to connected players.
+- Chat messages, sent with `T` and displayed to connected players. The client
+  keeps the most recent 64 messages for the current world session; this local
+  history is not written to the world save or sent to newly joining peers.
 - Block changes made while the players are connected. The host applies client
   edits and relays accepted changes, so the host's open world is authoritative.
 - Falling-block start and landing events. Clients predict motion between those

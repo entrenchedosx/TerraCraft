@@ -74,7 +74,7 @@ open.
 | `Esc` | Pause or close the current screen |
 | `F3` | Toggle debug overlay |
 | `F5` | Toggle first/third-person camera |
-| `T` | Open LAN chat while playing |
+| `T` | Open chat and scrollable recent history while playing |
 
 Developer-only keys are kept in source comments and are not needed for
 ordinary play.

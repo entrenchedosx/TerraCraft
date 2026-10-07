@@ -632,6 +632,11 @@ enum {
     APP_CHAT_MAX_BYTES = 160
 };
 
+#define APP_CHAT_LINE_HEIGHT 20.0f
+#define APP_CHAT_HIDE_AFTER_SECONDS 5.0
+#define APP_CHAT_FADE_SECONDS 1.0
+#define APP_CHAT_RECENT_VISIBLE 6u
+
 static void app_net_write_u16(uint8_t *out, uint16_t value)
 {
     out[0] = (uint8_t)(value >> 8);
@@ -694,12 +699,14 @@ static void app_chat_add(AppContext *app, const char *username, const char *mess
     if (app == NULL || username == NULL || message == NULL) {
         return;
     }
-    unsigned slot = app->chat_line_head % 8u;
+    unsigned slot = app->chat_line_head % APP_CHAT_HISTORY_LINES;
     snprintf(app->chat_lines[slot], sizeof(app->chat_lines[slot]), "%s: %s", username, message);
-    app->chat_line_head = (slot + 1u) % 8u;
-    if (app->chat_line_count < 8u) {
+    app->chat_line_times[slot] = time_now_seconds();
+    app->chat_line_head = (slot + 1u) % APP_CHAT_HISTORY_LINES;
+    if (app->chat_line_count < APP_CHAT_HISTORY_LINES) {
         app->chat_line_count++;
     }
+    app->chat_scroll = 0;
 }
 
 static bool app_chat_encode(uint8_t *out, size_t out_cap, const char *username,
@@ -1020,6 +1027,8 @@ void app_lan_disconnect(AppContext *app)
     app->chat_line_count = 0;
     app->chat_line_head = 0;
     memset(app->chat_lines, 0, sizeof(app->chat_lines));
+    memset(app->chat_line_times, 0, sizeof(app->chat_line_times));
+    app->chat_scroll = 0;
 }
 
 static bool app_lan_open_client_world(AppContext *app, const LanEvent *event)
@@ -1574,42 +1583,139 @@ static void app_chat_backspace(AppContext *app)
     }
 }
 
+static void app_chat_add_rect(float *rects, size_t *n, float x, float y, float width, float height, float alpha)
+{
+    static const int corner[6] = {0, 1, 2, 2, 1, 3};
+    for (int v = 0; v < 6; ++v) {
+        int c = corner[v];
+        rects[(*n)++] = x + ((c == 1 || c == 3) ? width : 0.0f);
+        rects[(*n)++] = y + ((c >= 2) ? height : 0.0f);
+        rects[(*n)++] = 0.0f;
+        rects[(*n)++] = 0.0f;
+        rects[(*n)++] = 0.0f;
+        rects[(*n)++] = alpha;
+    }
+}
+
+static unsigned app_chat_history_visible(const AppContext *app)
+{
+    if (app == NULL || app->height <= 0) {
+        return 1u;
+    }
+    int total_rows = (app->height - 120) / (int)APP_CHAT_LINE_HEIGHT;
+    unsigned visible = total_rows > 2 ? (unsigned)(total_rows - 2) : 1u;
+    if (visible > APP_CHAT_HISTORY_LINES) {
+        visible = APP_CHAT_HISTORY_LINES;
+    }
+    return visible;
+}
+
+static float app_chat_line_alpha(double now, double received_at)
+{
+    double age = now - received_at;
+    if (age < 0.0) {
+        age = 0.0;
+    }
+    if (age >= APP_CHAT_HIDE_AFTER_SECONDS) {
+        return 0.0f;
+    }
+    double fade_start = APP_CHAT_HIDE_AFTER_SECONDS - APP_CHAT_FADE_SECONDS;
+    if (age <= fade_start) {
+        return 1.0f;
+    }
+    return (float)((APP_CHAT_HIDE_AFTER_SECONDS - age) / APP_CHAT_FADE_SECONDS);
+}
+
 static void app_draw_chat(AppContext *app)
 {
     if (app == NULL || app->renderer == NULL || (!app->chat_open && app->chat_line_count == 0)) {
         return;
     }
-    unsigned visible = app->chat_line_count < 6u ? app->chat_line_count : 6u;
-    float line_h = 20.0f;
     float x = 12.0f;
-    float h = (float)(visible + (app->chat_open ? 1u : 0u)) * line_h + 12.0f;
-    float y = (float)app->height - h - 12.0f;
-    float rects[6 * 6];
-    size_t n = 0;
-    /* The UI quad helper format is x/y + RGBA, six vertices per rectangle. */
-    for (int v = 0; v < 6; ++v) {
-        static const int corner[6] = {0, 1, 2, 2, 1, 3};
-        int c = corner[v];
-        rects[n++] = x + ((c == 1 || c == 3) ? 720.0f : 0.0f);
-        rects[n++] = y + ((c >= 2) ? h : 0.0f);
-        rects[n++] = 0.0f;
-        rects[n++] = 0.0f;
-        rects[n++] = 0.0f;
-        rects[n++] = 0.64f;
+    float line_h = APP_CHAT_LINE_HEIGHT;
+    float panel_w = (float)app->width - 24.0f;
+    if (panel_w > 720.0f) {
+        panel_w = 720.0f;
     }
-    renderer_draw_rects(app->renderer, app->width, app->height, rects, 6);
-    unsigned start = (app->chat_line_head + 8u - visible) % 8u;
-    for (unsigned i = 0; i < visible; ++i) {
-        unsigned index = (start + i) % 8u;
-        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)i * line_h,
-                           1.0f, 1.0f, 1.0f, 1.0f, 1.0f, app->chat_lines[index]);
+    if (panel_w < 1.0f) {
+        panel_w = 1.0f;
     }
+    float bottom_pad = 92.0f; /* Keep the log clear of the hotbar and vitals. */
+
     if (app->chat_open) {
+        unsigned visible = app->chat_line_count;
+        unsigned capacity = app_chat_history_visible(app);
+        if (visible > capacity) {
+            visible = capacity;
+        }
+        unsigned max_scroll = app->chat_line_count > visible ? app->chat_line_count - visible : 0u;
+        if (app->chat_scroll > max_scroll) {
+            app->chat_scroll = max_scroll;
+        }
+        float h = (float)(visible + 2u) * line_h + 12.0f; /* title, history, input */
+        float y = (float)app->height - h - bottom_pad;
+        if (y < 8.0f) {
+            y = 8.0f;
+        }
+        float rects[36];
+        size_t n = 0;
+        app_chat_add_rect(rects, &n, x, y, panel_w, h, 0.76f);
+        renderer_draw_rects(app->renderer, app->width, app->height, rects, 6);
+        renderer_draw_text(app->renderer, x + 8.0f, y + 5.0f, 0.85f,
+                           0.72f, 0.82f, 0.92f, 1.0f,
+                           "Chat history - wheel or Page Up/Down to scroll");
+
+        unsigned oldest_age = app->chat_scroll + (visible > 0u ? visible - 1u : 0u);
+        unsigned start = (app->chat_line_head + APP_CHAT_HISTORY_LINES - 1u - oldest_age) %
+                         APP_CHAT_HISTORY_LINES;
+        for (unsigned i = 0; i < visible; ++i) {
+            unsigned index = (start + i) % APP_CHAT_HISTORY_LINES;
+            renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)(i + 1u) * line_h,
+                               1.0f, 1.0f, 1.0f, 1.0f, 1.0f, app->chat_lines[index]);
+        }
         char prompt[APP_CHAT_MAX_BYTES + 8];
         /* Precision-capped: provably fits (GCC -Wformat-truncation). */
         snprintf(prompt, sizeof(prompt), "> %.*s_", (int)(sizeof(prompt) - 4), app->chat_input);
-        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)visible * line_h,
+        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)(visible + 1u) * line_h,
                            1.0f, 1.0f, 0.90f, 0.70f, 1.0f, prompt);
+        return;
+    }
+
+    unsigned indices[APP_CHAT_HISTORY_LINES];
+    float alphas[APP_CHAT_HISTORY_LINES];
+    unsigned recent_count = 0;
+    double now = time_now_seconds();
+    unsigned oldest = (app->chat_line_head + APP_CHAT_HISTORY_LINES - app->chat_line_count) %
+                      APP_CHAT_HISTORY_LINES;
+    for (unsigned i = 0; i < app->chat_line_count; ++i) {
+        unsigned index = (oldest + i) % APP_CHAT_HISTORY_LINES;
+        float alpha = app_chat_line_alpha(now, app->chat_line_times[index]);
+        if (alpha > 0.0f) {
+            indices[recent_count] = index;
+            alphas[recent_count++] = alpha;
+        }
+    }
+    unsigned first = recent_count > APP_CHAT_RECENT_VISIBLE ? recent_count - APP_CHAT_RECENT_VISIBLE : 0u;
+    unsigned visible = recent_count - first;
+    if (visible == 0u) {
+        return;
+    }
+    float h = (float)visible * line_h + 12.0f;
+    float y = (float)app->height - h - bottom_pad;
+    if (y < 8.0f) {
+        y = 8.0f;
+    }
+    float rects[APP_CHAT_RECENT_VISIBLE * 36u];
+    size_t n = 0;
+    for (unsigned i = 0; i < visible; ++i) {
+        float row_y = y + 6.0f + (float)i * line_h;
+        app_chat_add_rect(rects, &n, x, row_y - 2.0f, panel_w, line_h, 0.64f * alphas[first + i]);
+    }
+    renderer_draw_rects(app->renderer, app->width, app->height, rects, n / 6u);
+    for (unsigned i = 0; i < visible; ++i) {
+        unsigned item = first + i;
+        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)i * line_h,
+                           1.0f, 1.0f, 1.0f, 1.0f, alphas[item], app->chat_lines[indices[item]]);
     }
 }
 
@@ -2893,11 +2999,47 @@ int app_run(AppContext *app)
             window_take_key_pressed(app->window, SDL_SCANCODE_T)) {
             app->chat_open = true;
             app->chat_input[0] = '\0';
+            app->chat_scroll = 0;
             window_set_relative_mouse(app->window, false);
             window_text_input(true);
             window_clear_input_edges(app->window);
         }
         if (app->chat_open) {
+            int wheel = window_take_wheel_delta(app->window);
+            int page_up = window_take_key_pressed(app->window, SDL_SCANCODE_PAGEUP) ? 1 : 0;
+            int page_down = window_take_key_pressed(app->window, SDL_SCANCODE_PAGEDOWN) ? 1 : 0;
+            unsigned visible = app_chat_history_visible(app);
+            unsigned max_scroll = app->chat_line_count > visible
+                                      ? app->chat_line_count - visible
+                                      : 0u;
+            if (wheel != 0) {
+                int direction = wheel > 0 ? 1 : -1;
+                int64_t steps = wheel > 0 ? (int64_t)wheel : -(int64_t)wheel;
+                if (steps > 20) {
+                    steps = 20;
+                }
+                unsigned amount = (unsigned)steps * 3u;
+                if (direction > 0) {
+                    app->chat_scroll = app->chat_scroll + amount > max_scroll
+                                           ? max_scroll
+                                           : app->chat_scroll + amount;
+                } else {
+                    app->chat_scroll = app->chat_scroll > amount
+                                           ? app->chat_scroll - amount
+                                           : 0u;
+                }
+            }
+            unsigned page_amount = visible > 2u ? visible - 2u : 1u;
+            if (page_up) {
+                app->chat_scroll = app->chat_scroll + page_amount > max_scroll
+                                       ? max_scroll
+                                       : app->chat_scroll + page_amount;
+            }
+            if (page_down) {
+                app->chat_scroll = app->chat_scroll > page_amount
+                                       ? app->chat_scroll - page_amount
+                                       : 0u;
+            }
             app_chat_append_ascii(app, text_accum);
             text_accum[0] = '\0';
             bool enter = window_take_key_pressed(app->window, SDL_SCANCODE_RETURN) ||
