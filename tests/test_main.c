@@ -20,6 +20,7 @@ int main(void)
     RUN_TEST(test_block_table);
     RUN_TEST(test_chunk_basic);
     RUN_TEST(test_arena);
+    RUN_TEST(test_process_working_set_metric);
     RUN_TEST(test_path_dirs);
     RUN_TEST(test_camera_viewmodel_fov_compensation);
     RUN_TEST(test_player_viewmodel_arm_pose);

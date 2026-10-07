@@ -2,14 +2,24 @@
 
 ## What this means here
 
-The [Gauntlet Loop](https://thrixel.com/learn/gauntlet-loop) is an iterative
-quality method: define a bar, produce a result, have an independent critic
-compare it with that bar, fix the largest gap, and repeat. Implementations
-can bound the review cycles and stop when the bar is met or when a human
-decision/playtest is needed. This is a general method, not a formal software
-test standard or a TerraCraft-specific recipe. A related open implementation
-uses explicit worker/reviewer cycles and a bounded iteration limit:
+“Gauntlet Loop” is not a standardized QA term; it is used for related
+validation methods. In the agentic method described by
+[Matt Shumer](https://somethingbig.ai/gauntlet-loop), a lead agent divides the
+goal, builders create parts, and an independent critic checks the real output
+against a concrete quality bar, names the largest remaining gap, and sends it
+back through another round. Review can stop when the bar is met or a human
+decision/playtest is needed. In continuous delivery, “gauntlet” can also mean
+ordered build/test/release gates that find failures early, as in this
+[GoCD workflow description](https://www.gocd.org/2014/02/24/model-everything-fail-fast/).
+Those usages overlap in evidence and iteration, but describe different
+workflows. A related open implementation uses explicit worker/reviewer cycles
+and a bounded iteration limit:
 [gauntlet-loop on GitHub](https://github.com/kamtS/gauntlet-loop).
+
+The supplied TerraCraft roadmap controls this project: its phases are ordered
+gates with measurable exit criteria, and Phase 18 adds ten consecutive full
+QA runs. The agentic build/critic loop is useful within an eligible phase, but
+does not replace the roadmap's required tests, runtime evidence, or phase order.
 
 TerraCraft applies that idea to a fidelity pass. Each round uses evidence a
 reviewer can check: source locations, a working build, automated test

@@ -1887,7 +1887,7 @@ void screens_draw_debug(AppContext *app)
     if (app == NULL || !app->world_open || app->world == NULL) {
         return;
     }
-    char lines[13][128];
+    char lines[14][128];
     Vec3 p = app->player.pos;
     RendererPerf perf = renderer_get_perf(app->renderer);
     int sel_idx = app->player.hotbar_sel;
@@ -1899,7 +1899,8 @@ void screens_draw_debug(AppContext *app)
     }
     const ItemStack *sel_slot = &app->player.inv.slots[sel_idx];
     const ItemInfo *sel = item_get_info(sel_slot->item);
-    snprintf(lines[0], sizeof(lines[0]), "TerraCraft debug - %.1f FPS", (double)app->fps_smooth);
+    snprintf(lines[0], sizeof(lines[0]), "TerraCraft debug - %.1f FPS  %.2f ms/frame",
+             (double)app->fps_smooth, (double)app->frame_ms_avg);
     snprintf(lines[1], sizeof(lines[1]), "XYZ: %.2f / %.2f / %.2f", (double)p.x, (double)p.y, (double)p.z);
     snprintf(lines[2], sizeof(lines[2]), "Chunk: %d %d", (int)floorf(p.x / 16.0f), (int)floorf(p.z / 16.0f));
     snprintf(lines[3], sizeof(lines[3]), "Chunks: %zu loaded, %zu drawn (+%zu transp), %zu culled",
@@ -1922,8 +1923,16 @@ void screens_draw_debug(AppContext *app)
              projectile_active_count(&app->projectiles),
              projectile_embedded_count(&app->projectiles), (unsigned)app->projectiles.fired,
              (unsigned)app->projectiles.impacts, app->arrows_drawn);
+    snprintf(lines[12], sizeof(lines[12]), "Simulation: %.2f ms/tick, %.1f ticks/s",
+             (double)app->sim_ms_avg, (double)app->sim_tps);
+    if (app->process_working_set_bytes > 0) {
+        snprintf(lines[13], sizeof(lines[13]), "Process resident memory: %llu MiB",
+                 (unsigned long long)(app->process_working_set_bytes / (1024u * 1024u)));
+    } else {
+        snprintf(lines[13], sizeof(lines[13]), "Process resident memory: unavailable");
+    }
     float y = 12.0f;
-    for (int i = 0; i < 12 && lines[i][0] != '\0'; ++i) {
+    for (int i = 0; i < 14 && lines[i][0] != '\0'; ++i) {
         renderer_draw_text(app->renderer, 12.0f, y, SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
                            lines[i]);
         y += 22.0f;

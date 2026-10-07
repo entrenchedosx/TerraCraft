@@ -1,0 +1,299 @@
+TerraCraft unit tests
+==============================
+[PASS] test_vec3_add
+[PASS] test_vec3_ops
+[PASS] test_mat4_identity
+[PASS] test_mat4_ortho_ydown
+[PASS] test_block_table
+[PASS] test_chunk_basic
+[PASS] test_arena
+[PASS] test_process_working_set_metric
+[PASS] test_path_dirs
+[PASS] test_camera_viewmodel_fov_compensation
+[PASS] test_player_viewmodel_arm_pose
+[PASS] test_chunk_index
+[PASS] test_block_ids
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world.c:477: world_generate_stub: seed=1337, chunks=9 (3x3 around origin)
+[PASS] test_world_gen
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world.c:477: world_generate_stub: seed=42, chunks=9 (3x3 around origin)
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world.c:477: world_generate_stub: seed=42, chunks=9 (3x3 around origin)
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world.c:477: world_generate_stub: seed=43, chunks=9 (3x3 around origin)
+[PASS] test_world_gen_determinism
+[PASS] test_water_simulation
+[PASS] test_water_queue_bound
+[PASS] test_gravity_blocks_fall_land_and_save_settle
+[PASS] test_gravity_support_chain_and_water
+[PASS] test_gravity_queue_bound_recovery
+[PASS] test_gravity_retries_when_lan_queue_is_full
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_save.c:306: world_save: meta + 1 chunk(s) saved, 0 failure(s) (test_tmp_gravity_lan)
+[PASS] test_gravity_lan_prediction_and_authority
+[PASS] test_gravity_lan_pool_full_start_clears_source
+[PASS] test_world_chunk_compaction_and_seam_dirtying
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 0 verts, 0 indices in 0.823 ms
+[PASS] test_mesher_empty
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 24 verts, 36 indices in 1.023 ms
+[PASS] test_mesher_single_block
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) transparent -> 44 verts, 66 indices in 0.459 ms
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) transparent -> 40 verts, 60 indices in 0.441 ms
+[PASS] test_mesher_water_height
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 40 verts, 60 indices in 0.445 ms
+[PASS] test_mesher_two_adjacent
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 216 verts, 324 indices in 0.471 ms
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 20 verts, 30 indices in 1.990 ms
+[PASS] test_mesher_hidden_faces
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 16 verts, 24 indices in 0.819 ms
+[PASS] test_mesher_cross_sprite
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 24 verts, 36 indices in 0.613 ms
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 24 verts, 36 indices in 1.199 ms
+[12:04:18] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 24 verts, 36 indices in 1.739 ms
+[PASS] test_ao_diagonal_chunk_lifecycle
+[PASS] test_atlas_layout
+[PASS] test_atlas_tile_mapping
+[PASS] test_atlas_pixels
+[PASS] test_atlas_mcfaces
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\render\texture_atlas.c:907: texture_atlas: dir 'test_tmp_nope_xyz' tiles 0/49 (rest procedural)
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\render\texture_atlas.c:907: texture_atlas: dir 'test_tmp_mctiles' tiles 1/49 (rest procedural)
+[PASS] test_atlas_apply_dir
+[12:04:18] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\render\texture_atlas.c:907: texture_atlas: dir 'test_tmp_packroot\Example Pack\tiles' tiles 1/49 (rest procedural)
+[PASS] test_atlas_resource_pack_paths
+[PASS] test_hashmap_basic
+[PASS] test_world_gen_chunk
+[12:04:19] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:147: streamer: +9 chunk(s) around (0,0) [total gen 9]
+[12:04:19] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:175: streamer: center (0,0) r=1 loaded=9
+[12:04:19] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:147: streamer: +9 chunk(s) around (62,62) [total gen 18]
+[12:04:19] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:172: streamer: -9 chunk(s) outside (62,62) [total unload 9]
+[12:04:19] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:175: streamer: center (62,62) r=1 loaded=9
+[12:04:19] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:147: streamer: +1 chunk(s) around (0,0) [total gen 1]
+[12:04:19] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:172: streamer: -9 chunk(s) outside (0,0) [total unload 9]
+[12:04:19] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:175: streamer: center (0,0) r=0 loaded=1
+[12:04:19] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:147: streamer: +5 chunk(s) around (0,0) [total gen 5]
+[12:04:19] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:175: streamer: center (0,0) r=2 loaded=6
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:147: streamer: +19 chunk(s) around (0,0) [total gen 24]
+[PASS] test_streamer_load_unload
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:147: streamer: +9 chunk(s) around (2,-3) [total gen 9]
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:175: streamer: center (2,-3) r=1 loaded=9
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:147: streamer: +9 chunk(s) around (2,-3) [total gen 9]
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\streamer.c:175: streamer: center (2,-3) r=1 loaded=9
+[PASS] test_streamer_determinism
+[PASS] test_physics_fall_land
+[PASS] test_physics_high_drop
+[PASS] test_physics_wall_slide
+[PASS] test_physics_jump
+[PASS] test_physics_water_motion
+[PASS] test_physics_water_contact
+[PASS] test_physics_water_step_up
+[PASS] test_physics_water_fall_cushion
+[PASS] test_physics_spawn
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:122: Block broken: stone at (8,64,8) *particles burst*
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 6 at (8,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 1 at (8,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 2 at (8,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 19 at (8,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 16 at (8,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 15 at (7,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 15 at (6,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:204: Block placed: id 16 at (7,64,8)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\interaction.c:193: Place rejected: target (8,65,8) overlaps player
+[PASS] test_interaction_break_place
+[PASS] test_raycast_down
+[PASS] test_raycast_wall
+[PASS] test_raycast_miss
+[PASS] test_raycast_camera
+[PASS] test_time_phases
+[PASS] test_time_sun
+[PASS] test_time_wrap
+[PASS] test_simulation_clock_render_rates
+[PASS] test_simulation_clock_catch_up_and_remainder
+[PASS] test_simulation_clock_invalid_elapsed
+[PASS] test_input_buffer_press_release_pulse
+[PASS] test_input_buffer_held_and_repeat
+[PASS] test_input_buffer_clear_and_focus_loss
+[PASS] test_ao_levels
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 3328 verts, 4992 indices in 1.124 ms
+[PASS] test_ao_flat
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 72 verts, 108 indices in 0.572 ms
+[PASS] test_ao_corner
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 24 verts, 36 indices in 0.533 ms
+[PASS] test_ao_seam
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 48 verts, 72 indices in 0.542 ms
+[PASS] test_ao_sun_shade
+[PASS] test_item_registry
+[PASS] test_item_stackability_contract
+[PASS] test_item_texture_mapping
+[PASS] test_stack_ops
+[PASS] test_inventory_ops
+[PASS] test_inventory_sanitize
+[PASS] test_meta_roundtrip
+[PASS] test_meta_corrupt
+[PASS] test_chunk_roundtrip
+[PASS] test_chunk_water_version_compat
+[PASS] test_chunk_corrupt
+[PASS] test_sanitize
+[PASS] test_world_delete
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\session.c:146: session: created world 'Persist_Me' seed 123456 (test_tmp_m5\Persist_Me (2))
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_save.c:306: world_save: meta + 2 chunk(s) saved, 0 failure(s) (test_tmp_m5\Persist_Me (2))
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_gen.c:461: world_generate_chunk: loaded saved chunk (0,0)
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_gen.c:461: world_generate_chunk: loaded saved chunk (1,0)
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_gen.c:461: world_generate_chunk: loaded saved chunk (0,0)
+[12:04:20] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_gen.c:461: world_generate_chunk: loaded saved chunk (1,0)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\session.c:304: session: opened 'Persist_Me' seed 123456 mode survival (expecting ~25 chunks)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_save.c:306: world_save: meta + 0 chunk(s) saved, 0 failure(s) (test_tmp_m5\Persist_Me (2))
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\session.c:353: session: world closed
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\session.c:304: session: opened 'Persist_Me' seed 123456 mode survival (expecting ~25 chunks)
+[12:04:20] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\session.c:353: session: world closed
+[PASS] test_session_persist
+[PASS] test_biome_determinism
+[PASS] test_biome_coverage
+[PASS] test_world_gen_terrain_v2
+[PASS] test_world_gen_terrain_v3
+[PASS] test_tree_determinism
+[PASS] test_vegetation
+[PASS] test_caves
+[PASS] test_ores
+[PASS] test_settings_defaults
+[PASS] test_settings_parse
+[PASS] test_settings_roundtrip
+[PASS] test_profile_name_validation
+[PASS] test_profile_generated_name
+[PASS] test_profile_storage
+[PASS] test_seed_parse
+[PASS] test_bmp_parse
+[PASS] test_game_states
+[PASS] test_font_basic
+[PASS] test_ui_button
+[PASS] test_ui_text_field
+[PASS] test_ui_slider
+[PASS] test_ui_icons
+[PASS] test_hud_vitals_icons
+[PASS] test_survival_mine_time
+[PASS] test_survival_drops
+[PASS] test_survival_mining
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\survival.c:159: player died (damage 25.0)
+[PASS] test_survival_damage_heal
+[PASS] test_survival_fall
+[PASS] test_survival_hunger
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\game\survival.c:159: player died (damage 100.0)
+[PASS] test_survival_respawn
+[PASS] test_entity_pickup
+[12:04:25] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\game\entity.c:256: entity 0 despawned (age 300s, item 2)
+[PASS] test_entity_lifetime
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_save.c:306: world_save: meta + 0 chunk(s) saved, 0 failure(s) (test_tmp_m6/rt)
+[PASS] test_save_m6_roundtrip
+[PASS] test_save_m5_migration
+[PASS] test_raycast_plants_water
+[PASS] test_chunk_save_dirty_semantics
+[PASS] test_save_fresh_world_meta
+[PASS] test_meta_partial_and_strict
+[PASS] test_meta_full_inventory
+[12:04:25] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\render\mesher.c:443: mesher: chunk (0,0) opaque -> 3328 verts, 4992 indices in 1.058 ms
+[PASS] test_mesher_glass_light
+[PASS] test_esave_single
+[PASS] test_esave_multiple
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:475: entity_save: bad magic (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:472: entity_save: bad header (ver 99, count 0, size 10) (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:472: entity_save: bad header (ver 1, count 1, size 43) (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:472: entity_save: bad header (ver 1, count 1, size 51) (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:472: entity_save: bad header (ver 1, count 1000, size 10) (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:287: entity_save: record 0 invalid (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:287: entity_save: record 0 invalid (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:287: entity_save: record 0 invalid (test_tmp_es/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:287: entity_save: record 0 invalid (test_tmp_es/corrupt\entities.bin)
+[PASS] test_esave_corrupt
+[PASS] test_esave_missing
+[12:04:25] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\game\entity.c:256: entity 0 despawned (age 300s, item 2)
+[PASS] test_esave_transient
+[PASS] test_recipe_registry
+[PASS] test_recipe_shapeless
+[PASS] test_recipe_shaped
+[PASS] test_recipe_bench
+[PASS] test_recipe_consume
+[PASS] test_durability_use
+[PASS] test_durability_merge
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\world\world_save.c:306: world_save: meta + 0 chunk(s) saved, 0 failure(s) (test_tmp_m6/wear)
+[PASS] test_durability_save
+[PASS] test_food_eat
+[PASS] test_exhaustion
+[PASS] test_leaf_bonus
+[PASS] test_particle_pool
+[PASS] test_particle_sim
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[PASS] test_audio_basics
+[PASS] test_audio_wav
+[12:04:25] [WARN] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:935: audio: refusing pack name '../evil'
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[12:04:25] [WARN] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:510: audio: SDL audio unavailable (Audio target 'terracraft_missing_driver' not available); continuing silent
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[12:04:25] [WARN] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:510: audio: SDL audio unavailable (Audio target 'terracraft_missing_driver' not available); continuing silent
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:536: audio: device open (22050 Hz)
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:536: audio: device open (22050 Hz)
+[PASS] test_audio_dummy
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:536: audio: device open (22050 Hz)
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[12:04:25] [WARN] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:935: audio: refusing pack name '../evil'
+[PASS] test_audio_pack_swap
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'test_tmp_mcsnd' applied (3 variant files)
+[12:04:25] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:832: audio: no converted sounds dir 'test_tmp_nope_xyz' (lower layers kept)
+[12:04:25] [INFO] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:862: audio: converted layer 'C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\mcassets\generated/sounds' applied (97 variant files)
+[12:04:25] [WARN] C:\Users\aawad\Desktop\minecraft-in-c\src\audio\audio.c:935: audio: refusing pack name '../evil'
+[PASS] test_audio_material
+[PASS] test_mob_handles
+[PASS] test_mob_physics_fall
+[PASS] test_mob_physics_wall_step
+[PASS] test_mob_definitions
+[PASS] test_mob_ai_passive
+[PASS] test_mob_ai_hostile
+[PASS] test_mob_damage
+[PASS] test_mob_fall_events
+[PASS] test_mob_raycast
+[PASS] test_mob_tool_stats
+[12:04:25] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\game\mob.c:1306: mob spawned Cow at (11,65,-29)
+[PASS] test_mob_spawn_passive
+[12:04:25] [DEBUG] C:\Users\aawad\Desktop\minecraft-in-c\src\game\mob.c:1306: mob spawned Skeleton at (38,65,-26)
+[PASS] test_mob_spawn_hostile
+[PASS] test_mob_spawn_rules
+[PASS] test_save_mob_roundtrip
+[PASS] test_save_mob_v1_compat
+[PASS] test_save_mob_v2_compat
+[PASS] test_save_mob_write_failure_preserves
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:461: entity_save: unknown kind 99 at record 0 (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:461: entity_save: unknown kind 9 at record 0 (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:337: entity_save: mob record 0 invalid (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:308: entity_save: mob record 0 invalid (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:308: entity_save: mob record 0 invalid (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:447: entity_save: truncated mob 0 (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:472: entity_save: bad header (ver 2, count 500, size 10) (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:349: entity_save: mob record 0 invalid (test_tmp_mobsave/corrupt\entities.bin)
+[12:04:25] [ERROR] C:\Users\aawad\Desktop\minecraft-in-c\src\world\entity_save.c:308: entity_save: mob record 0 invalid (test_tmp_mobsave/corrupt\entities.bin)
+[PASS] test_save_mob_corrupt
+[PASS] test_save_mob_dead_excluded
+[PASS] test_mob_models
+[PASS] test_player_swing_animation
+[PASS] test_player_anim_states
+[PASS] test_player_body_model
+[PASS] test_mob_strike_pitch
+[PASS] test_mob_water_cushion
+[PASS] test_path_flat
+[PASS] test_path_wall
+[PASS] test_path_steps
+[PASS] test_path_unreachable
+[PASS] test_path_negative_deterministic
+[PASS] test_projectile_basics
+[PASS] test_projectile_flight
+[PASS] test_projectile_block_swept
+[PASS] test_projectile_ordering
+[PASS] test_projectile_owner
+[PASS] test_projectile_entities
+[PASS] test_projectile_damage
+[PASS] test_bow_policy
+[PASS] test_bow_slot_switch
+[PASS] test_skeleton_ai
+[PASS] test_skeleton_drops_save
+[PASS] test_lan_loopback_transport
+[PASS] test_lan_local_address_filter
+[PASS] test_lan_discover_codec
+[PASS] test_lan_discover_scan
+==============================
+Ran 191 test(s), 0 failed

@@ -1,7 +1,20 @@
 #include "core/mem.h"
 #include "core/log.h"
 
+#include <limits.h>
 #include <stdlib.h>
+#include <string.h>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <psapi.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#elif defined(__linux__)
+#include <stdio.h>
+#endif
 
 /* Allocate `size` bytes.
  *
@@ -52,6 +65,45 @@ void *mem_calloc(size_t count, size_t size)
 void mem_free(void *ptr)
 {
     free(ptr);
+}
+
+/* Query resident process memory without installing hooks into allocation.
+ * This keeps the diagnostic representative of both wrapped and direct
+ * allocator use in the engine and its dependencies.
+ */
+size_t mem_process_working_set_bytes(void)
+{
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS counters;
+    memset(&counters, 0, sizeof(counters));
+    counters.cb = (DWORD)sizeof(counters);
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, (DWORD)sizeof(counters)) != 0) {
+        return (size_t)counters.WorkingSetSize;
+    }
+#elif defined(__APPLE__)
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+        return (size_t)info.resident_size;
+    }
+#elif defined(__linux__)
+    FILE *status = fopen("/proc/self/status", "r");
+    if (status != NULL) {
+        char line[128];
+        unsigned long long kib = 0;
+        while (fgets(line, sizeof(line), status) != NULL) {
+            if (sscanf(line, "VmRSS: %llu kB", &kib) == 1) {
+                fclose(status);
+                if (kib > (unsigned long long)(SIZE_MAX / 1024u)) {
+                    return SIZE_MAX;
+                }
+                return (size_t)(kib * 1024ULL);
+            }
+        }
+        fclose(status);
+    }
+#endif
+    return 0;
 }
 
 /* Align `n` up to the next multiple of `alignment` (power of two). */

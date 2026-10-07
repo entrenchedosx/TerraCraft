@@ -53,7 +53,7 @@ open.
 - Direct LAN play: one player opens a world to LAN, and up to eight other
   players can join by the host computer's local IPv4 address. Player movement,
   chat, and block changes made during the session are shared.
-- 184 registered headless test functions in the custom test runner.
+- 191 registered headless test functions in the custom test runner.
 
 ## Controls
 
@@ -180,6 +180,7 @@ in [docs/FIDELITY_BUGS.md](docs/FIDELITY_BUGS.md).
 - [Fluid scheduling, falling-block physics, persistence, and current limits](docs/WORLD_PHYSICS.md)
 - [Fidelity bug log and playtest checklist](docs/FIDELITY_BUGS.md)
 - [Gauntlet review procedure and round notes](docs/GAUNTLET.md)
+- [Phase 0 baseline and runtime evidence](docs/PHASE0_BASELINE.md)
 - [LAN setup, controls, and synchronization scope](docs/LAN_MULTIPLAYER.md)
 - [Build and test decisions](docs/DECISIONS.md)
 - [Milestone history and backlog](docs/BACKLOG.md)

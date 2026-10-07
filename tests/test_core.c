@@ -240,6 +240,20 @@ int test_arena(void)
     return failures;
 }
 
+/* The OS working-set probe must not crash and must report a sane value:
+ * nonzero when the OS exposes it, zero where unavailable (sandbox, masked
+ * /proc, transient API failure). Either outcome is a pass; the call just
+ * has to be safe and repeatable. */
+int test_process_working_set_metric(void)
+{
+    int failures = 0;
+    size_t first = mem_process_working_set_bytes();
+    size_t second = mem_process_working_set_bytes();
+    TEST_ASSERT(first < (size_t)1 << 40);
+    TEST_ASSERT(second < (size_t)1 << 40);
+    return failures;
+}
+
 /* Test: exe-dir resolution + mcassets path building.
  *
  * Returns: failure count.

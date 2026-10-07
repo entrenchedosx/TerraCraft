@@ -1,6 +1,7 @@
 #include "core/app.h"
 #include "audio/audio.h"
 #include "core/log.h"
+#include "core/mem.h"
 #include "core/profile.h"
 #include "core/time.h"
 #include "game/audio.h"
@@ -234,6 +235,10 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->last_frame_time = 0.0;
     app->frame_count = 0;
     app->fps_smooth = 0.0f;
+    app->frame_ms_avg = 0.0f;
+    app->sim_ms_avg = 0.0f;
+    app->sim_tps = 0.0f;
+    app->process_working_set_bytes = 0;
     app->show_debug = false;
     app->autosave_timer = 0.0;
     simulation_clock_init(&app->simulation);
@@ -2765,6 +2770,9 @@ int app_run(AppContext *app)
 
     LOG_INFO("Entering main menu. Singleplayer to play.");
     app->last_frame_time = time_now_seconds();
+    double sim_window_ms = 0.0;
+    unsigned sim_window_ticks = 0;
+    const Uint64 perf_frequency = SDL_GetPerformanceFrequency();
     UiFrame ui;
     char text_accum[64];
 
@@ -2903,9 +2911,22 @@ int app_run(AppContext *app)
                 LOG_WARN("simulation: dropped %llu overdue tick(s) (%.3f seconds) after catch-up cap",
                          (unsigned long long)advance.dropped_ticks, advance.dropped_time);
             }
+            unsigned executed_ticks = 0;
             for (unsigned tick = 0; tick < advance.ticks && game_state_ticks_world(app->state); ++tick) {
+                Uint64 tick_start = SDL_GetPerformanceCounter();
                 app_tick_playing(app, (float)SIMULATION_TICK_SECONDS);
+                Uint64 tick_end = SDL_GetPerformanceCounter();
+                if (perf_frequency > 0 && tick_end >= tick_start) {
+                    sim_window_ms += (double)(tick_end - tick_start) * 1000.0 / (double)perf_frequency;
+                }
+                executed_ticks++;
             }
+            sim_window_ticks += executed_ticks;
+        } else {
+            /* No simulation this frame (menus, pause, death): drop any
+             * stale window so the next 1s report starts fresh. */
+            sim_window_ms = 0.0;
+            sim_window_ticks = 0;
         }
 
         app_build_uiframe(app, &ui, text_accum);
@@ -3043,24 +3064,41 @@ int app_run(AppContext *app)
         if (elapsed >= 1.0) {
             double fps = (double)app->frame_count / elapsed;
             app->fps_smooth = (float)fps;
+            app->frame_ms_avg = app->frame_count > 0 ? (float)(elapsed * 1000.0 / (double)app->frame_count) : 0.0f;
+            app->sim_ms_avg = sim_window_ticks > 0 ? (float)(sim_window_ms / (double)sim_window_ticks) : 0.0f;
+            app->sim_tps = (float)((double)sim_window_ticks / elapsed);
+            app->process_working_set_bytes = mem_process_working_set_bytes();
             if (app->world_open) {
                 Vec3 p = app->player.pos;
                 RendererPerf perf = renderer_get_perf(app->renderer);
-                const ItemStack *sel = &app->player.inv.slots[app->player.hotbar_sel];
+                int sel_idx = app->player.hotbar_sel;
+                if (sel_idx < 0) {
+                    sel_idx = 0;
+                }
+                if (sel_idx > 8) {
+                    sel_idx = 8;
+                }
+                const ItemStack *sel = &app->player.inv.slots[sel_idx];
                 const ItemInfo *sel_info = item_get_info(sel->item);
                 LOG_INFO("FPS: %.1f | %s pos (%.1f, %.1f, %.1f)%s HP %.0f/%.0f HU %.0f day %.3f | hotbar %d (%s x%u) | chunks %zu drawn %zu(+%zu) culled %zu | "
-                         "mesh %.2fms up %.2fms draw %.2fms",
+                         "frame %.2fms sim %.2fms/tick %.1f TPS RSS %llu MiB | mesh %.2fms up %.2fms draw %.2fms",
                          fps, app->player.flying ? "Creative" : "Survival", p.x, p.y, p.z,
                          app->player.grounded ? " grounded" : "", (double)app->player.health,
                          (double)app->player.max_health, (double)app->player.hunger, app->clock.day_progress,
                          app->player.hotbar_sel + 1, sel_info ? sel_info->name : "?",
                          stack_is_empty(sel) ? 0u : (unsigned)sel->count, world_chunk_count(app->world),
-                         perf.drawn, perf.drawn_t, perf.culled, perf.mesh_ms, perf.upload_ms, perf.draw_ms);
+                         perf.drawn, perf.drawn_t, perf.culled, app->frame_ms_avg, app->sim_ms_avg,
+                         app->sim_tps, (unsigned long long)(app->process_working_set_bytes / (1024u * 1024u)),
+                         perf.mesh_ms, perf.upload_ms, perf.draw_ms);
             } else {
-                LOG_INFO("FPS: %.1f | state %s", fps, game_state_name(app->state));
+                LOG_INFO("FPS: %.1f | frame %.2fms | RSS %llu MiB | state %s", fps, app->frame_ms_avg,
+                         (unsigned long long)(app->process_working_set_bytes / (1024u * 1024u)),
+                         game_state_name(app->state));
             }
             app->frame_count = 0;
             app->last_fps_time = now;
+            sim_window_ms = 0.0;
+            sim_window_ticks = 0;
         }
     }
 

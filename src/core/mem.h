@@ -34,6 +34,14 @@ void *mem_calloc(size_t count, size_t size);
  */
 void mem_free(void *ptr);
 
+/* Return the current process resident working-set size in bytes.
+ *
+ * This is an operating-system process metric and includes allocations made
+ * outside mem_alloc/mem_calloc. Returns 0 when the platform query is not
+ * available.
+ */
+size_t mem_process_working_set_bytes(void);
+
 /* Linear (bump) arena for transient per-frame data.
  * Allocate once, bump `offset` per allocation, reset per frame.
  */

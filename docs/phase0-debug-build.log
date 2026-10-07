@@ -1,0 +1,14 @@
+MSBuild version 17.14.51+25f168cee for .NET Framework
+
+  1>Checking Build System
+  Building Custom Rule C:/Users/aawad/Desktop/minecraft-in-c/CMakeLists.txt
+  terracraft_core.vcxproj -> C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\terracraft_core.lib
+  Building Custom Rule C:/Users/aawad/Desktop/minecraft-in-c/CMakeLists.txt
+  terracraft.vcxproj -> C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\terracraft.exe
+MSBuild version 17.14.51+25f168cee for .NET Framework
+
+  1>Checking Build System
+  Building Custom Rule C:/Users/aawad/Desktop/minecraft-in-c/CMakeLists.txt
+  terracraft_core.vcxproj -> C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\terracraft_core.lib
+  Building Custom Rule C:/Users/aawad/Desktop/minecraft-in-c/CMakeLists.txt
+  terracraft_tests.vcxproj -> C:\Users\aawad\Desktop\minecraft-in-c\build\Debug\terracraft_tests.exe

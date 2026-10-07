@@ -60,6 +60,7 @@ int test_mat4_ortho_ydown(void);
 int test_block_table(void);
 int test_chunk_basic(void);
 int test_arena(void);
+int test_process_working_set_metric(void);
 int test_path_dirs(void);
 int test_camera_viewmodel_fov_compensation(void);
 int test_player_viewmodel_arm_pose(void);

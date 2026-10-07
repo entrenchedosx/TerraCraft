@@ -173,6 +173,10 @@ typedef struct AppContext {
     double last_frame_time; /* Last frame timestamp (for dt). */
     int frame_count;      /* Frames since last FPS log. */
     float fps_smooth;     /* Last logged FPS (for the F3 overlay). */
+    float frame_ms_avg;   /* Average frame duration over the last FPS window. */
+    float sim_ms_avg;     /* Average CPU time per fixed simulation tick. */
+    float sim_tps;        /* Executed fixed simulation ticks per second. */
+    size_t process_working_set_bytes; /* OS resident memory sample, or 0 if unavailable. */
     bool show_debug;      /* F3 debug overlay toggle. */
     bool third_person;    /* F5 camera: chase view + visible player body. */
     double autosave_timer; /* Seconds since last autosave (PLAYING only). */

@@ -139,7 +139,7 @@ endif()
 
 # Require OpenGL 3.3 availability note for MSVC (opengl32 ships with SDK).
 if(WIN32)
-  target_link_libraries(terracraft_core PUBLIC opengl32 ws2_32)
+  target_link_libraries(terracraft_core PUBLIC opengl32 ws2_32 psapi)
 endif()
 
 # --- Main executable ---------------------------------------------------------
