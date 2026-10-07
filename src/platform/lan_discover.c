@@ -312,9 +312,17 @@ bool lan_discover_scan(LanDiscover *d)
     if (d == NULL || !d->socket_ok) {
         return false;
     }
-    /* Limited broadcast reaches every host on the local network. */
-    return discover_send_to(d, DISCOVER_QUERY, sizeof(DISCOVER_QUERY) - 1u, 0xFFFFFFFFu,
-                           (uint16_t)LAN_DISCOVERY_PORT);
+    /* Limited broadcast reaches every host on the local network. The
+     * loopback broadcast is a fallback for sandboxes that refuse the
+     * limited address, and loopback unicast always reaches this machine
+     * (still discovers other local instances). */
+    bool lan = discover_send_to(d, DISCOVER_QUERY, sizeof(DISCOVER_QUERY) - 1u, 0xFFFFFFFFu,
+                                (uint16_t)LAN_DISCOVERY_PORT);
+    bool loopback = discover_send_to(d, DISCOVER_QUERY, sizeof(DISCOVER_QUERY) - 1u, 0x7FFFFFFFu,
+                                     (uint16_t)LAN_DISCOVERY_PORT);
+    bool self = discover_send_to(d, DISCOVER_QUERY, sizeof(DISCOVER_QUERY) - 1u, 0x7F000001u,
+                                 (uint16_t)LAN_DISCOVERY_PORT);
+    return lan || loopback || self;
 }
 
 static void discover_note_beacon(LanDiscover *d, const char *sender, uint16_t port,

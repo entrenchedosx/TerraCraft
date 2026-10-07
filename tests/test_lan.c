@@ -304,8 +304,17 @@ int test_lan_discover_scan(void)
     lan_discover_host(d, "Loopback World", 2, 8, 25566, 2.0f);
     TEST_ASSERT(lan_discover_scan(d));
     TEST_ASSERT(lan_test_wait_server(d));
-    TEST_ASSERT(lan_discover_count(d) == 1);
-    const LanServerInfo *info = lan_discover_at(d, 0);
+    /* Our query can arrive over several local paths (broadcast,
+     * loopback); each sender address gets its own entry. */
+    TEST_ASSERT(lan_discover_count(d) >= 1);
+    const LanServerInfo *info = NULL;
+    for (size_t i = 0; i < lan_discover_count(d); ++i) {
+        const LanServerInfo *entry = lan_discover_at(d, i);
+        if (entry != NULL && entry->port == 25566u) {
+            info = entry;
+            break;
+        }
+    }
     TEST_ASSERT(info != NULL);
     if (info != NULL) {
         /* Loopback self-delivery reports 127.0.0.1 or the LAN address. */
@@ -315,7 +324,6 @@ int test_lan_discover_scan(void)
         TEST_ASSERT(info->players == 2u);
         TEST_ASSERT(info->capacity == 8u);
     }
-    TEST_ASSERT(lan_discover_at(d, 1) == NULL);
     /* Stale entries age out (poll clamps dt to 1 s per call). */
     for (int i = 0; i < 10; ++i) {
         lan_discover_poll(d, 10.0f);
