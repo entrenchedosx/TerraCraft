@@ -199,30 +199,55 @@ bool player_aabb_solid(const World *w, Vec3 mn, Vec3 mx)
     return false;
 }
 
-/* A small block-space sample of the player's collision body is enough for
- * movement drag and buoyancy; water remains non-colliding. */
-static bool player_in_water(const World *w, const Player *p)
+/* Fractional water contact for the player's complete AABB. Flow states
+ * occupy only block_water_height() from the bottom of their cell; divide
+ * actual overlap volume by the full player volume so shallow immersion has
+ * a proportionally smaller effect than full submersion. */
+static float player_water_contact(const World *w, const Player *p)
 {
-    if (w == NULL || p == NULL) {
-        return false;
+    if (w == NULL || p == NULL || !(p->width > 0.0f) || !(p->height > 0.0f)) {
+        return 0.0f;
     }
     float half = p->width * 0.5f;
-    int x0 = (int)floorf(p->pos.x - half + PLAYER_EPS);
-    int x1 = (int)floorf(p->pos.x + half - PLAYER_EPS);
-    int z0 = (int)floorf(p->pos.z - half + PLAYER_EPS);
-    int z1 = (int)floorf(p->pos.z + half - PLAYER_EPS);
-    int y0 = (int)floorf(p->pos.y + 0.05f);
-    int y1 = (int)floorf(p->pos.y + p->height - 0.05f);
+    float min_x = p->pos.x - half;
+    float max_x = p->pos.x + half;
+    float min_y = p->pos.y;
+    float max_y = p->pos.y + p->height;
+    float min_z = p->pos.z - half;
+    float max_z = p->pos.z + half;
+    int x0 = (int)floorf(min_x + PLAYER_EPS);
+    int x1 = (int)floorf(max_x - PLAYER_EPS);
+    int y0 = (int)floorf(min_y + PLAYER_EPS);
+    int y1 = (int)floorf(max_y - PLAYER_EPS);
+    int z0 = (int)floorf(min_z + PLAYER_EPS);
+    int z1 = (int)floorf(max_z - PLAYER_EPS);
+    float footprint = p->width * p->width;
+    float body_volume = footprint * p->height;
+    float contact = 0.0f;
+    if (!(body_volume > 0.0f)) {
+        return 0.0f;
+    }
     for (int y = y0; y <= y1; ++y) {
         for (int z = z0; z <= z1; ++z) {
             for (int x = x0; x <= x1; ++x) {
-                if (block_is_water(world_get_block(w, x, y, z))) {
-                    return true;
+                uint16_t id = world_get_block(w, x, y, z);
+                if (!block_is_water(id)) {
+                    continue;
+                }
+                float fluid_top = (float)y + block_water_height(id);
+                float overlap_x = fminf(max_x, (float)x + 1.0f) - fmaxf(min_x, (float)x);
+                float overlap_y = fminf(max_y, fluid_top) - fmaxf(min_y, (float)y);
+                float overlap_z = fminf(max_z, (float)z + 1.0f) - fmaxf(min_z, (float)z);
+                if (overlap_x > PLAYER_EPS && overlap_y > PLAYER_EPS && overlap_z > PLAYER_EPS) {
+                    contact += overlap_x * overlap_y * overlap_z / body_volume;
+                    if (contact >= 1.0f) {
+                        return 1.0f;
+                    }
                 }
             }
         }
     }
-    return false;
+    return contact;
 }
 
 /* Resolve one axis after moving: snap out and zero velocity on hit.
@@ -276,7 +301,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     bool sneak = in ? in->sneak : false;
     bool sprint = in ? in->sprint : false;
     const float dt = PLAYER_STEP_DT;
-    bool swimming = player_in_water(w, p);
+    float water_contact = player_water_contact(w, p);
 
     p->sprinting = sprint && !sneak;
     p->sneaking = sneak && !p->flying;
@@ -306,8 +331,8 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     if (sneak) {
         speed *= 0.3f;
     }
-    if (swimming) {
-        speed *= 0.55f;
+    if (water_contact > 0.0f) {
+        speed *= 1.0f - 0.45f * water_contact;
     }
     Vec3 wish = player_wish_dir(p->yaw, fwd, strafe);
     if (mmath_vec3_length_sq(wish) > 1e-8f) {
@@ -315,7 +340,8 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         p->vel.z = wish.z * speed;
     } else {
         /* No input: decay horizontal velocity (MC-style per-step retention). */
-        float d = swimming ? 0.80f : (p->grounded ? p->drag_ground : p->drag_air);
+        float dry_drag = p->grounded ? p->drag_ground : p->drag_air;
+        float d = dry_drag + (0.80f - dry_drag) * water_contact;
         p->vel.x *= d;
         p->vel.z *= d;
         if (fabsf(p->vel.x) < 1e-4f) {
@@ -327,7 +353,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     }
 
     /* Vertical: gravity integrate, terminal clamp, jump on grounded. */
-    float gravity = swimming ? p->gravity * 0.12f : p->gravity;
+    float gravity = p->gravity * (1.0f - 0.88f * water_contact);
     p->acc = mmath_vec3(0.0f, -gravity, 0.0f);
     p->vel.y -= gravity * dt;
     if (p->vel.y < PLAYER_TERMINAL_VEL) {
@@ -337,16 +363,16 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         p->vel.y = p->jump_vel;
         p->grounded = false;
     }
-    if (swimming) {
+    if (water_contact > 0.0f) {
         if (jump) {
-            p->vel.y = 2.4f;
+            p->vel.y += (2.4f - p->vel.y) * water_contact;
         } else if (sneak) {
-            p->vel.y = -2.4f;
+            p->vel.y += (-2.4f - p->vel.y) * water_contact;
         } else {
-            p->vel.y *= 0.80f;
+            p->vel.y *= 1.0f - 0.20f * water_contact;
         }
-        p->vel.x *= 0.92f;
-        p->vel.z *= 0.92f;
+        p->vel.x *= 1.0f - 0.08f * water_contact;
+        p->vel.z *= 1.0f - 0.08f * water_contact;
     }
 
     if (w == NULL) {

@@ -177,6 +177,79 @@ int test_ao_seam(void)
     return failures;
 }
 
+/* Diagonal chunks contribute corner ambient occlusion and must invalidate a
+ * cached mesh when loaded, unloaded, or edited at the shared corner. */
+int test_ao_diagonal_chunk_lifecycle(void)
+{
+    int failures = 0;
+    World *w = world_create();
+    Chunk *a = chunk_create(0, 0);
+    Chunk *diagonal = chunk_create(1, 1);
+    TEST_ASSERT(w != NULL && a != NULL && diagonal != NULL);
+    if (w == NULL || a == NULL || diagonal == NULL) {
+        world_destroy(w);
+        chunk_destroy(a);
+        chunk_destroy(diagonal);
+        return failures + 1;
+    }
+    chunk_set_block(a, 15, 64, 15, BLOCK_STONE);
+    chunk_set_block(diagonal, 0, 65, 0, BLOCK_STONE);
+    int add_a = world_add_chunk(w, a);
+    TEST_ASSERT(add_a == 0);
+    if (add_a != 0) {
+        chunk_destroy(a);
+        chunk_destroy(diagonal);
+        world_destroy(w);
+        return failures + 1;
+    }
+    MeshData *mesh = mesher_build_chunk_mesh(a, w);
+    TEST_ASSERT(mesh != NULL);
+    if (mesh != NULL) {
+        TEST_ASSERT_FLOAT_EQ(corner_ao(mesh, 65.0f, 16.0f, 16.0f), 1.0f, 1e-6f);
+        mesher_free(mesh);
+    }
+    a->dirty = false;
+    int add_diagonal = world_add_chunk(w, diagonal);
+    TEST_ASSERT(add_diagonal == 0);
+    if (add_diagonal != 0) {
+        chunk_destroy(diagonal);
+        world_destroy(w);
+        return failures + 1;
+    }
+    TEST_ASSERT(a->dirty);
+    mesh = mesher_build_chunk_mesh(a, w);
+    TEST_ASSERT(mesh != NULL);
+    if (mesh != NULL) {
+        TEST_ASSERT_FLOAT_EQ(corner_ao(mesh, 65.0f, 16.0f, 16.0f), 0.8f, 1e-6f);
+        mesher_free(mesh);
+    }
+    a->dirty = false;
+    TEST_ASSERT(world_remove_chunk(w, 1, 1));
+    TEST_ASSERT(a->dirty);
+    mesh = mesher_build_chunk_mesh(a, w);
+    TEST_ASSERT(mesh != NULL);
+    if (mesh != NULL) {
+        TEST_ASSERT_FLOAT_EQ(corner_ao(mesh, 65.0f, 16.0f, 16.0f), 1.0f, 1e-6f);
+        mesher_free(mesh);
+    }
+    diagonal = chunk_create(1, 1);
+    TEST_ASSERT(diagonal != NULL);
+    if (diagonal != NULL) {
+        chunk_set_block(diagonal, 0, 65, 0, BLOCK_STONE);
+        add_diagonal = world_add_chunk(w, diagonal);
+        TEST_ASSERT(add_diagonal == 0);
+        if (add_diagonal != 0) {
+            chunk_destroy(diagonal);
+        } else {
+            a->dirty = false;
+            TEST_ASSERT(world_set_block(w, 16, 65, 16, BLOCK_AIR));
+            TEST_ASSERT(a->dirty);
+        }
+    }
+    world_destroy(w);
+    return failures;
+}
+
 /* Test: roofed faces get the shade factor; top-solid helper works.
  *
  * Returns: failure count.

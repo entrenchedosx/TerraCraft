@@ -120,6 +120,60 @@ int test_mob_handles(void)
  *
  * Returns: failure count.
  */
+static int test_mob_physics_water(void)
+{
+    int failures = 0;
+    World *full = make_mob_world();
+    World *shallow = make_mob_world();
+    TEST_ASSERT(full != NULL && shallow != NULL);
+    if (full == NULL || shallow == NULL) {
+        world_destroy(full);
+        world_destroy(shallow);
+        return failures + 1;
+    }
+    TEST_ASSERT(world_set_block(full, 8, 70, 8, BLOCK_WATER));
+    TEST_ASSERT(world_set_block(shallow, 8, 70, 8, BLOCK_WATER_FLOW_7));
+
+    MobPool full_pool, shallow_pool;
+    mob_pool_init(&full_pool, 10u);
+    mob_pool_init(&shallow_pool, 11u);
+    EntityId full_id = mob_spawn(&full_pool, ENTITY_COW, mmath_vec3(8.5f, 70.05f, 8.5f), 0.0f);
+    EntityId shallow_id = mob_spawn(&shallow_pool, ENTITY_COW, mmath_vec3(8.5f, 70.05f, 8.5f), 0.0f);
+    Mob *full_mob = mob_resolve(&full_pool, full_id);
+    Mob *shallow_mob = mob_resolve(&shallow_pool, shallow_id);
+    TEST_ASSERT(full_mob != NULL && shallow_mob != NULL);
+    if (full_mob == NULL || shallow_mob == NULL) {
+        world_destroy(full);
+        world_destroy(shallow);
+        return failures + 1;
+    }
+    full_mob->wish_dir = shallow_mob->wish_dir = mmath_vec3(1.0f, 0.0f, 0.0f);
+    full_mob->wish_speed = shallow_mob->wish_speed = 3.0f;
+    mob_physics_step(full_mob, full, 1.0f / 60.0f);
+    mob_physics_step(shallow_mob, shallow, 1.0f / 60.0f);
+    TEST_ASSERT(full_mob->vel.x < shallow_mob->vel.x); /* Deeper contact adds drag. */
+    TEST_ASSERT(full_mob->vel.y > 0.0f);                /* Full water supplies buoyancy. */
+    TEST_ASSERT(shallow_mob->vel.y < 0.0f);             /* Shallow flow is only a partial effect. */
+    TEST_ASSERT(isfinite(full_mob->vel.x) && isfinite(full_mob->vel.y) && isfinite(full_mob->vel.z));
+    TEST_ASSERT(isfinite(shallow_mob->vel.x) && isfinite(shallow_mob->vel.y) &&
+                isfinite(shallow_mob->vel.z));
+
+    /* Invalid intent/vertical state is sanitized and oversized speed is capped. */
+    full_mob->wish_dir = mmath_vec3(INFINITY, 0.0f, NAN);
+    full_mob->wish_speed = INFINITY;
+    full_mob->vel.y = NAN;
+    mob_physics_step(full_mob, full, 1.0f / 60.0f);
+    TEST_ASSERT(isfinite(full_mob->vel.x) && isfinite(full_mob->vel.y) && isfinite(full_mob->vel.z));
+    full_mob->wish_dir = mmath_vec3(1.0f, 0.0f, 0.0f);
+    full_mob->wish_speed = 10000.0f;
+    mob_physics_step(full_mob, full, 1.0f / 60.0f);
+    TEST_ASSERT(isfinite(full_mob->vel.x) && fabsf(full_mob->vel.x) <= 12.0f);
+
+    world_destroy(full);
+    world_destroy(shallow);
+    return failures;
+}
+
 int test_mob_physics_fall(void)
 {
     int failures = 0;
@@ -150,6 +204,7 @@ int test_mob_physics_fall(void)
     mob_physics_step(m, w, 0.0f);
     mob_physics_step(m, w, -1.0f);
     world_destroy(w);
+    failures += test_mob_physics_water();
     return failures;
 }
 

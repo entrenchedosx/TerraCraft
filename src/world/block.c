@@ -23,7 +23,7 @@ static const BlockInfo BLOCK_TABLE[BLOCK_COUNT] = {
     [BLOCK_BEDROCK] = {.name = "bedrock", .solid = true, .transparent = false, .color_r = 0.1f, .color_g = 0.1f, .color_b = 0.1f, .hardness = 0.0f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = true},
     [BLOCK_WOOD] = {.name = "wood", .solid = true, .transparent = false, .color_r = 0.45f, .color_g = 0.3f, .color_b = 0.15f, .hardness = 2.0f, .tool = 2, .min_tier = 1, .drop = 6, .drop_count = 1, .unbreakable = false},
     [BLOCK_LEAVES] = {.name = "leaves", .solid = true, .transparent = true, .color_r = 0.2f, .color_g = 0.55f, .color_b = 0.2f, .hardness = 0.2f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = false},
-    [BLOCK_SAND] = {.name = "sand", .solid = true, .transparent = false, .color_r = 0.85f, .color_g = 0.75f, .color_b = 0.5f, .hardness = 0.5f, .tool = 3, .min_tier = 1, .drop = 8, .drop_count = 1, .unbreakable = false},
+    [BLOCK_SAND] = {.name = "sand", .solid = true, .transparent = false, .color_r = 0.85f, .color_g = 0.75f, .color_b = 0.5f, .hardness = 0.5f, .tool = 3, .min_tier = 1, .drop = 8, .drop_count = 1, .unbreakable = false, .gravity_affected = true},
     [BLOCK_GLASS] = {.name = "glass", .solid = true, .transparent = true, .color_r = 0.75f, .color_g = 0.88f, .color_b = 0.95f, .hardness = 0.3f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = false},
     [BLOCK_COAL_ORE] = {.name = "coal_ore", .solid = true, .transparent = false, .color_r = 0.35f, .color_g = 0.35f, .color_b = 0.35f, .hardness = 3.0f, .tool = 1, .min_tier = 1, .drop = 100, .drop_count = 1, .unbreakable = false},
     [BLOCK_IRON_ORE] = {.name = "iron_ore", .solid = true, .transparent = false, .color_r = 0.62f, .color_g = 0.5f, .color_b = 0.42f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = 11, .drop_count = 1, .unbreakable = false},
@@ -142,6 +142,11 @@ float block_water_height(uint16_t type)
         return 1.0f;
     }
     return (float)(8 - level) / 8.0f;
+}
+
+bool block_has_gravity(uint16_t type)
+{
+    return block_get_info(type)->gravity_affected;
 }
 
 /* Cross-sprite blocks (non-solid decor rendered as X quads). */

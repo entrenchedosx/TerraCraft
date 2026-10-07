@@ -48,15 +48,20 @@ void chunk_init(Chunk *c, int cx, int cz)
         c->blocks[i] = BLOCK_AIR;
     }
     memset(c->water_queued, 0, sizeof(c->water_queued));
+    memset(c->water_deferred, 0, sizeof(c->water_deferred));
+    c->water_deferred_count = 0;
+    memset(c->gravity_queued, 0, sizeof(c->gravity_queued));
+    memset(c->gravity_deferred, 0, sizeof(c->gravity_deferred));
+    c->gravity_deferred_count = 0;
     c->dirty = true;
     c->save_dirty = false;
     /* Cache the full-column AABB for frustum culling (M2). */
-    c->aabb_min[0] = (float)(cx * CHUNK_X);
+    c->aabb_min[0] = (float)cx * (float)CHUNK_X;
     c->aabb_min[1] = 0.0f;
-    c->aabb_min[2] = (float)(cz * CHUNK_Z);
-    c->aabb_max[0] = (float)(cx * CHUNK_X + CHUNK_X);
+    c->aabb_min[2] = (float)cz * (float)CHUNK_Z;
+    c->aabb_max[0] = (float)cx * (float)CHUNK_X + (float)CHUNK_X;
     c->aabb_max[1] = (float)CHUNK_Y;
-    c->aabb_max[2] = (float)(cz * CHUNK_Z + CHUNK_Z);
+    c->aabb_max[2] = (float)cz * (float)CHUNK_Z + (float)CHUNK_Z;
 }
 
 /* Linear index (unchecked): (y * 256) + (z * 16) + x.

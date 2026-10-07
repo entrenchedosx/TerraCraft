@@ -30,8 +30,11 @@ open.
 - Versioned terrain profiles for legacy-save continuity, with connected
   mountain belts, sharper peaks, varied foothills, and lowland river channels
   in newly created worlds.
-- Bounded source/flow/falling water with partial-height rendering and basic
-  player buoyancy.
+- Bounded source/flow/falling water with partial-height rendering and
+  depth-aware player, mob, and dropped-item buoyancy.
+- Continuous fixed-tick sand physics with collision, chain reactions,
+  water displacement, safe save/unload settling, and a separate falling-block
+  render pass.
 - Chunk streaming, block editing, lighting, ambient occlusion, fog, and a
   day/night cycle.
 - Creative flight and Survival health, hunger, mining, tool wear, food,
@@ -50,7 +53,7 @@ open.
 - Direct LAN play: one player opens a world to LAN, and up to eight other
   players can join by the host computer's local IPv4 address. Player movement,
   chat, and block changes made during the session are shared.
-- 176 registered headless test functions in the custom test runner.
+- 184 registered headless test functions in the custom test runner.
 
 ## Controls
 
@@ -174,6 +177,7 @@ in [docs/FIDELITY_BUGS.md](docs/FIDELITY_BUGS.md).
 
 - [Java behavior targets and current differences](docs/JAVA_FIDELITY.md)
 - [Terrain profiles, water states, and save compatibility](docs/TERRAIN_AND_WATER.md)
+- [Fluid scheduling, falling-block physics, persistence, and current limits](docs/WORLD_PHYSICS.md)
 - [Fidelity bug log and playtest checklist](docs/FIDELITY_BUGS.md)
 - [Gauntlet review procedure and round notes](docs/GAUNTLET.md)
 - [LAN setup, controls, and synchronization scope](docs/LAN_MULTIPLAYER.md)

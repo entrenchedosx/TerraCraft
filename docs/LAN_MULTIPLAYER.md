@@ -32,6 +32,11 @@ is saved in `config/profile.cfg`; it is not tied to a world save.
 - Chat messages, sent with `T` and displayed to connected players.
 - Block changes made while the players are connected. The host applies client
   edits and relays accepted changes, so the host's open world is authoritative.
+- Falling-block start and landing events. Clients predict motion between those
+  events. A LAND frame includes the authoritative destination cell so the
+  client can reconcile and apply the landing as one reliable message. If the
+  host's bounded outbox is full, it delays the transition and retries instead
+  of dropping the event.
 - The host's seed, terrain-generation version, game mode, player position,
   and time of day when a client joins. The client creates a local save copy
   and generates the same unmodified terrain.
@@ -46,6 +51,8 @@ is saved in `config/profile.cfg`; it is not tied to a world save.
 - The connection uses direct, unencrypted TCP intended for trusted local
   networks. There is no account authentication or protection from a hostile
   peer on the same local network.
+- Falling blocks do not send continuous position snapshots; client animation
+  can drift slightly from the host between lifecycle events.
 - The host uses client-reported player positions for rendering and block-edit
   reach checks; it does not simulate or validate client movement. Treat LAN
   peers as trusted.

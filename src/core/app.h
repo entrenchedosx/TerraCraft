@@ -145,6 +145,11 @@ typedef struct AppContext {
     size_t lan_block_queue_head;
     size_t lan_block_queue_count;
     bool lan_block_queue_warned;
+    bool lan_gravity_echo_pending; /* A gravity event bundles its paired setter callback. */
+    int lan_gravity_echo_x;
+    int lan_gravity_echo_y;
+    int lan_gravity_echo_z;
+    uint16_t lan_gravity_echo_block_id;
     bool chat_open;       /* Chat owns keyboard/mouse input while true. */
     char chat_input[192]; /* UTF-8 outgoing chat draft. */
     char chat_lines[8][224]; /* Recent local/LAN chat history. */

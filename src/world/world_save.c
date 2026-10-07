@@ -248,6 +248,13 @@ int world_save_all(const char *dir, World *w, const Player *p, Vec3 spawn, bool 
     if (dir == NULL || w == NULL || p == NULL) {
         return -1;
     }
+    /* Falling blocks are transient world objects. Convert them back to their
+     * deterministic landing cells before writing chunk snapshots so a save
+     * cannot omit or duplicate a moving block. */
+    if (!world_gravity_settle_all(w, w->gravity_replicate_changes)) {
+        LOG_ERROR("world_save: could not safely settle falling blocks before saving");
+        return -4;
+    }
     WorldMeta m;
     world_meta_defaults(&m);
     size_t nl = strlen(w->name);

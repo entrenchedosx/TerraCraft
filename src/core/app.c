@@ -588,7 +588,9 @@ enum {
     APP_LAN_MSG_CHAT = 4,
     APP_LAN_MSG_BLOCK = 5,
     APP_LAN_MSG_PLAYER_LEFT = 6,
-    APP_LAN_PROTOCOL_VERSION = 1,
+    APP_LAN_MSG_GRAVITY_START = 7,
+    APP_LAN_MSG_GRAVITY_LAND = 8,
+    APP_LAN_PROTOCOL_VERSION = 2,
     APP_LAN_PORT = 25566,
     APP_CHAT_MAX_BYTES = 160
 };
@@ -796,29 +798,68 @@ static bool app_lan_send_welcome(AppContext *app, uint32_t peer_id)
     return lan_send(app->lan, peer_id, payload, at);
 }
 
-static void app_lan_block_changed(void *context, int wx, int wy, int wz, uint16_t block_id)
+static bool app_lan_queue_world_event(AppContext *app, uint8_t type, int wx, int wy, int wz,
+                                      uint16_t block_id)
 {
-    AppContext *app = (AppContext *)context;
     if (app == NULL || app->lan == NULL || app->lan_applying_remote_block ||
         (!app->lan_host && !app->lan_client) || !lan_is_connected(app->lan) ||
         (app->lan_host && lan_peer_count(app->lan) == 0)) {
-        return;
+        return false;
     }
     if (app->lan_block_queue_count >= MINEC_LAN_BLOCK_QUEUE) {
         if (!app->lan_block_queue_warned) {
             LOG_WARN("LAN block update queue is full; further edits may not reach peers until it drains");
             app->lan_block_queue_warned = true;
         }
-        return;
+        return false;
     }
     size_t slot = (app->lan_block_queue_head + app->lan_block_queue_count) % MINEC_LAN_BLOCK_QUEUE;
     uint8_t *payload = app->lan_block_queue[slot];
-    payload[0] = APP_LAN_MSG_BLOCK;
+    payload[0] = type;
     app_net_write_u32(payload + 1, (uint32_t)(int32_t)wx);
     app_net_write_u32(payload + 5, (uint32_t)(int32_t)wy);
     app_net_write_u32(payload + 9, (uint32_t)(int32_t)wz);
     app_net_write_u16(payload + 13, block_id);
     app->lan_block_queue_count++;
+    return true;
+}
+
+static void app_lan_block_changed(void *context, int wx, int wy, int wz, uint16_t block_id)
+{
+    AppContext *app = (AppContext *)context;
+    if (app != NULL && app->lan_gravity_echo_pending) {
+        bool bundled = wx == app->lan_gravity_echo_x && wy == app->lan_gravity_echo_y &&
+                       wz == app->lan_gravity_echo_z && block_id == app->lan_gravity_echo_block_id;
+        app->lan_gravity_echo_pending = false;
+        if (bundled) {
+            return;
+        }
+    }
+    (void)app_lan_queue_world_event(app, APP_LAN_MSG_BLOCK, wx, wy, wz, block_id);
+}
+
+static bool app_lan_gravity_event(void *context, bool landed, int wx, int wy, int wz, uint16_t block_id)
+{
+    AppContext *app = (AppContext *)context;
+    if (app == NULL || !app->lan_host) {
+        return false;
+    }
+    if (app->lan == NULL || lan_peer_count(app->lan) == 0) {
+        return true; /* No remote peer needs this transition. */
+    }
+    /* START clears the source and LAND installs the destination on clients,
+     * so each event also carries its paired canonical block update. */
+    bool queued = app_lan_queue_world_event(app,
+                                            landed ? APP_LAN_MSG_GRAVITY_LAND : APP_LAN_MSG_GRAVITY_START,
+                                            wx, wy, wz, block_id);
+    if (queued) {
+        app->lan_gravity_echo_pending = true;
+        app->lan_gravity_echo_x = wx;
+        app->lan_gravity_echo_y = wy;
+        app->lan_gravity_echo_z = wz;
+        app->lan_gravity_echo_block_id = landed ? block_id : BLOCK_AIR;
+    }
+    return queued;
 }
 
 bool app_lan_host(AppContext *app)
@@ -844,8 +885,11 @@ bool app_lan_host(AppContext *app)
     app->lan_block_queue_head = 0;
     app->lan_block_queue_count = 0;
     app->lan_block_queue_warned = false;
+    app->lan_gravity_echo_pending = false;
     app->menu.error[0] = '\0';
     world_set_block_change_callback(app->world, app_lan_block_changed, app);
+    world_set_gravity_replication(app->world, true);
+    world_set_gravity_event_callback(app->world, app_lan_gravity_event, app);
     LOG_INFO("LAN host listening on port %d", APP_LAN_PORT);
     return true;
 }
@@ -874,6 +918,7 @@ bool app_lan_join(AppContext *app, const char *address)
     app->lan_block_queue_head = 0;
     app->lan_block_queue_count = 0;
     app->lan_block_queue_warned = false;
+    app->lan_gravity_echo_pending = false;
     return true;
 }
 
@@ -884,6 +929,8 @@ void app_lan_disconnect(AppContext *app)
     }
     if (app->world != NULL) {
         world_set_block_change_callback(app->world, NULL, NULL);
+        world_set_gravity_event_callback(app->world, NULL, NULL);
+        world_set_gravity_replication(app->world, true);
     }
     if (app->lan != NULL) {
         lan_close(app->lan);
@@ -898,6 +945,7 @@ void app_lan_disconnect(AppContext *app)
     app->lan_block_queue_head = 0;
     app->lan_block_queue_count = 0;
     app->lan_block_queue_warned = false;
+    app->lan_gravity_echo_pending = false;
     app->lan_player_count = 0;
     memset(app->lan_players, 0, sizeof(app->lan_players));
     app->chat_open = false;
@@ -974,6 +1022,7 @@ static bool app_lan_open_client_world(AppContext *app, const LanEvent *event)
     app->has_spawn_point = true;
     app->player_from_save = true;
     world_set_block_change_callback(app->world, app_lan_block_changed, app);
+    world_set_gravity_replication(app->world, false);
     LanRemotePlayer *host = app_lan_find_player(app, 0, true);
     if (host != NULL) {
         memcpy(host->username, host_name, name_len + 1);
@@ -1085,6 +1134,36 @@ static void app_lan_handle_block(AppContext *app, const LanEvent *event)
         app->lan_applying_remote_block = true;
         (void)world_set_block(app->world, wx, wy, wz, block_id);
         app->lan_applying_remote_block = false;
+    }
+}
+
+static void app_lan_handle_gravity(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || !app->lan_client || app->world == NULL ||
+        event->size != 15 || event->peer_id != LAN_SERVER_PEER_ID ||
+        (event->payload[0] != APP_LAN_MSG_GRAVITY_START && event->payload[0] != APP_LAN_MSG_GRAVITY_LAND)) {
+        return;
+    }
+    int32_t wx = (int32_t)app_net_read_u32(event->payload + 1);
+    int32_t wy = (int32_t)app_net_read_u32(event->payload + 5);
+    int32_t wz = (int32_t)app_net_read_u32(event->payload + 9);
+    uint16_t block_id = app_net_read_u16(event->payload + 13);
+    if (wx < -30000000 || wx > 30000000 || wz < -30000000 || wz > 30000000 ||
+        wy < 0 || wy >= CHUNK_Y || !block_has_gravity(block_id)) {
+        return;
+    }
+    int cx = app_floor_div16(wx);
+    int cz = app_floor_div16(wz);
+    if (world_get_chunk(app->world, cx, cz) == NULL && world_generate_chunk(app->world, cx, cz) != 0) {
+        return;
+    }
+    if (event->payload[0] == APP_LAN_MSG_GRAVITY_START) {
+        (void)world_gravity_apply_remote_start(app->world, wx, wy, wz, block_id);
+    } else {
+        (void)world_gravity_apply_remote_landing(app->world, wx, wy, wz, block_id);
+        /* Keep landing atomic in the reliable queue: the LAND frame contains
+         * both the end of the visual fall and its authoritative block cell. */
+        (void)world_set_block_unreplicated(app->world, wx, wy, wz, block_id);
     }
 }
 
@@ -1214,6 +1293,10 @@ static void app_lan_handle_message(AppContext *app, const LanEvent *event)
     case APP_LAN_MSG_BLOCK:
         app_lan_handle_block(app, event);
         break;
+    case APP_LAN_MSG_GRAVITY_START:
+    case APP_LAN_MSG_GRAVITY_LAND:
+        app_lan_handle_gravity(app, event);
+        break;
     case APP_LAN_MSG_PLAYER_LEFT:
         if (app->lan_client && event->size == 5) {
             app_lan_remove_player(app, app_net_read_u32(event->payload + 1));
@@ -1314,6 +1397,7 @@ static void app_lan_update(AppContext *app, double dt)
         app->lan_block_queue_head = 0;
         app->lan_block_queue_count = 0;
         app->lan_block_queue_warned = false;
+        app->lan_gravity_echo_pending = false;
     } else if ((app->lan_host || app->lan_client) && lan_is_connected(app->lan)) {
         uint32_t target = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
         while (app->lan_block_queue_count > 0) {
@@ -2158,7 +2242,10 @@ static void app_tick_playing(AppContext *app, float dt)
     bool controllable = app->state == GAME_STATE_PLAYING && !app->chat_open;
 
     time_system_update(&app->clock, dt);
-    world_water_tick(app->world, dt);
+    /* The host's fluid transitions are canonical. Clients run the same
+     * fixed-step simulation for responsiveness but never echo predictions. */
+    world_water_tick_mode(app->world, dt, !app->lan_client);
+    world_gravity_tick(app->world, dt, !app->lan_client);
 
     PlayerInput in;
     if (controllable) {
@@ -2450,6 +2537,7 @@ static void app_render_playing(AppContext *app)
 
     float aspect = app->height > 0 ? (float)app->width / (float)app->height : 16.0f / 9.0f;
     renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
+    renderer_draw_falling_blocks(app->renderer, app->world, app->camera, aspect, &app->clock);
     renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                        (float)(app->last_frame_time - app->start_time), &app->mobs_drawn, &app->mobs_culled);
     app_draw_player_third(app, aspect);
@@ -2769,6 +2857,7 @@ int app_run(AppContext *app)
                 app_prepare_world_render(app);
                 float aspect = app->height > 0 ? (float)app->width / (float)app->height : 16.0f / 9.0f;
                 renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
+                renderer_draw_falling_blocks(app->renderer, app->world, app->camera, aspect, &app->clock);
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                                    (float)(app->last_frame_time - app->start_time), NULL, NULL);
                 app_draw_player_third(app, aspect);
@@ -2803,6 +2892,7 @@ int app_run(AppContext *app)
                 app_prepare_world_render(app);
                 float aspect = app->height > 0 ? (float)app->width / (float)app->height : 16.0f / 9.0f;
                 renderer_draw_world(app->renderer, app->world, app->camera, aspect, &app->clock);
+                renderer_draw_falling_blocks(app->renderer, app->world, app->camera, aspect, &app->clock);
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                                    (float)(app->last_frame_time - app->start_time), NULL, NULL);
                 app_draw_player_third(app, aspect);

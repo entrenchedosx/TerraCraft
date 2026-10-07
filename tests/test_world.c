@@ -281,15 +281,31 @@ int test_water_queue_bound(void)
     for (int y = 0; y < CHUNK_Y; ++y) {
         for (int z = 0; z < CHUNK_Z; ++z) {
             for (int x = 0; x < CHUNK_X; ++x) {
+                if (x == 15 && y == 255 && z == 15) {
+                    continue; /* Observable target for a source that is deferred below. */
+                }
                 (void)world_set_block(w, x, y, z, BLOCK_WATER);
             }
         }
     }
+    /* Isolate the target so only this late, deferred source can fill it. */
+    TEST_ASSERT(world_set_block(w, 15, 255, 14, BLOCK_STONE));
     TEST_ASSERT(world_water_pending(w) == WORLD_WATER_QUEUE_CAP);
     TEST_ASSERT(w->water_rescan_needed);
+    size_t sentinel = chunk_index(14, 255, 15);
+    TEST_ASSERT((c->water_deferred[sentinel >> 3] & (uint8_t)(1u << (sentinel & 7u))) != 0);
     world_water_tick(w, 0.25f);
     TEST_ASSERT(world_water_pending(w) <= WORLD_WATER_QUEUE_CAP);
     TEST_ASSERT(w->water_scan_cell > 0 || w->water_scan_chunk > 0);
+    /* Saturated work must eventually be replayed exactly once, then stop
+     * requesting recovery scans instead of leaving stale deferred bits. */
+    for (int tick = 0; tick < 320 && (w->water_rescan_needed || world_water_pending(w) > 0); ++tick) {
+        world_water_tick(w, 0.25f);
+    }
+    TEST_ASSERT(world_water_pending(w) == 0);
+    TEST_ASSERT(c->water_deferred_count == 0);
+    TEST_ASSERT(w->water_rescan_needed == false);
+    TEST_ASSERT(block_is_water(world_get_block(w, 15, 255, 15)));
     world_destroy(w);
     return failures;
 }

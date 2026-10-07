@@ -90,6 +90,70 @@ static bool entity_box_solid(const World *w, Vec3 mn, Vec3 mx)
     return false;
 }
 
+/* Fraction of the item's collision AABB occupied by water. Flowing states
+ * use their real bottom-up surface height. */
+static float entity_water_contact(const ItemEntity *e, const World *w)
+{
+    if (e == NULL || w == NULL) {
+        return 0.0f;
+    }
+    const float eps = 0.001f;
+    float width = ENTITY_HALF * 2.0f;
+    float min_x = e->pos.x - ENTITY_HALF;
+    float max_x = e->pos.x + ENTITY_HALF;
+    float min_y = e->pos.y;
+    float max_y = e->pos.y + width;
+    float min_z = e->pos.z - ENTITY_HALF;
+    float max_z = e->pos.z + ENTITY_HALF;
+    int x0 = (int)floorf(min_x + eps);
+    int x1 = (int)floorf(max_x - eps);
+    int y0 = (int)floorf(min_y + eps);
+    int y1 = (int)floorf(max_y - eps);
+    int z0 = (int)floorf(min_z + eps);
+    int z1 = (int)floorf(max_z - eps);
+    float volume = width * width * width;
+    if (!(volume > 0.0f)) {
+        return 0.0f;
+    }
+
+    float contact = 0.0f;
+    for (int y = y0; y <= y1; ++y) {
+        for (int z = z0; z <= z1; ++z) {
+            for (int x = x0; x <= x1; ++x) {
+                uint16_t id = world_get_block(w, x, y, z);
+                if (!block_is_water(id)) {
+                    continue;
+                }
+                float fluid_top = (float)y + block_water_height(id);
+                float overlap_x = fminf(max_x, (float)x + 1.0f) - fmaxf(min_x, (float)x);
+                float overlap_y = fminf(max_y, fluid_top) - fmaxf(min_y, (float)y);
+                float overlap_z = fminf(max_z, (float)z + 1.0f) - fmaxf(min_z, (float)z);
+                if (overlap_x > eps && overlap_y > eps && overlap_z > eps) {
+                    contact += overlap_x * overlap_y * overlap_z / volume;
+                    if (contact >= 1.0f) {
+                        return 1.0f;
+                    }
+                }
+            }
+        }
+    }
+    return contact;
+}
+
+static float entity_clamp_velocity(float value, float min_value, float max_value)
+{
+    if (!isfinite(value)) {
+        return 0.0f;
+    }
+    if (value < min_value) {
+        return min_value;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return value;
+}
+
 /* Move one axis with snap-out (mirrors player resolution, lighter). */
 static void entity_resolve(ItemEntity *e, World *w, int axis, float delta, bool down)
 {
@@ -125,13 +189,33 @@ static void entity_resolve(ItemEntity *e, World *w, int axis, float delta, bool 
 /* One physics substep for a single entity. */
 static void entity_step(ItemEntity *e, World *w, float dt)
 {
-    e->vel.y -= ENTITY_GRAVITY * dt;
+    if (!isfinite(e->pos.x) || !isfinite(e->pos.y) || !isfinite(e->pos.z)) {
+        e->pos = mmath_vec3(0.0f, 0.0f, 0.0f);
+    }
+    e->vel.x = entity_clamp_velocity(e->vel.x, -30.0f, 30.0f);
+    e->vel.y = entity_clamp_velocity(e->vel.y, ENTITY_TERMINAL_VEL, 8.0f);
+    e->vel.z = entity_clamp_velocity(e->vel.z, -30.0f, 30.0f);
+    float water_contact = entity_water_contact(e, w);
+    float gravity = ENTITY_GRAVITY * (1.0f - 1.15f * water_contact);
+    e->vel.y -= gravity * dt;
     if (e->vel.y < ENTITY_TERMINAL_VEL) {
         e->vel.y = ENTITY_TERMINAL_VEL;
+    } else if (e->vel.y > 8.0f) {
+        e->vel.y = 8.0f;
     }
     /* Mild air drag so pops settle instead of sliding forever. */
     e->vel.x *= 0.98f;
     e->vel.z *= 0.98f;
+    if (water_contact > 0.0f) {
+        float horizontal_drag = expf(-4.0f * water_contact * dt);
+        float vertical_drag = expf(-5.0f * water_contact * dt);
+        e->vel.x *= horizontal_drag;
+        e->vel.y *= vertical_drag;
+        e->vel.z *= horizontal_drag;
+    }
+    e->vel.x = entity_clamp_velocity(e->vel.x, -30.0f, 30.0f);
+    e->vel.y = entity_clamp_velocity(e->vel.y, ENTITY_TERMINAL_VEL, 8.0f);
+    e->vel.z = entity_clamp_velocity(e->vel.z, -30.0f, 30.0f);
     if (w == NULL) {
         e->pos = mmath_vec3_add(e->pos, mmath_vec3_scale(e->vel, dt));
         return;

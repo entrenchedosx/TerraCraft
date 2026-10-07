@@ -83,6 +83,7 @@ set(TERRACRAFT_SOURCES
   src/world/chunk.c
   src/world/world.c
   src/world/water.c
+  src/world/gravity.c
   src/world/world_gen.c
   src/world/streamer.c
   src/world/biome.c
@@ -176,6 +177,7 @@ add_executable(terracraft_tests
   tests/test_input_buffer.c
   tests/test_core.c
   tests/test_world.c
+  tests/test_gravity.c
   tests/test_mesher.c
   tests/test_texture.c
   tests/test_streamer.c

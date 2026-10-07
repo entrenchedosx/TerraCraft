@@ -310,6 +310,50 @@ triaged against the user's report.
   end-to-end acceptance.
 - `AI_MEMORY` is ignored and excluded from the commit and push.
 
+### Round 10 — fluid depth, falling sand, and streamed mesh seams
+
+- Bounded the water update queue's overflow recovery with per-chunk deferred
+  bits, raised the fixed interval work budget to 1,024 cells, and added a
+  saturation test that drains all deferred work and checks that rescanning
+  stops.
+- Player, mob, and dropped-item drag/buoyancy now use actual AABB overlap with
+  each fluid surface. Player overlap is normalized by the full body volume,
+  so one source cell and a shallow flow have distinct partial effects.
+- Added opt-in gravity metadata and a bounded, fixed-tick falling-block
+  scheduler. Sand falls through fluids and plants, collides against solid
+  blocks without tunneling, displaces water at landing, and safely settles
+  for persistence. Falling blocks render during play, inventory, and crafting.
+- LAN hosts now send ordered falling-start and landing events. A landing frame
+  carries the canonical destination cell, so the reliable queue cannot send a
+  landing event while dropping its paired sand update. Clients can predict
+  the fall without echoing local simulation or save/unload settlement; tagged
+  local save landings remain pending until the host confirms or corrects them.
+- A separate critic identified a missing start event, predicted landing
+  duplication risk, missing inventory/crafting rendering, diagonal AO cache
+  invalidation, and a player water-fraction mismatch. A follow-up review found
+  two edge cases: client save settlement could outlive authority without a
+  reconciliation tag, and a one-slot LAN backlog could split a LAND packet
+  from its block update. Both are fixed. Focused tests cover start-before-AIR
+  ordering before the source is cleared, save-and-correct landing
+  reconciliation, callback-free client
+  save/unload, observable fluid and gravity queue recovery, full-body water
+  fraction, and diagonal chunk load/remove/edit remeshing.
+- A final independent review found that clients at the 256-record visual pool
+  limit could retain a host-cleared source, and a completely full host outbox
+  could drop an entire gravity event. Host starts and landings now wait and
+  retry until the bounded reliable queue accepts the transition; clients clear
+  the authoritative source even if they cannot allocate a visual record. New
+  regressions cover both cases.
+- Visual Studio Debug and Release builds succeeded; both CTest suites pass.
+  The direct Release runner reports 184 tests, 0 failures. No live two-computer
+  or in-game visual playtest was run, so rendered fluid/fall appearance and
+  LAN timing still need human confirmation.
+- Water still has no lava, reactions, waterlogging, current forces, oxygen,
+  drowning, waves, or refraction. Sand is the only gravity block; continuous
+  network position snapshots and material-specific fall effects are also
+  unimplemented. `docs/WORLD_PHYSICS.md` records the implemented rules and
+  remaining limits.
+
 ## Research
 
 - [Gauntlet Loop](https://thrixel.com/learn/gauntlet-loop) — description of

@@ -195,27 +195,60 @@ int test_physics_water_motion(void)
     int failures = 0;
     World *dry = make_floor_world();
     World *wet = make_floor_world();
-    TEST_ASSERT(dry != NULL && wet != NULL);
-    if (dry == NULL || wet == NULL) {
+    World *partial = make_floor_world();
+    World *shallow = make_floor_world();
+    TEST_ASSERT(dry != NULL && wet != NULL && partial != NULL && shallow != NULL);
+    if (dry == NULL || wet == NULL || partial == NULL || shallow == NULL) {
         world_destroy(dry);
         world_destroy(wet);
+        world_destroy(partial);
+        world_destroy(shallow);
         return failures + 1;
     }
     TEST_ASSERT(world_set_block(wet, 8, 65, 8, BLOCK_WATER));
-    Player dry_player, wet_player;
+    TEST_ASSERT(world_set_block(wet, 8, 66, 8, BLOCK_WATER));
+    TEST_ASSERT(world_set_block(partial, 8, 65, 8, BLOCK_WATER));
+    TEST_ASSERT(world_set_block(shallow, 8, 65, 8, BLOCK_WATER_FLOW_7));
+    Player dry_player, wet_player, partial_player, shallow_player;
     player_init(&dry_player);
     player_init(&wet_player);
-    dry_player.pos = wet_player.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
-    dry_player.grounded = wet_player.grounded = true;
+    player_init(&partial_player);
+    player_init(&shallow_player);
+    dry_player.pos = wet_player.pos = partial_player.pos = shallow_player.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    dry_player.grounded = wet_player.grounded = partial_player.grounded = shallow_player.grounded = true;
     PlayerInput in = no_input();
     in.fwd = 1.0f;
     in.jump = true;
     player_update(&dry_player, &in, dry, PLAYER_STEP_DT);
     player_update(&wet_player, &in, wet, PLAYER_STEP_DT);
+    player_update(&partial_player, &in, partial, PLAYER_STEP_DT);
+    player_update(&shallow_player, &in, shallow, PLAYER_STEP_DT);
     TEST_ASSERT(fabsf(wet_player.vel.z) < fabsf(dry_player.vel.z));
-    TEST_ASSERT(wet_player.vel.y > 2.0f);
+    TEST_ASSERT_FLOAT_EQ(wet_player.vel.z, -wet_player.walk_speed * 0.55f * 0.92f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(wet_player.vel.y, 2.4f, 1e-5f);
+    /* A single source at the feet wets only part of the 1.8-block player;
+     * a shallow flow wets less still. */
+    TEST_ASSERT(fabsf(partial_player.vel.z) > fabsf(wet_player.vel.z));
+    TEST_ASSERT(fabsf(partial_player.vel.z) < fabsf(dry_player.vel.z));
+    TEST_ASSERT(partial_player.vel.y > wet_player.vel.y);
+    TEST_ASSERT(fabsf(shallow_player.vel.z) > fabsf(partial_player.vel.z));
+    TEST_ASSERT(fabsf(shallow_player.vel.z) < fabsf(dry_player.vel.z));
+    TEST_ASSERT(shallow_player.vel.y > partial_player.vel.y);
+
+    /* A shallow fluid surface below the player's feet is not contact. */
+    Player dry_above, shallow_above;
+    player_init(&dry_above);
+    player_init(&shallow_above);
+    dry_above.pos = shallow_above.pos = mmath_vec3(8.5f, 65.2f, 8.5f);
+    in.jump = false;
+    player_update(&dry_above, &in, dry, PLAYER_STEP_DT);
+    player_update(&shallow_above, &in, shallow, PLAYER_STEP_DT);
+    TEST_ASSERT_FLOAT_EQ(shallow_above.vel.z, dry_above.vel.z, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(shallow_above.vel.y, dry_above.vel.y, 1e-6f);
     world_destroy(dry);
     world_destroy(wet);
+    world_destroy(partial);
+    world_destroy(shallow);
     return failures;
 }
 

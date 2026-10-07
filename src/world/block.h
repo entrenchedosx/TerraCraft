@@ -63,6 +63,7 @@ typedef struct BlockInfo {
     uint16_t drop;    /* Dropped ItemId (0 = none). */
     uint8_t drop_count; /* Dropped count (>= 1 when drop != 0). */
     bool unbreakable; /* True: survival mining never finishes (bedrock). */
+    bool gravity_affected; /* True when unsupported blocks are simulated as falling. */
 } BlockInfo;
 
 /* Get metadata for a block ID. Out-of-range IDs return the AIR entry.
@@ -110,6 +111,9 @@ int block_water_level(uint16_t type);
 bool block_water_is_falling(uint16_t type);
 uint16_t block_water_flowing(int level, bool falling);
 float block_water_height(uint16_t type);
+
+/* True for registry-defined falling blocks (currently sand). */
+bool block_has_gravity(uint16_t type);
 
 /* Check whether a block renders as crossed sprite quads (plants, flowers,
  * torches) instead of a full cube. Sprites are always cutout-opaque and

@@ -6,6 +6,7 @@
 #include "world/world_save.h"
 
 #include <string.h>
+#include <limits.h>
 
 #include <math.h>
 #include <stdlib.h>
@@ -15,10 +16,11 @@
  */
 static int floor_div_16(int v)
 {
-    if (v >= 0) {
-        return v / 16;
+    int q = v / 16;
+    if (v % 16 < 0) {
+        --q;
     }
-    return -((-v + 15) / 16);
+    return q;
 }
 
 /* Positive modulo 16. */
@@ -29,6 +31,25 @@ static int mod_16(int v)
         r += 16;
     }
     return r;
+}
+
+/* AO samples diagonal cells around chunk corners as well as cardinal seams. */
+static void world_dirty_chunk_neighborhood(World *w, int cx, int cz)
+{
+    if (w == NULL) {
+        return;
+    }
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dz == 0) {
+                continue;
+            }
+            Chunk *neighbor = world_get_chunk(w, cx + dx, cz + dz);
+            if (neighbor != NULL) {
+                neighbor->dirty = true;
+            }
+        }
+    }
 }
 
 /* Create an empty world.
@@ -45,8 +66,18 @@ World *world_create(void)
     w->count = 0;
     w->seed = 1337;
     w->terrain_version = 1;
+    w->gravity_replicate_changes = true;
     w->water_updates = (WorldWaterUpdate *)calloc(WORLD_WATER_QUEUE_CAP, sizeof(*w->water_updates));
     if (w->water_updates == NULL) {
+        free(w);
+        return NULL;
+    }
+    w->gravity_updates = (WorldGravityUpdate *)calloc(WORLD_GRAVITY_QUEUE_CAP, sizeof(*w->gravity_updates));
+    w->falling_blocks = (WorldFallingBlock *)calloc(WORLD_FALLING_BLOCK_CAP, sizeof(*w->falling_blocks));
+    if (w->gravity_updates == NULL || w->falling_blocks == NULL) {
+        free(w->falling_blocks);
+        free(w->gravity_updates);
+        free(w->water_updates);
         free(w);
         return NULL;
     }
@@ -54,6 +85,8 @@ World *world_create(void)
     w->mode = 0; /* WORLD_MODE_SURVIVAL without pulling world_meta.h here. */
     if (hashmap_init(&w->chunk_map, WORLD_MAX_CHUNKS) != 0) {
         LOG_ERROR("world_create: chunk map init failed");
+        free(w->falling_blocks);
+        free(w->gravity_updates);
         free(w->water_updates);
         free(w);
         return NULL;
@@ -78,6 +111,10 @@ void world_destroy(World *w)
     hashmap_free(&w->chunk_map);
     free(w->water_updates);
     w->water_updates = NULL;
+    free(w->gravity_updates);
+    w->gravity_updates = NULL;
+    free(w->falling_blocks);
+    w->falling_blocks = NULL;
     w->count = 0;
     free(w);
 }
@@ -123,25 +160,40 @@ Chunk *world_get_chunk(const World *w, int cx, int cz)
  */
 int world_add_chunk(World *w, Chunk *c)
 {
-    if (w == NULL || c == NULL) {
+    /* Keep room for neighboring-block arithmetic and ensure each chunk's
+     * complete 16-cell world-space extent fits in signed block coordinates. */
+    if (w == NULL || c == NULL || c->cx <= INT_MIN / CHUNK_X ||
+        c->cx >= (INT_MAX - (CHUNK_X - 1)) / CHUNK_X || c->cz <= INT_MIN / CHUNK_Z ||
+        c->cz >= (INT_MAX - (CHUNK_Z - 1)) / CHUNK_Z) {
         return -1;
     }
     if (world_get_chunk(w, c->cx, c->cz) != NULL) {
         return -2;
     }
-    for (size_t i = 0; i < WORLD_MAX_CHUNKS; ++i) {
-        if (w->chunks[i] == NULL) {
-            if (hashmap_put(&w->chunk_map, hashmap_chunk_key(c->cx, c->cz), c) != 0) {
-                return -4;
-            }
-            w->chunks[i] = c;
-            w->count++;
-            world_water_seed_chunk(w, c->cx, c->cz);
-            world_water_seed_chunk_edges(w, c->cx, c->cz);
-            return 0;
-        }
+    if (w->count >= WORLD_MAX_CHUNKS || w->chunks[w->count] != NULL) {
+        return -3;
     }
-    return -3;
+    if (hashmap_put(&w->chunk_map, hashmap_chunk_key(c->cx, c->cz), c) != 0) {
+        return -4;
+    }
+    w->chunks[w->count++] = c;
+    world_water_seed_chunk(w, c->cx, c->cz);
+    world_water_seed_chunk_edges(w, c->cx, c->cz);
+    world_gravity_seed_chunk(w, c->cx, c->cz);
+
+    /* Faces and AO can sample any of the eight chunks around a corner. */
+    world_dirty_chunk_neighborhood(w, c->cx, c->cz);
+    if (w->water_rescan_needed) {
+        w->water_scan_chunk = 0;
+        w->water_scan_cell = 0;
+        w->water_rescan_repeat = true;
+    }
+    if (w->gravity_rescan_needed) {
+        w->gravity_scan_chunk = 0;
+        w->gravity_scan_cell = 0;
+        w->gravity_rescan_repeat = true;
+    }
+    return 0;
 }
 
 /* Remove and free a chunk (flushing save-dirty edits first).
@@ -161,23 +213,46 @@ bool world_remove_chunk(World *w, int cx, int cz)
     if (c == NULL) {
         return false;
     }
+    size_t i = 0;
+    for (; i < w->count; ++i) {
+        if (w->chunks[i] == c) {
+            break;
+        }
+    }
+    if (i >= w->count) {
+        LOG_ERROR("world_remove_chunk: hashmap/iteration array disagree for (%d,%d)", cx, cz);
+        return false;
+    }
+    if (!world_gravity_settle_chunk(w, cx, cz, w->gravity_replicate_changes)) {
+        LOG_ERROR("world_remove_chunk: could not safely settle falling blocks in (%d,%d)", cx, cz);
+        return false;
+    }
     if (c->save_dirty && w->save_dir[0] != '\0') {
         if (world_save_write_chunk(w->save_dir, c) == 0) {
             c->save_dirty = false;
         } else {
-            LOG_ERROR("world_remove_chunk: dropping unsaved edits (%d,%d)", cx, cz);
+            LOG_ERROR("world_remove_chunk: preserving chunk after save failure (%d,%d)", cx, cz);
+            return false;
         }
     }
     hashmap_remove(&w->chunk_map, hashmap_chunk_key(cx, cz));
-    for (size_t i = 0; i < WORLD_MAX_CHUNKS; ++i) {
-        if (w->chunks[i] == c) {
-            w->chunks[i] = NULL;
-            break;
-        }
-    }
+    size_t last = w->count - 1;
+    w->chunks[i] = w->chunks[last];
+    w->chunks[last] = NULL;
     chunk_destroy(c);
     if (w->count > 0) {
         w->count--;
+    }
+    world_dirty_chunk_neighborhood(w, cx, cz);
+    if (w->water_rescan_needed) {
+        w->water_scan_chunk = 0;
+        w->water_scan_cell = 0;
+        w->water_rescan_repeat = true;
+    }
+    if (w->gravity_rescan_needed) {
+        w->gravity_scan_chunk = 0;
+        w->gravity_scan_cell = 0;
+        w->gravity_rescan_repeat = true;
     }
     return true;
 }
@@ -232,7 +307,7 @@ uint16_t world_get_block(const World *w, int wx, int wy, int wz)
 
 /* Write a block by world coordinates and invalidate both sides of chunk
  * seams, since neighboring meshes query across those borders. */
-bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id)
+static bool world_set_block_internal(World *w, int wx, int wy, int wz, uint16_t id, bool replicate)
 {
     if (w == NULL || wy < 0 || wy >= CHUNK_Y) {
         return false;
@@ -272,11 +347,30 @@ bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id)
             neighbor->dirty = true;
         }
     }
+    if ((lx == 0 || lx == CHUNK_X - 1) && (lz == 0 || lz == CHUNK_Z - 1)) {
+        int dcx = lx == 0 ? -1 : 1;
+        int dcz = lz == 0 ? -1 : 1;
+        Chunk *diagonal = world_get_chunk(w, cx + dcx, cz + dcz);
+        if (diagonal != NULL) {
+            diagonal->dirty = true;
+        }
+    }
     world_water_notify_block_changed(w, wx, wy, wz);
-    if (w->block_change_callback != NULL) {
+    world_gravity_notify_block_changed(w, wx, wy, wz);
+    if (replicate && w->block_change_callback != NULL) {
         w->block_change_callback(w->block_change_context, wx, wy, wz, id);
     }
     return true;
+}
+
+bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id)
+{
+    return world_set_block_internal(w, wx, wy, wz, id, true);
+}
+
+bool world_set_block_unreplicated(World *w, int wx, int wy, int wz, uint16_t id)
+{
+    return world_set_block_internal(w, wx, wy, wz, id, false);
 }
 
 void world_set_block_change_callback(World *w, WorldBlockChangeCallback callback, void *context)
@@ -286,6 +380,22 @@ void world_set_block_change_callback(World *w, WorldBlockChangeCallback callback
     }
     w->block_change_callback = callback;
     w->block_change_context = callback != NULL ? context : NULL;
+}
+
+void world_set_gravity_event_callback(World *w, WorldGravityEventCallback callback, void *context)
+{
+    if (w == NULL) {
+        return;
+    }
+    w->gravity_event_callback = callback;
+    w->gravity_event_context = callback != NULL ? context : NULL;
+}
+
+void world_set_gravity_replication(World *w, bool enabled)
+{
+    if (w != NULL) {
+        w->gravity_replicate_changes = enabled;
+    }
 }
 
 /* Legacy deterministic column height (frozen for tests).

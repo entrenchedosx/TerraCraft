@@ -208,6 +208,11 @@ void renderer_draw_hud(Renderer *r, int width, int height, const ItemStack *hotb
 void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *cam, float aspect,
                             const TimeSystem *ts);
 
+/* Draw continuous falling-block physics records as full-size textured cubes
+ * using renderer-owned transient scratch (no per-frame allocation). */
+void renderer_draw_falling_blocks(Renderer *r, const World *w, const Camera *cam, float aspect,
+                                  const TimeSystem *ts);
+
 /* Draw active particles as small shrinking textured cubes (one transient
  * upload per call from renderer-owned scratch: no per-frame heap churn).
  * No-op on bad args or missing scratch/pipe.

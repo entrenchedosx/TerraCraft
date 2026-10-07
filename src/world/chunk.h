@@ -28,6 +28,11 @@ typedef struct Chunk {
     int cz; /* Chunk Z coordinate (in chunks). */
     uint16_t blocks[CHUNK_VOLUME]; /* Block IDs, see BlockType. */
     uint8_t water_queued[(CHUNK_VOLUME + 7) / 8]; /* Bounded-fluid queue dedupe bits. */
+    uint8_t water_deferred[(CHUNK_VOLUME + 7) / 8]; /* Overflow updates awaiting queue space. */
+    size_t water_deferred_count;
+    uint8_t gravity_queued[(CHUNK_VOLUME + 7) / 8]; /* Bounded-gravity queue dedupe bits. */
+    uint8_t gravity_deferred[(CHUNK_VOLUME + 7) / 8]; /* Queue overflow recovery bits. */
+    size_t gravity_deferred_count;
     bool dirty; /* True when blocks changed since last mesh. */
     bool save_dirty; /* True when edited since last disk save. */
     float aabb_min[3]; /* Cached world-space AABB minimum. */

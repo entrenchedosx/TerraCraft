@@ -77,7 +77,7 @@ IDs represent horizontal flow levels 1 through 7 and a falling column. Each
 chunk stores a bitset that prevents the same coordinate from appearing in
 the update queue more than once at a time.
 
-At each 0.25-second fluid interval, the simulation processes at most 384
+At each 0.25-second fluid interval, the simulation processes at most 1,024
 queued cells. A fluid cell first attempts to flow down. If blocked, it
 spreads horizontally: a source starts at level 1 and each horizontal step
 loses one level, ending after level 7. Flow levels are removed when they no
@@ -87,11 +87,14 @@ an empty middle cell.
 
 Only loaded chunks participate. Fluid never writes into an unloaded chunk;
 when a neighboring chunk is added, water along the shared border is queued
-again. A full rebuild queue stays capped at 32,768 coordinate updates. An
-incremental scan of loaded chunk cells recovers water work that did not fit
-in the queue, with a 4,096-cell scan budget per fluid interval. This bounds
-memory and per-interval work, while allowing large bodies of water to drain
-through the queue over time.
+again. A full rebuild queue stays capped at 32,768 coordinate updates. Each
+chunk also stores a deduplicated bitset for updates deferred by queue
+saturation. Recovery visits those marked cells incrementally, with a
+4,096 scan-unit budget per fluid interval; it does not repeatedly sweep every
+block in the loaded world. Duplicate notifications are recognized before
+saturation is recorded, so an already queued cell cannot pin the recovery
+cursor. Queue and deferred storage are bounded, and queue records contain
+coordinates rather than chunk pointers.
 
 Water flow states are stored as block IDs in chunk-file format version 2.
 The payload size did not change. Version 1 files still load; any ID that was
@@ -103,17 +106,22 @@ The transparent mesher uses each flow level's fractional height. Flow level
 1 is 7/8 of a block high and level 7 is 1/8; sources and falling columns are
 full height. When adjacent cells have different heights, it draws the exposed
 step between the surfaces and culls equal-height internal faces. Water does
-not collide with the player. The player controller
-detects water in its standing body, lowers horizontal speed, increases drag,
-and applies a simple vertical response: jump rises and sneak sinks. It does
-not yet implement a swimming pose, the short swimming hitbox, oxygen,
-drowning, waterlogged blocks, or current-driven movement.
+not collide with solid-body physics. Player, mob, and dropped-item fluid
+contact compares each collision AABB with the actual block surface, so a
+shallow level-7 flow does not behave like a full source block. Submerged
+fraction drives bounded drag and buoyancy; the player's jump/sneak response
+remains a simple controller rule. This does not yet implement a swimming
+pose, the short swimming hitbox, oxygen, drowning, waterlogged blocks,
+shape-aware fluid displacement, lava, water/lava reactions, or
+current-driven movement. The renderer still uses discrete block heights and
+has no waves, refraction, or bubble system.
 
 ## Checks
 
 The test runner includes deterministic profile checks, loaded-chunk edge
-wakeup, bounded queue behavior, source/flow/retraction rules, fractional
-water-mesh heights, version 1/2 save compatibility, and player buoyancy.
+wakeup, saturation and deferred-cell recovery, source/flow/retraction rules,
+fractional water-mesh heights, version 1/2 save compatibility, player
+shallow/source-water response, and mob/drop fluid damping.
 Those checks are headless: they do not judge the terrain's visual quality,
 river continuity, water transparency, or comparison with a live Java
 Edition client.

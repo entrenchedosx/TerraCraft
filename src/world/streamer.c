@@ -147,9 +147,8 @@ unload_pass:
         LOG_DEBUG("streamer: +%d chunk(s) around (%d,%d) [total gen %zu]", generated, ccx, ccz, s->generated_total);
     }
 
-    /* 2. Unload everything outside the square. Iterate the dense array by
-     * index; removal compacts NULLs but never moves live chunks, so a
-     * simple rescan is safe (collect first, then remove). */
+    /* 2. Unload everything outside the square. Collect coordinates first
+     * because removal compacts the dense array by swapping its last chunk. */
     int unload_list[WORLD_MAX_CHUNKS][2];
     size_t unload_n = 0;
     for (size_t i = 0; i < WORLD_MAX_CHUNKS && unload_n < WORLD_MAX_CHUNKS; ++i) {

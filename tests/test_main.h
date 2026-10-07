@@ -71,6 +71,14 @@ int test_world_gen(void);
 int test_world_gen_determinism(void);
 int test_water_simulation(void);
 int test_water_queue_bound(void);
+int test_gravity_blocks_fall_land_and_save_settle(void);
+int test_gravity_support_chain_and_water(void);
+int test_gravity_queue_bound_recovery(void);
+int test_gravity_retries_when_lan_queue_is_full(void);
+int test_gravity_lan_prediction_and_authority(void);
+int test_gravity_lan_pool_full_start_clears_source(void);
+int test_world_chunk_compaction_and_seam_dirtying(void);
+int test_ao_diagonal_chunk_lifecycle(void);
 int test_chunk_water_version_compat(void);
 int test_mesher_water_height(void);
 

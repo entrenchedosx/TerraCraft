@@ -9,6 +9,7 @@
  */
 
 #include "core/hashmap.h"
+#include "world/gravity.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,6 +22,8 @@
  * ((2*15+1)^2 = 961); the M2 default distance is far smaller. */
 #define WORLD_MAX_CHUNKS 1024
 #define WORLD_WATER_QUEUE_CAP 32768
+#define WORLD_GRAVITY_QUEUE_CAP 8192
+#define WORLD_FALLING_BLOCK_CAP 256
 
 /* Sea level for water fill (M2 terrain fills water up to this height). */
 #define WORLD_SEA_LEVEL 64
@@ -29,14 +32,18 @@
 typedef struct Chunk Chunk;
 typedef struct WorldWaterUpdate WorldWaterUpdate;
 typedef void (*WorldBlockChangeCallback)(void *context, int wx, int wy, int wz, uint16_t block_id);
+/* Return false to defer the transition (for example, when a reliable LAN
+ * event queue is full); the physics scheduler retries without losing state. */
+typedef bool (*WorldGravityEventCallback)(void *context, bool landed, int wx, int wy, int wz,
+                                          uint16_t block_id);
 
-/* World: owns up to WORLD_MAX_CHUNKS heap chunks. The dense array is the
+/* World: owns up to WORLD_MAX_CHUNKS heap chunks. The compact array is the
  * iteration order; chunk_map mirrors it for O(1) lookup by chunk key.
  * name/mode describe the open session; save_dir (empty = session-only,
  * no disk I/O) roots chunk persistence for load-first generation and
  * save-on-unload. */
 typedef struct World {
-    Chunk *chunks[WORLD_MAX_CHUNKS]; /* Owned chunk pointers (NULL = empty slot). */
+    Chunk *chunks[WORLD_MAX_CHUNKS]; /* Owned pointers in [0,count); remainder is NULL. */
     size_t count;                    /* Number of live chunks. */
     long seed;                       /* Generation seed. */
     int terrain_version;             /* 1 = legacy, 2 = warped landforms, 3 = modern-style landforms. */
@@ -48,12 +55,25 @@ typedef struct World {
     size_t water_scan_cell;
     bool water_rescan_needed;
     bool water_rescan_repeat;
+    WorldGravityUpdate *gravity_updates; /* Bounded coordinate queue; no chunk pointers. */
+    size_t gravity_head;
+    size_t gravity_count;
+    float gravity_accumulator;
+    size_t gravity_scan_chunk;
+    size_t gravity_scan_cell;
+    bool gravity_rescan_needed;
+    bool gravity_rescan_repeat;
+    WorldFallingBlock *falling_blocks; /* Fixed-capacity, world-coordinate physics records. */
+    size_t falling_active;
     HashMap chunk_map;               /* Maps hashmap_chunk_key(cx,cz) -> Chunk*. */
     char name[WORLD_NAME_LEN];        /* Session display name. */
     int mode;                        /* Session game mode (WorldMode value). */
     char save_dir[512];              /* World directory ("" = no persistence). */
     WorldBlockChangeCallback block_change_callback; /* Optional synchronous replication hook. */
     void *block_change_context;       /* Borrowed callback context. */
+    WorldGravityEventCallback gravity_event_callback; /* Optional falling start/landing replication hook. */
+    void *gravity_event_context;      /* Borrowed callback context. */
+    bool gravity_replicate_changes;   /* Whether save/unload settling is authoritative. */
 } World;
 
 /* Create an empty world (no chunks yet).
@@ -138,9 +158,19 @@ uint16_t world_get_block(const World *w, int wx, int wy, int wz);
  * Returns true only when a loaded cell changed. */
 bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id);
 
+/* Apply a local predicted/simulated block change without invoking the
+ * multiplayer replication callback. All local invalidation and neighbor
+ * notifications still run. */
+bool world_set_block_unreplicated(World *w, int wx, int wy, int wz, uint16_t id);
+
 /* Install an optional synchronous block-change hook. Passing NULL disables it.
  * The callback runs after a changed block is stored and water is notified. */
 void world_set_block_change_callback(World *w, WorldBlockChangeCallback callback, void *context);
+
+/* Install an optional callback for authoritative falling-block start/landing
+ * events. Clients use these events to keep local falling visuals in sync. */
+void world_set_gravity_event_callback(World *w, WorldGravityEventCallback callback, void *context);
+void world_set_gravity_replication(World *w, bool enabled);
 
 /* Legacy M1 terrain height for a world (x,z) column (deterministic,
  * seed-aware). FROZEN for test determinism; new code prefers world_gen.

@@ -1568,6 +1568,39 @@ void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *c
     renderer_end_voxel(r);
 }
 
+void renderer_draw_falling_blocks(Renderer *r, const World *w, const Camera *cam, float aspect,
+                                  const TimeSystem *ts)
+{
+    if (r == NULL || w == NULL || cam == NULL || r->part_verts == NULL || r->part_idx == NULL) {
+        return;
+    }
+    size_t o = 0;
+    for (size_t i = 0; i < WORLD_FALLING_BLOCK_CAP; ++i) {
+        const WorldFallingBlock *falling = &w->falling_blocks[i];
+        if (!falling->active) {
+            continue;
+        }
+        int tile = block_tile_for_face(falling->block_id, ATLAS_FACE_POS_Y);
+        entity_emit_cube(r->part_verts + o * MESHER_FLOATS_PER_VERTEX, (float)falling->x, falling->y,
+                         (float)falling->z, 1.0f, tile, 1.0f, 0.0f);
+        o += 36;
+    }
+    if (o == 0 || !renderer_begin_voxel(r, cam, aspect, ts)) {
+        return;
+    }
+    MeshData mesh;
+    mesh.vertices = r->part_verts;
+    mesh.indices = r->part_idx;
+    mesh.vertex_count = o;
+    mesh.index_count = o;
+    mesh.vertex_cap = o;
+    mesh.index_cap = o;
+    if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
+        gpu_chunk_draw(&r->ent_buf);
+    }
+    renderer_end_voxel(r);
+}
+
 /* Draw active particles as small shrinking textured cubes (one transient
  * upload per call from the owned scratch buffer: no per-frame heap
  * churn). Cubes shrink linearly with remaining life, then pop out.

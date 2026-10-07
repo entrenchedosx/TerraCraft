@@ -253,6 +253,57 @@ static void mob_box(const Mob *m, Vec3 *out_mn, Vec3 *out_mx)
     *out_mx = mmath_vec3(m->pos.x + hw, m->pos.y + m->height, m->pos.z + hw);
 }
 
+/* Water contact is the fraction of the mob's collision AABB occupied by
+ * actual fluid. Flow levels only fill from the cell bottom to
+ * block_water_height(); touching a shallow surface is not full submersion. */
+static float mob_water_contact(const Mob *m, const World *w)
+{
+    if (m == NULL || w == NULL || !(m->width > 0.0f) || !(m->height > 0.0f)) {
+        return 0.0f;
+    }
+    const float eps = 0.001f;
+    float half = m->width * 0.5f;
+    float min_x = m->pos.x - half;
+    float max_x = m->pos.x + half;
+    float min_y = m->pos.y;
+    float max_y = m->pos.y + m->height;
+    float min_z = m->pos.z - half;
+    float max_z = m->pos.z + half;
+    int x0 = (int)floorf(min_x + eps);
+    int x1 = (int)floorf(max_x - eps);
+    int y0 = (int)floorf(min_y + eps);
+    int y1 = (int)floorf(max_y - eps);
+    int z0 = (int)floorf(min_z + eps);
+    int z1 = (int)floorf(max_z - eps);
+    float volume = m->width * m->height * m->width;
+    if (!(volume > 0.0f)) {
+        return 0.0f;
+    }
+
+    float contact = 0.0f;
+    for (int y = y0; y <= y1; ++y) {
+        for (int z = z0; z <= z1; ++z) {
+            for (int x = x0; x <= x1; ++x) {
+                uint16_t id = world_get_block(w, x, y, z);
+                if (!block_is_water(id)) {
+                    continue;
+                }
+                float fluid_top = (float)y + block_water_height(id);
+                float overlap_x = fminf(max_x, (float)x + 1.0f) - fmaxf(min_x, (float)x);
+                float overlap_y = fminf(max_y, fluid_top) - fmaxf(min_y, (float)y);
+                float overlap_z = fminf(max_z, (float)z + 1.0f) - fmaxf(min_z, (float)z);
+                if (overlap_x > eps && overlap_y > eps && overlap_z > eps) {
+                    contact += overlap_x * overlap_y * overlap_z / volume;
+                    if (contact >= 1.0f) {
+                        return 1.0f;
+                    }
+                }
+            }
+        }
+    }
+    return contact;
+}
+
 /* Resolve one axis after moving (snap out, zero velocity, land on Y-down).
  * Mirrors the player scheme (axis-separated move-and-clamp) without
  * importing player input concepts (no sprint/sneak/flight here).
@@ -336,12 +387,42 @@ void mob_physics_step(Mob *m, World *w, float dt)
     bool was_grounded = m->grounded;
     /* Horizontal velocity follows AI intent exactly (no momentum model;
      * M8 mobs stop crisply, which reads better than sliding). */
-    m->vel.x = m->wish_dir.x * m->wish_speed;
-    m->vel.z = m->wish_dir.z * m->wish_speed;
-    /* Vertical: gravity integrate, terminal clamp. */
-    m->vel.y -= MOB_GRAVITY * dt;
+    float wish_x = isfinite(m->wish_dir.x) ? m->wish_dir.x : 0.0f;
+    float wish_z = isfinite(m->wish_dir.z) ? m->wish_dir.z : 0.0f;
+    float wish_len = sqrtf(wish_x * wish_x + wish_z * wish_z);
+    if (!isfinite(wish_len)) {
+        wish_x = 0.0f;
+        wish_z = 0.0f;
+    } else if (wish_len > 1.0f) {
+        wish_x /= wish_len;
+        wish_z /= wish_len;
+    }
+    float wish_speed = isfinite(m->wish_speed) ? fmaxf(0.0f, fminf(12.0f, m->wish_speed)) : 0.0f;
+    m->vel.x = wish_x * wish_speed;
+    m->vel.z = wish_z * wish_speed;
+    if (!isfinite(m->vel.y)) {
+        m->vel.y = 0.0f;
+    }
     if (m->vel.y < MOB_TERMINAL_VEL) {
         m->vel.y = MOB_TERMINAL_VEL;
+    } else if (m->vel.y > 8.0f) {
+        m->vel.y = 8.0f;
+    }
+
+    float water_contact = mob_water_contact(m, w);
+    /* Fluid slows commanded horizontal motion, damps vertical momentum, and
+     * partially counteracts gravity. Deep water supplies a small net lift;
+     * shallow flow scales all three effects by its actual AABB overlap. */
+    float horizontal_drag = expf(-4.0f * water_contact * dt);
+    m->vel.x *= horizontal_drag;
+    m->vel.z *= horizontal_drag;
+    float gravity = MOB_GRAVITY * (1.0f - 1.5f * water_contact);
+    m->vel.y -= gravity * dt;
+    m->vel.y *= expf(-5.0f * water_contact * dt);
+    if (m->vel.y < MOB_TERMINAL_VEL) {
+        m->vel.y = MOB_TERMINAL_VEL;
+    } else if (m->vel.y > 8.0f) {
+        m->vel.y = 8.0f;
     }
     /* Axis-separated move + collide: X (step-up on hit), then Z, then Y.
      * Step-up reads last frame's grounded (we are still "walking" until

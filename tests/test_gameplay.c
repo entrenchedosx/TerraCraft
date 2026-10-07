@@ -15,6 +15,7 @@
 #include "world/world_meta.h"
 #include "world/world_save.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -346,6 +347,84 @@ int test_entity_lifetime(void)
         entity_update(&pool, NULL, 0.25f);
     }
     TEST_ASSERT(entity_active_count(&pool) == 0);
+
+    /* A submerged dropped item is buoyant and damped; level-7 flow applies
+     * the same effects in proportion to its shallow AABB overlap. */
+    World *dry = world_create();
+    World *full = world_create();
+    World *shallow = world_create();
+    Chunk *dry_chunk = chunk_create(0, 0);
+    Chunk *full_chunk = chunk_create(0, 0);
+    Chunk *shallow_chunk = chunk_create(0, 0);
+    TEST_ASSERT(dry != NULL && full != NULL && shallow != NULL && dry_chunk != NULL &&
+                full_chunk != NULL && shallow_chunk != NULL);
+    if (dry == NULL || full == NULL || shallow == NULL || dry_chunk == NULL || full_chunk == NULL ||
+        shallow_chunk == NULL) {
+        world_destroy(dry);
+        world_destroy(full);
+        world_destroy(shallow);
+        chunk_destroy(dry_chunk);
+        chunk_destroy(full_chunk);
+        chunk_destroy(shallow_chunk);
+        return failures + 1;
+    }
+    int dry_add = world_add_chunk(dry, dry_chunk);
+    int full_add = world_add_chunk(full, full_chunk);
+    int shallow_add = world_add_chunk(shallow, shallow_chunk);
+    TEST_ASSERT(dry_add == 0 && full_add == 0 && shallow_add == 0);
+    if (dry_add != 0 || full_add != 0 || shallow_add != 0) {
+        if (dry_add != 0) {
+            chunk_destroy(dry_chunk);
+        }
+        if (full_add != 0) {
+            chunk_destroy(full_chunk);
+        }
+        if (shallow_add != 0) {
+            chunk_destroy(shallow_chunk);
+        }
+        world_destroy(dry);
+        world_destroy(full);
+        world_destroy(shallow);
+        return failures + 1;
+    }
+    TEST_ASSERT(world_set_block(full, 8, 70, 8, BLOCK_WATER));
+    TEST_ASSERT(world_set_block(full, 8, 71, 8, BLOCK_WATER));
+    TEST_ASSERT(world_set_block(shallow, 8, 70, 8, BLOCK_WATER_FLOW_7));
+
+    EntityPool dry_pool, full_pool, shallow_pool;
+    entity_pool_clear(&dry_pool);
+    entity_pool_clear(&full_pool);
+    entity_pool_clear(&shallow_pool);
+    ItemStack water_drop = {(ItemId)BLOCK_STONE, 1, 0};
+    Vec3 start = mmath_vec3(8.5f, 70.05f, 8.5f);
+    int dry_idx = entity_spawn(&dry_pool, start, &water_drop);
+    int full_idx = entity_spawn(&full_pool, start, &water_drop);
+    int shallow_idx = entity_spawn(&shallow_pool, start, &water_drop);
+    TEST_ASSERT(dry_idx >= 0 && full_idx >= 0 && shallow_idx >= 0);
+    if (dry_idx >= 0 && full_idx >= 0 && shallow_idx >= 0) {
+        dry_pool.items[dry_idx].vel = mmath_vec3(4.0f, 0.0f, 0.0f);
+        full_pool.items[full_idx].vel = mmath_vec3(4.0f, 0.0f, 0.0f);
+        shallow_pool.items[shallow_idx].vel = mmath_vec3(4.0f, 0.0f, 0.0f);
+        entity_update(&dry_pool, dry, 0.03f);
+        entity_update(&full_pool, full, 0.03f);
+        entity_update(&shallow_pool, shallow, 0.03f);
+        TEST_ASSERT(full_pool.items[full_idx].vel.y > 0.0f);
+        TEST_ASSERT(shallow_pool.items[shallow_idx].vel.y < 0.0f);
+        TEST_ASSERT(fabsf(shallow_pool.items[shallow_idx].vel.y) <
+                    fabsf(dry_pool.items[dry_idx].vel.y));
+        TEST_ASSERT(full_pool.items[full_idx].vel.x < shallow_pool.items[shallow_idx].vel.x);
+        TEST_ASSERT(shallow_pool.items[shallow_idx].vel.x < dry_pool.items[dry_idx].vel.x);
+
+        /* Invalid stored velocities are reset before movement and stay finite. */
+        full_pool.items[full_idx].vel = mmath_vec3(NAN, INFINITY, -INFINITY);
+        entity_update(&full_pool, full, 0.03f);
+        TEST_ASSERT(isfinite(full_pool.items[full_idx].vel.x) &&
+                    isfinite(full_pool.items[full_idx].vel.y) &&
+                    isfinite(full_pool.items[full_idx].vel.z));
+    }
+    world_destroy(dry);
+    world_destroy(full);
+    world_destroy(shallow);
     return failures;
 }
 
