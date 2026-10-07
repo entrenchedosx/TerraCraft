@@ -487,8 +487,9 @@ BACKLOG "Save format forward compatibility".
 ### Item IDs mirror blocks; tools/materials live above 100
 Block-placeable items reuse the BlockType value (one ID to remember, save
 format untouched); WATER is excluded (not an item). Standalone items take
-explicit frozen IDs (coal=100, tools 200..205) that never collide with
-future block IDs. Lookup is linear-scan by match, never by position.
+explicit frozen IDs (coal=100, tools 200..205, bow=206, swords=207..208)
+that never collide with future block IDs. Lookup is linear-scan by match,
+never by position. Append new items; do not renumber or reuse these IDs.
 
 ### Survival policy lives in survival.c, not app.c
 Mining times, drops, fall damage, hunger/regen/starve, damage gates, and

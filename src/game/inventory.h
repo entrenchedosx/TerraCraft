@@ -91,6 +91,12 @@ uint16_t stack_remove(ItemStack *s, uint16_t n);
  */
 bool stack_use_tool(ItemStack *s);
 
+/* Apply ordinary weapon/tool wear after a melee hit that actually dealt
+ * damage: swords lose one use, other damageable tools lose two, bows and
+ * nondamageable items lose none. Returns true only if the item broke.
+ */
+bool stack_use_melee_hit(ItemStack *s);
+
 /* Remaining uses on a stack (max_durability - wear). Empty stacks and
  * non-damageable items report 0; a fresh tool reports its maximum.
  *

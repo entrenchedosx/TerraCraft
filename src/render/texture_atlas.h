@@ -17,7 +17,7 @@
 #define ATLAS_TILE_PX 16
 #define ATLAS_BYTES 4
 
-/* Tile indices (row-major: tile = row*16+col; we use the first 41). */
+/* Tile indices (row-major: tile = row*16+col; named tiles currently end at 50). */
 typedef enum AtlasTile {
     TILE_GRASS_TOP = 0,
     TILE_GRASS_SIDE = 1,
@@ -67,7 +67,9 @@ typedef enum AtlasTile {
     TILE_LEATHER = 45,
     TILE_PLAYER_SKIN = 46,
     TILE_PLAYER_SLEEVE = 47,
-    TILE_FLESH = 48
+    TILE_FLESH = 48,
+    TILE_WOOD_SWORD = 49,
+    TILE_STONE_SWORD = 50
 } AtlasTile;
 
 /* Resource-pack tile file names, indexed by tile (NULL entry = no override).

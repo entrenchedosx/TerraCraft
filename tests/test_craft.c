@@ -179,6 +179,21 @@ int test_recipe_bench(void)
     TEST_ASSERT(recipe_match(big, 3, 3, &m) == true);
     TEST_ASSERT(m.recipe->out_item == ITEM_STICK);
     TEST_ASSERT(m.ox == 2 && m.oy == 1);
+
+    /* Swords use the 3-tall vertical tool pattern. */
+    craft_clear(big, 9);
+    craft_set(big, 3, 1, 0, P, 1);
+    craft_set(big, 3, 1, 1, P, 1);
+    craft_set(big, 3, 1, 2, ITEM_STICK, 1);
+    TEST_ASSERT(recipe_match(big, 3, 3, &m));
+    TEST_ASSERT(m.recipe->out_item == ITEM_WOOD_SWORD && m.ox == 1 && m.oy == 0);
+    recipe_consume(big, 3, 3, &m);
+    TEST_ASSERT(recipe_match(big, 3, 3, &m) == false);
+    craft_set(big, 3, 1, 0, (ItemId)BLOCK_STONE, 1);
+    craft_set(big, 3, 1, 1, (ItemId)BLOCK_STONE, 1);
+    craft_set(big, 3, 1, 2, ITEM_STICK, 1);
+    TEST_ASSERT(recipe_match(big, 3, 3, &m));
+    TEST_ASSERT(m.recipe->out_item == ITEM_STONE_SWORD);
     return failures;
 }
 
@@ -237,6 +252,21 @@ int test_durability_use(void)
     TEST_ASSERT(stack_use_tool(&empty) == false);
     TEST_ASSERT(stack_use_tool(NULL) == false);
     TEST_ASSERT(stack_uses_left(NULL) == 0);
+
+    /* Successful melee hits wear swords once, other tools twice, and do not
+     * wear bows or ordinary block stacks. */
+    ItemStack sword = {ITEM_WOOD_SWORD, 1, 0};
+    TEST_ASSERT(stack_use_melee_hit(&sword) == false && sword.durability == 1);
+    sword.durability = 58;
+    TEST_ASSERT(stack_use_melee_hit(&sword) == true && stack_is_empty(&sword));
+    ItemStack stone_sword = {ITEM_STONE_SWORD, 1, 130};
+    TEST_ASSERT(stack_use_melee_hit(&stone_sword) == true && stack_is_empty(&stone_sword));
+    ItemStack pick = {ITEM_WOOD_PICKAXE, 1, 0};
+    TEST_ASSERT(stack_use_melee_hit(&pick) == false && pick.durability == 2);
+    ItemStack bow = {ITEM_BOW, 1, 0};
+    TEST_ASSERT(stack_use_melee_hit(&bow) == false && bow.durability == 0);
+    TEST_ASSERT(stack_use_melee_hit(&stone) == false && stone.count == 10);
+    TEST_ASSERT(stack_use_melee_hit(NULL) == false);
     return failures;
 }
 

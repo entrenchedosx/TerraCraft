@@ -60,7 +60,7 @@ owner-local layer.
 
 ### Texture tiles
 
-The current atlas exposes 46 named tiles. Each tile is a 16×16 BMP; files
+The current atlas exposes 51 named tiles. Each tile is a 16×16 BMP; files
 may be omitted individually.
 
 ```text
@@ -75,7 +75,7 @@ workbench.bmp       planks.bmp          apple.bmp            stick.bmp
 wood_top.bmp        workbench_top.bmp  workbench_side.bmp   wood_pickaxe.bmp
 stone_pickaxe.bmp   wood_axe.bmp        stone_axe.bmp        wood_shovel.bmp
 stone_shovel.bmp    bow.bmp             arrow.bmp             bone.bmp
-beef.bmp            leather.bmp
+beef.bmp            leather.bmp           wood_sword.bmp       stone_sword.bmp
 ```
 
 The source of truth for names and item mappings is

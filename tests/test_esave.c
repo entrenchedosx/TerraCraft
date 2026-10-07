@@ -142,18 +142,65 @@ int test_esave_multiple(void)
     ItemStack a = {(ItemId)BLOCK_DIRT, 7, 0}; /* Partial stack. */
     ItemStack b = {(ItemId)BLOCK_STONE, 64, 0}; /* Maximum stack. */
     ItemStack c = {ITEM_COAL, 3, 0};
+    ItemStack d = {ITEM_STONE_SWORD, 1, 8}; /* Damageable unstackable item. */
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(-100.5f, 70.0f, -200.25f), &a) >= 0);
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(0.0f, 80.0f, 0.0f), &b) >= 0);
     TEST_ASSERT(entity_spawn(&pool, mmath_vec3(3000.0f, 65.0f, 4000.0f), &c) >= 0);
+    TEST_ASSERT(entity_spawn(&pool, mmath_vec3(2.0f, 70.0f, 2.0f), &d) >= 0);
     TEST_ASSERT(entity_save_write(dir, &pool, NULL) == 0);
 
     EntityPool back;
     TEST_ASSERT(entity_save_read(dir, &back, NULL) == 0);
-    TEST_ASSERT(entity_active_count(&back) == 3);
+    TEST_ASSERT(entity_active_count(&back) == 4);
     TEST_ASSERT(esave_count_item(&back, (ItemId)BLOCK_DIRT) == 7);
     TEST_ASSERT(esave_count_item(&back, (ItemId)BLOCK_STONE) == 64);
     TEST_ASSERT(esave_count_item(&back, ITEM_COAL) == 3);
+    bool found_worn_sword = false;
+    for (int i = 0; i < ENTITY_MAX; ++i) {
+        if (back.items[i].active && back.items[i].stack.item == ITEM_STONE_SWORD) {
+            found_worn_sword = back.items[i].stack.count == 1 && back.items[i].stack.durability == 8;
+        }
+    }
+    TEST_ASSERT(found_worn_sword);
     esave_cleanup(dir);
+    return failures;
+}
+
+/* A failed drop never consumes the source, partial drops preserve the
+ * remainder, and damageable items keep their wear in the world entity. */
+int test_entity_drop_stack(void)
+{
+    int failures = 0;
+    EntityPool pool;
+    entity_pool_clear(&pool);
+    ItemStack stack = {(ItemId)BLOCK_STONE, 7, 0};
+    Vec3 pos = mmath_vec3(1.25f, 65.5f, -2.0f);
+    Vec3 vel = mmath_vec3(1.0f, 2.0f, -3.0f);
+    int first = entity_drop_stack(&pool, &stack, 1, pos, vel);
+    TEST_ASSERT(first == 0);
+    TEST_ASSERT(stack.item == (ItemId)BLOCK_STONE && stack.count == 6);
+    TEST_ASSERT(pool.items[first].stack.item == (ItemId)BLOCK_STONE && pool.items[first].stack.count == 1);
+    TEST_ASSERT_FLOAT_EQ(pool.items[first].vel.x, 1.0f, 1e-6f);
+    int rest = entity_drop_stack(&pool, &stack, stack.count, pos, vel);
+    TEST_ASSERT(rest == 1 && stack_is_empty(&stack));
+    TEST_ASSERT(pool.items[rest].stack.count == 6);
+
+    ItemStack worn = {ITEM_WOOD_SWORD, 1, 12};
+    int sword = entity_drop_stack(&pool, &worn, 1, pos, vel);
+    TEST_ASSERT(sword == 2 && stack_is_empty(&worn));
+    TEST_ASSERT(pool.items[sword].stack.item == ITEM_WOOD_SWORD);
+    TEST_ASSERT(pool.items[sword].stack.durability == 12);
+
+    entity_pool_clear(&pool);
+    ItemStack filler = {(ItemId)BLOCK_DIRT, 1, 0};
+    for (int i = 0; i < ENTITY_MAX; ++i) {
+        TEST_ASSERT(entity_spawn(&pool, pos, &filler) >= 0);
+    }
+    ItemStack kept = {ITEM_STONE_SWORD, 1, 17};
+    TEST_ASSERT(entity_drop_stack(&pool, &kept, 1, pos, vel) == -1);
+    TEST_ASSERT(kept.item == ITEM_STONE_SWORD && kept.count == 1 && kept.durability == 17);
+    TEST_ASSERT(entity_drop_stack(&pool, &kept, 0, pos, vel) == -1);
+    TEST_ASSERT(entity_drop_stack(NULL, &kept, 1, pos, vel) == -1);
     return failures;
 }
 

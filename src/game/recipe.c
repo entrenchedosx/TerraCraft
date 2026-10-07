@@ -36,6 +36,8 @@ static const Recipe RECIPES[] = {
     {"stone_pick", true, 3, 3, {T, T, T, N, S, N, N, S, N}, 0, ITEM_STONE_PICKAXE, 1},
     {"stone_axe", true, 3, 3, {T, T, N, T, S, N, N, S, N}, 0, ITEM_STONE_AXE, 1},
     {"stone_shovel", true, 3, 3, {N, T, N, N, S, N, N, S, N}, 0, ITEM_STONE_SHOVEL, 1},
+    {"wood_sword", true, 1, 3, {P, P, S, N, N, N, N, N, N}, 0, ITEM_WOOD_SWORD, 1},
+    {"stone_sword", true, 1, 3, {T, T, S, N, N, N, N, N, N}, 0, ITEM_STONE_SWORD, 1},
     /* M9 ranged gear (bench-only): bow limbs + coal-tipped arrows
      * (shaped 3-tall so the 2x2 player grid never collides). */
     {"bow", true, 3, 3, {P, S, N, P, N, S, P, S, N}, 0, ITEM_BOW, 1},

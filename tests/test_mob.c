@@ -691,6 +691,12 @@ int test_mob_tool_stats(void)
     mob_tool_stats(ITEM_STONE_AXE, &dmg, &cd);
     TEST_ASSERT_FLOAT_EQ(dmg, 4.0f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(cd, 0.8f, 1e-6f);
+    mob_tool_stats(ITEM_WOOD_SWORD, &dmg, &cd);
+    TEST_ASSERT_FLOAT_EQ(dmg, 4.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(cd, 0.625f, 1e-6f);
+    mob_tool_stats(ITEM_STONE_SWORD, &dmg, &cd);
+    TEST_ASSERT_FLOAT_EQ(dmg, 5.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(cd, 0.625f, 1e-6f);
     mob_tool_stats((ItemId)BLOCK_STONE, &dmg, &cd);
     TEST_ASSERT_FLOAT_EQ(dmg, 1.0f, 1e-6f); /* Blocks hit as fists. */
     mob_tool_stats(ITEM_APPLE, NULL, NULL); /* Safe. */
@@ -1506,6 +1512,16 @@ int test_player_anim_states(void)
         }
     }
     TEST_ASSERT(peak > PLAYER_ANIM_BOB_WALK * 0.9f);
+    float joint_peak = 0.0f;
+    for (int i = 0; i < 120; ++i) {
+        player_anim_update(&a, &walk, 1.0f / 60.0f);
+        PlayerAnimPose p = player_anim_pose(&a);
+        float joint_motion = fabsf(p.arm_roll) + fabsf(p.arm_pitch) + fabsf(p.arm_yaw);
+        if (joint_motion > joint_peak) {
+            joint_peak = joint_motion;
+        }
+    }
+    TEST_ASSERT(joint_peak > 0.20f);
 
     PlayerAnimInput sprint = {true, true, true, false, false};
     player_anim_update(&a, &sprint, 1.0f / 60.0f);

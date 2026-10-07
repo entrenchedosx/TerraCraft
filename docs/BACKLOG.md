@@ -90,7 +90,7 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 
 ## Milestone 9 — Projectiles + Bow + Skeleton Ranged Combat (DONE)
 - [x] Projectile framework (`game/projectile.h/.c`): fixed pool 32, stable type IDs (ARROW=1), data-driven definitions (gravity 20, drag 0.82/s, fly 6 s / embed 12 s), fixed 1/60 s substeps, swept DDA voxel + swept segment-vs-AABB entity collision, nearest-wins (ties to block), owner grace 0.2 s (re-arms), damage/knockback only via `living_entity_damage_src`, no-penetration, fail-clean cap.
-- [x] Bow (`ITEM_BOW`=206: unstackable, 128 uses, `TOOL_BOW`) + Arrow (`ITEM_ARROW`=103: 64-stack); bench-only recipes (limbs / coal-tipped shafts → 4); tiles 41/42 + stems; catalogue extended; registry 14 recipes.
+- [x] Bow (`ITEM_BOW`=206: unstackable, 128 uses, `TOOL_BOW`) + Arrow (`ITEM_ARROW`=103: 64-stack); bench-only recipes (limbs / coal-tipped shafts → 4); tiles 41/42 + stems; catalogue extended; 14 recipes at that milestone.
 - [x] Draw/charge/fire: RMB hold (both modes), charge draw_t/1.0 s, < 0.15 taps cancel, speed 0.75 curve 10→45 m/s + damage 2→6 HP + 6.0 knock, eye+0.6 forward origin, 0.5x move slow; slot/wheel/menu/death/unload/no-arrow cancels consume nothing; survival 1 arrow + 1 wear per real fire (pool-full fails consume nothing); creative free.
 - [x] Feedback: amber charge bar (pale at full), `BOW_DRAW/FIRE` + `ARROW_STICK` synth events, oriented shaft+head rendering (shared mob scratch, frustum-culled, embed keeps orientation).
 - [x] Skeleton (`ENTITY_SKELETON`=4): HP 20, 6-part model with raised bow arm, AI AIM/ATTACK on the reused FSM (approach > 14, retreat < 6, hold+draw in band, per-tick LOS recheck, distance-scaled jitter, 2.2 s cooldown / 0.8 s draw, melee fallback 2 dmg), shots through the `MobFrameEvents` queue into the same `projectile_fire`; shared hostile cap + ~35% night rotation; kind-4 persistence (projectiles never persist).
@@ -100,7 +100,7 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 ## Fidelity pass — current verification round (ACTIVE)
 - [x] Record Java Edition 26.3 behavior targets and measured TerraCraft differences in `docs/JAVA_FIDELITY.md`.
 - [x] Open a persistent reproduction log and manual playtest checklist in `docs/FIDELITY_BUGS.md`.
-- [x] Add coverage for all 33 item registry-to-atlas mappings and nonempty procedural fallback tiles; correct entity interaction reach and replaceable decor placement with Survival drops.
+- [x] Add coverage for all 35 item registry-to-atlas mappings and nonempty procedural fallback tiles; correct entity interaction reach and replaceable decor placement with Survival drops.
 - [x] Refresh the resource-pack reference to the current 46 atlas tiles and sound events.
 - [x] Fix custom resource-pack path construction/discovery and reload the live atlas when the selected pack changes; headless tests cover pack listing and item-tile application.
 - [x] Add a tested 60 TPS scheduler with bounded catch-up, dropped-time accounting, event-latched input edges, and world simulation during inventory/workbench screens.

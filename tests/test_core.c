@@ -66,7 +66,7 @@ int test_player_viewmodel_arm_pose(void)
     Vec3 shoulder = mmath_vec3(0.42f, -0.33f, 0.60f);
     Vec3 sleeve_end = mmath_vec3(0.375f, -0.03f, 0.61f);
     Vec3 wrist_end = mmath_vec3(0.375f, -0.44f, 0.61f);
-    Vec3 item_center = mmath_vec3(0.30f, -0.16f, 0.62f);
+    Vec3 item_center = mmath_vec3(0.34f, -0.50f, 0.57f);
     const float swings[] = {0.0f, 0.70f};
     for (size_t i = 0; i < sizeof(swings) / sizeof(swings[0]); ++i) {
         float swing_y = i == 0 ? 0.0f : 0.06f;
@@ -78,12 +78,54 @@ int test_player_viewmodel_arm_pose(void)
         TEST_ASSERT(sleeve.x > wrist.x);
         TEST_ASSERT(wrist.x > 0.30f && wrist.x < 0.45f);
         TEST_ASSERT(wrist.y > -0.30f && wrist.y < -0.10f);
-        Vec3 item = player_viewmodel_arm_transform_point(item_center, shoulder, 0.0f, swings[i],
+        Vec3 item = player_viewmodel_arm_transform_point(item_center, shoulder, -2.36f, swings[i],
                                                          swing_y);
         TEST_ASSERT(item.x < wrist.x);
         TEST_ASSERT(item.y > wrist.y);
         TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(item, wrist)) < 0.15f);
     }
+
+    /* Exercise the exact pose composition used by renderer_draw_player_arm:
+     * both the sleeve endpoint and held item move with a walking arm and an
+     * attack, while the item remains beside the wrist. */
+    PlayerAnim idle_anim;
+    player_anim_init(&idle_anim);
+    PlayerAnimPose idle_pose = player_anim_pose(&idle_anim);
+    PlayerViewmodelPose rest = player_viewmodel_pose(&idle_pose, 0.0f, -2.36f);
+    Vec3 rest_wrist = player_viewmodel_pose_transform_point(wrist_end, shoulder, &rest);
+    Vec3 rest_item = player_viewmodel_pose_transform_point(item_center, shoulder, &rest);
+    Vec3 rest_sleeve = player_viewmodel_pose_transform_point(sleeve_end, shoulder, &rest);
+
+    PlayerAnim walking_anim;
+    player_anim_init(&walking_anim);
+    PlayerAnimInput walking = {true, false, true, false, false};
+    for (int i = 0; i < 20; ++i) {
+        player_anim_update(&walking_anim, &walking, 1.0f / 60.0f);
+    }
+    PlayerAnimPose walking_pose = player_anim_pose(&walking_anim);
+    PlayerViewmodelPose walking_view = player_viewmodel_pose(&walking_pose, 0.0f, -2.36f);
+    Vec3 walking_wrist = player_viewmodel_pose_transform_point(wrist_end, shoulder, &walking_view);
+    Vec3 walking_item = player_viewmodel_pose_transform_point(item_center, shoulder, &walking_view);
+    Vec3 walking_sleeve = player_viewmodel_pose_transform_point(sleeve_end, shoulder, &walking_view);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(walking_wrist, rest_wrist)) > 0.002f);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(walking_item, rest_item)) > 0.005f);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(walking_sleeve, rest_sleeve)) > 0.02f);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(walking_item, walking_wrist)) < 0.15f);
+
+    PlayerAnim attack_anim;
+    player_anim_init(&attack_anim);
+    PlayerAnimInput idle = {false, false, true, false, false};
+    player_anim_notify_attacked(&attack_anim);
+    player_anim_update(&attack_anim, &idle, 0.105f);
+    PlayerAnimPose attack_pose = player_anim_pose(&attack_anim);
+    PlayerViewmodelPose attack_view = player_viewmodel_pose(&attack_pose, 0.0f, -2.36f);
+    Vec3 attack_wrist = player_viewmodel_pose_transform_point(wrist_end, shoulder, &attack_view);
+    Vec3 attack_item = player_viewmodel_pose_transform_point(item_center, shoulder, &attack_view);
+    Vec3 attack_sleeve = player_viewmodel_pose_transform_point(sleeve_end, shoulder, &attack_view);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(attack_wrist, rest_wrist)) > 0.02f);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(attack_item, rest_item)) > 0.02f);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(attack_sleeve, rest_sleeve)) > 0.10f);
+    TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(attack_item, attack_wrist)) < 0.15f);
     return failures;
 }
 

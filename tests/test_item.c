@@ -53,6 +53,8 @@ int test_item_texture_mapping(void)
         {ITEM_WOOD_SHOVEL, TILE_WOOD_SHOVEL, "wood_shovel"},
         {ITEM_STONE_SHOVEL, TILE_STONE_SHOVEL, "stone_shovel"},
         {ITEM_BOW, TILE_BOW, "bow"},
+        {ITEM_WOOD_SWORD, TILE_WOOD_SWORD, "wood_sword"},
+        {ITEM_STONE_SWORD, TILE_STONE_SWORD, "stone_sword"},
     };
     int failures = 0;
     const size_t atlas_bytes = (size_t)ATLAS_SIZE * ATLAS_SIZE * ATLAS_BYTES;
@@ -104,7 +106,9 @@ int test_item_registry(void)
     TEST_ASSERT(item_is_valid(19) == true); /* Planks (M7 block). */
     TEST_ASSERT(item_is_valid(20) == false);
     TEST_ASSERT(item_is_valid(199) == false);
-    TEST_ASSERT(item_is_valid(207) == false);
+    TEST_ASSERT(item_is_valid(ITEM_WOOD_SWORD));
+    TEST_ASSERT(item_is_valid(ITEM_STONE_SWORD));
+    TEST_ASSERT(item_is_valid(209) == false);
     TEST_ASSERT(item_is_valid(999) == false);
     TEST_ASSERT(item_is_valid(ITEM_RAW_BEEF) == true);
     TEST_ASSERT(item_is_valid(ITEM_LEATHER) == true);
@@ -124,6 +128,14 @@ int test_item_registry(void)
     const ItemInfo *axe = item_get_info(ITEM_WOOD_AXE);
     TEST_ASSERT(axe->attack_damage == 4);
     TEST_ASSERT_FLOAT_EQ(axe->attack_cooldown, 0.8f, 1e-6f);
+    const ItemInfo *wood_sword = item_get_info(ITEM_WOOD_SWORD);
+    TEST_ASSERT(wood_sword->tool == TOOL_SWORD && wood_sword->tier == TOOL_TIER_WOOD);
+    TEST_ASSERT(wood_sword->max_stack == 1 && wood_sword->max_durability == 59);
+    TEST_ASSERT(wood_sword->attack_damage == 4);
+    TEST_ASSERT_FLOAT_EQ(wood_sword->attack_cooldown, 0.625f, 1e-6f);
+    const ItemInfo *stone_sword = item_get_info(ITEM_STONE_SWORD);
+    TEST_ASSERT(stone_sword->max_stack == 1 && stone_sword->max_durability == 131);
+    TEST_ASSERT(stone_sword->attack_damage == 5);
     TEST_ASSERT(item_get_info((ItemId)BLOCK_STONE)->attack_damage == 1);
     TEST_ASSERT(item_get_info(3)->max_stack == 64);
     TEST_ASSERT(item_get_info(9999)->id == ITEM_NONE);
@@ -132,14 +144,14 @@ int test_item_registry(void)
 }
 
 /* TerraCraft currently registers the Java-style 64-stack set plus damageable
- * tools and a bow. Keep this explicit audit synchronized with ITEM_TABLE:
- * the six tools and bow are the only implemented items whose max stack is 1.
+ * tools, bow, and swords. Keep this explicit audit synchronized with ITEM_TABLE.
  */
 int test_item_stackability_contract(void)
 {
     static const ItemId unstackable[] = {
         ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_WOOD_AXE,
         ITEM_STONE_AXE, ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL, ITEM_BOW,
+        ITEM_WOOD_SWORD, ITEM_STONE_SWORD,
     };
     int failures = 0;
     int registered = 0;
@@ -160,12 +172,12 @@ int test_item_stackability_contract(void)
         ++registered;
         TEST_ASSERT(item_get_info(id)->max_stack == 64);
     }
-    for (ItemId id = 200; id <= 206; ++id) {
+    for (ItemId id = 200; id <= 208; ++id) {
         TEST_ASSERT(item_is_valid(id));
         ++registered;
         TEST_ASSERT(item_get_info(id)->max_stack == 1);
     }
-    TEST_ASSERT(registered == 33);
+    TEST_ASSERT(registered == 35);
     for (size_t i = 0; i < sizeof(unstackable) / sizeof(unstackable[0]); ++i) {
         TEST_ASSERT(item_get_info(unstackable[i])->max_stack == 1);
     }

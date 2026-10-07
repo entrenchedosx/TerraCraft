@@ -143,7 +143,7 @@ void player_anim_update(PlayerAnim *a, const PlayerAnimInput *in, float dt)
 
 PlayerAnimPose player_anim_pose(const PlayerAnim *a)
 {
-    PlayerAnimPose p = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    PlayerAnimPose p = {0};
     if (a == NULL) {
         return p;
     }
@@ -151,12 +151,19 @@ PlayerAnimPose player_anim_pose(const PlayerAnim *a)
     case PLAYER_ANIM_WALK:
     case PLAYER_ANIM_SPRINT: {
         float amp = a->state == PLAYER_ANIM_SPRINT ? PLAYER_ANIM_BOB_SPRINT : PLAYER_ANIM_BOB_WALK;
+        float joint_amp = a->state == PLAYER_ANIM_SPRINT ? 0.22f : 0.15f;
         if (a->sneak) {
             amp *= 0.5f;
+            joint_amp *= 0.5f;
         }
         p.bob_x = amp * sinf(a->stride);
         float bounce = 0.5f - 0.5f * cosf(2.0f * a->stride);
         p.bob_y = amp * 0.6f * bounce;
+        /* The arm counter-swings with each step; rotation makes locomotion
+         * visible even when the small camera bob is hard to notice. */
+        p.arm_roll = joint_amp * sinf(a->stride);
+        p.arm_pitch = joint_amp * 0.72f * cosf(a->stride * 2.0f);
+        p.arm_yaw = joint_amp * 0.42f * sinf(a->stride * 0.5f);
         if (a->sneak) {
             p.dip += 0.025f;
         }
@@ -168,10 +175,14 @@ PlayerAnimPose player_anim_pose(const PlayerAnim *a)
             phase = 1.0f;
         }
         p.dip = PLAYER_ANIM_LAND_MAX_DIP * a->land_mag * sinf(phase * 3.14159265358979323846f);
+        p.arm_pitch = 0.16f * a->land_mag * sinf(phase * 3.14159265358979323846f);
+        p.arm_roll = -0.06f * a->land_mag * sinf(phase * 3.14159265358979323846f);
         break;
     }
     case PLAYER_ANIM_ATTACK:
         p.punch = player_swing_weight(player_swing_phase(a->t));
+        p.arm_roll = -0.20f * p.punch;
+        p.arm_yaw = 0.12f * p.punch;
         break;
     case PLAYER_ANIM_USE:
         p.raise = 0.10f;
@@ -183,6 +194,8 @@ PlayerAnimPose player_anim_pose(const PlayerAnim *a)
         }
         /* Flinch lifts the hand (negative dip = upward jerk). */
         p.dip = -0.03f * sinf(phase * 3.14159265358979323846f);
+        p.arm_roll = 0.12f * sinf(phase * 3.14159265358979323846f);
+        p.arm_pitch = -0.10f * sinf(phase * 3.14159265358979323846f);
         break;
     }
     case PLAYER_ANIM_AIR:

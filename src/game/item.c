@@ -65,6 +65,12 @@ static const ItemInfo ITEM_TABLE[] = {
     /* Bow (M9 ranged weapon): unstackable, 128 shots per bow, mines at
      * hand speed (no block prefers TOOL_BOW), melees as fists. */
     {ITEM_BOW, "Bow", 1, 0, TOOL_BOW, TOOL_TIER_NONE, TILE_BOW, 0.55f, 0.42f, 0.25f, 128, 0, 0, 0.0f},
+    /* Wooden and stone sword values follow familiar vanilla tiers.
+     * Higher tiers await ingot/gem acquisition systems. */
+    {ITEM_WOOD_SWORD, "Wooden Sword", 1, 0, TOOL_SWORD, TOOL_TIER_WOOD, TILE_WOOD_SWORD, 0.55f, 0.42f,
+     0.25f, 59, 0, 4, 0.625f},
+    {ITEM_STONE_SWORD, "Stone Sword", 1, 0, TOOL_SWORD, TOOL_TIER_STONE, TILE_STONE_SWORD, 0.55f, 0.55f,
+     0.58f, 131, 0, 5, 0.625f},
 };
 #define ITEM_TABLE_COUNT (sizeof(ITEM_TABLE) / sizeof(ITEM_TABLE[0]))
 

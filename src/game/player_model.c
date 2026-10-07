@@ -42,9 +42,8 @@ static const MobSkinPart PLAYER_SKIN_PARTS[] = {
     {{{0, 20, 4, 12}, {8, 20, 4, 12}, {8, 16, 4, 4}, {4, 16, 4, 4}, {12, 20, 4, 12}, {4, 20, 4, 12}}},
 };
 
-/* A first-person camera sits behind the moving arm and sees its -Z face.
- * Exchange the front/back strips for this one viewmodel part so that side
- * carries the same authored face as the third-person +Z surface. */
+/* View-model geometry is already camera-local and has no mob-facing yaw.
+ * The camera sees its -Z side, which carries Steve's authored front strip. */
 static const MobSkinPart PLAYER_VIEWMODEL_ARM = {{{40, 20, 4, 12}, {48, 20, 4, 12}, {48, 16, 4, 4}, {44, 16, 4, 4},
                                                    {44, 20, 4, 12}, {52, 20, 4, 12}}};
 
@@ -63,6 +62,47 @@ const MobSkin *player_body_skin(void)
 const MobSkinPart *player_viewmodel_arm_skin_part(void)
 {
     return &PLAYER_VIEWMODEL_ARM;
+}
+
+PlayerViewmodelPose player_viewmodel_pose(const PlayerAnimPose *pose, float fallback_punch,
+                                           float rest_roll)
+{
+    PlayerViewmodelPose out = {{0.0f, 0.0f, 0.0f}, rest_roll, 0.0f, 0.0f};
+    float bob_x = 0.0f;
+    float bob_y = 0.0f;
+    float dip = 0.0f;
+    float raise = 0.0f;
+    float punch = fallback_punch;
+    float arm_roll = 0.0f;
+    float arm_pitch = 0.0f;
+    float arm_yaw = 0.0f;
+    if (pose != NULL) {
+        bob_x = pose->bob_x;
+        bob_y = pose->bob_y;
+        dip = pose->dip;
+        raise = pose->raise;
+        punch = pose->punch;
+        arm_roll = pose->arm_roll;
+        arm_pitch = pose->arm_pitch;
+        arm_yaw = pose->arm_yaw;
+    }
+    out.offset = mmath_vec3(bob_x - raise * 0.5f, bob_y - dip + raise * 0.7f, raise * 0.3f);
+    out.roll += arm_roll;
+    out.swing_x = 0.70f * punch + arm_pitch;
+    out.swing_y = 0.06f * punch + arm_yaw + bob_x * 0.8f;
+    return out;
+}
+
+Vec3 player_viewmodel_pose_transform_point(Vec3 point, Vec3 base_shoulder,
+                                           const PlayerViewmodelPose *pose)
+{
+    if (pose == NULL) {
+        return point;
+    }
+    Vec3 shoulder = mmath_vec3_add(base_shoulder, pose->offset);
+    point = mmath_vec3_add(point, pose->offset);
+    return player_viewmodel_arm_transform_point(point, shoulder, pose->roll,
+                                                pose->swing_x, pose->swing_y);
 }
 
 Vec3 player_viewmodel_arm_transform_point(Vec3 point, Vec3 shoulder, float roll,

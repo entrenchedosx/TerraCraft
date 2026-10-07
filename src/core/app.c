@@ -410,9 +410,11 @@ static void app_poll_move_input(PlayerInput *in)
  *   app: context.
  */
 static bool app_aim_mob(AppContext *app, EntityId *out_id);
-static void app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock_power);
+static bool app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock_power);
 static void app_start_arm_swing(AppContext *app);
 static bool app_try_attack(AppContext *app);
+static bool app_drop_stack_from_player(AppContext *app, ItemStack *stack, bool all);
+static void app_poll_cursor_drop(AppContext *app);
 static void app_debug_spawn_mob(AppContext *app, EntityType type);
 static void app_position_camera(AppContext *app);
 static void app_draw_player_third(AppContext *app, float aspect);
@@ -458,6 +460,16 @@ static void app_poll_discrete_input(AppContext *app)
     app->prev_e_key = e_down;
     if (app->state != GAME_STATE_PLAYING) {
         return; /* E opened the inventory: no hotbar/wheel/click this tick. */
+    }
+
+    /* Q drops one item; Ctrl+Q drops the selected stack. Edge-triggering
+     * keeps keyboard repeat from scattering several stacks per press. */
+    if (window_take_key_pressed(app->window, SDL_SCANCODE_Q)) {
+        bool all = window_is_key_down(SDL_SCANCODE_LCTRL) || window_is_key_down(SDL_SCANCODE_RCTRL);
+        ItemStack *held = &app->player.inv.slots[app->player.hotbar_sel];
+        if (!stack_is_empty(held) && !app_drop_stack_from_player(app, held, all)) {
+            LOG_WARN("drop: item pool full; selected stack kept");
+        }
     }
 
     /* Dev helpers (documented): F6 gives 64 of the selected stack (or
@@ -506,8 +518,7 @@ static void app_poll_discrete_input(AppContext *app)
     if (f7_pressed) {
         EntityId eid = ENTITY_ID_NULL;
         if (app_aim_mob(app, &eid)) {
-            app_strike_mob(app, eid, 5.0f, 5.0f);
-            LOG_INFO("Dev mob hurt: 5 damage");
+            LOG_INFO("Dev mob hurt: %s", app_strike_mob(app, eid, 5.0f, 5.0f) ? "5 damage" : "no damage");
         } else {
             LOG_INFO("Dev mob hurt: no mob aimed");
         }
@@ -1680,11 +1691,11 @@ static bool app_aim_mob(AppContext *app, EntityId *out_id)
 /* Strike an aimed mob: damage + knockback + feedback (shared by melee
  * swings and the F7 debug key). Drops spawn inside damage exactly once.
  */
-static void app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock_power)
+static bool app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock_power)
 {
     Mob *m = mob_resolve(&app->mobs, eid);
     if (m == NULL) {
-        return;
+        return false;
     }
     Vec3 kdir = mmath_vec3(m->pos.x - app->player.pos.x, 0.0f, m->pos.z - app->player.pos.z);
     Vec3 from = mmath_vec3(app->player.pos.x - m->pos.x, 0.0f, app->player.pos.z - m->pos.z);
@@ -1700,6 +1711,7 @@ static void app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock
         audio_play(&app->audio, mob_hurt_sound(mtype));
         particle_burst_item(&app->particles, ITEM_APPLE, chest, 5);
     }
+    return killed || m->health < before;
 }
 
 /* Start the visible first-person swing and its held-button repeat window. */
@@ -1726,13 +1738,53 @@ static bool app_try_attack(AppContext *app)
     if (app->player.attack_cd > 0.0f || app->player.dead) {
         return true;
     }
+    ItemStack *held = &app->player.inv.slots[app->player.hotbar_sel];
     float dmg = 1.0f;
     float cd = 0.4f;
-    mob_tool_stats(app->player.inv.slots[app->player.hotbar_sel].item, &dmg, &cd);
-    app_strike_mob(app, eid, dmg, 5.0f);
+    mob_tool_stats(held->item, &dmg, &cd);
+    bool damaged = app_strike_mob(app, eid, dmg, 5.0f);
+    if (damaged && stack_use_melee_hit(held)) {
+        audio_play(&app->audio, AUDIO_TOOL_BREAK);
+    }
     app->player.attack_cd = cd;
     app_start_arm_swing(app);
     return true;
+}
+
+/* Spawn a held stack just ahead of the player with a forward hand toss.
+ * entity_drop_stack commits the source only after reserving a pool slot. */
+static bool app_drop_stack_from_player(AppContext *app, ItemStack *stack, bool all)
+{
+    if (app == NULL || stack == NULL || stack_is_empty(stack)) {
+        return false;
+    }
+    Vec3 eye = player_eye_pos(&app->player);
+    float cp = cosf(app->player.pitch);
+    Vec3 forward = mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch),
+                              -cosf(app->player.yaw) * cp);
+    Vec3 pos = mmath_vec3_add(eye, mmath_vec3_scale(forward, 0.65f));
+    pos.y -= 0.45f;
+    Vec3 velocity = mmath_vec3_add(mmath_vec3_scale(forward, 3.0f), mmath_vec3(0.0f, 1.5f, 0.0f));
+    uint16_t count = all ? stack->count : 1;
+    int id = entity_drop_stack(&app->entities, stack, count, pos, velocity);
+    if (id < 0) {
+        return false;
+    }
+    return true;
+}
+
+/* Inventory screens bind Q to their cursor stack, matching the slot currently
+ * being carried. Control selects the whole cursor stack. */
+static void app_poll_cursor_drop(AppContext *app)
+{
+    if (app == NULL || !window_take_key_pressed(app->window, SDL_SCANCODE_Q) ||
+        stack_is_empty(&app->cursor)) {
+        return;
+    }
+    bool all = window_is_key_down(SDL_SCANCODE_LCTRL) || window_is_key_down(SDL_SCANCODE_RCTRL);
+    if (!app_drop_stack_from_player(app, &app->cursor, all)) {
+        LOG_WARN("drop: item pool full; cursor stack kept");
+    }
 }
 
 /* Spawn a mob at the crosshair (F9/F10 debug): targeted face cell, else
@@ -2968,6 +3020,7 @@ int app_run(AppContext *app)
                 renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);
                 renderer_draw_particles(app->renderer, &app->particles, app->camera, aspect, &app->clock);
                 screens_update(app, &ui);
+                app_poll_cursor_drop(app);
                 /* E closes the inventory too (cursor resolved first). The E
                 * edge here shares prev_e_key with PLAYING so a held key
                 * from opening never double-triggers. */
@@ -3003,6 +3056,7 @@ int app_run(AppContext *app)
                 renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);
                 renderer_draw_particles(app->renderer, &app->particles, app->camera, aspect, &app->clock);
                 screens_update(app, &ui);
+                app_poll_cursor_drop(app);
                 /* E closes the bench too (shares prev_e_key with PLAYING). */
                 bool e_down = window_is_key_down(SDL_SCANCODE_E);
                 bool e_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_E);

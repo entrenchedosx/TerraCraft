@@ -67,6 +67,7 @@ open.
 | `1`–`9`, mouse wheel | Select hotbar slot |
 | Left mouse | Mine a block or attack a creature |
 | Right mouse | Place/use the selected item |
+| `Q` / `Ctrl+Q` | Drop one item / drop the selected stack (the carried cursor stack in inventory) |
 | `E` | Open inventory |
 | `Esc` | Pause or close the current screen |
 | `F3` | Toggle debug overlay |

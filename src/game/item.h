@@ -33,8 +33,10 @@ typedef uint16_t ItemId;
 #define ITEM_WOOD_SHOVEL 204u
 #define ITEM_STONE_SHOVEL 205u
 #define ITEM_BOW 206u
+#define ITEM_WOOD_SWORD 207u
+#define ITEM_STONE_SWORD 208u
 
-/* Tool categories a block may prefer (bows never match a block tool,
+/* Tool categories a block may prefer (bows and swords never match a block tool,
  * so they always mine at hand speed — no struct change needed).
  */
 typedef enum ToolType {
@@ -42,7 +44,8 @@ typedef enum ToolType {
     TOOL_PICKAXE,
     TOOL_AXE,
     TOOL_SHOVEL,
-    TOOL_BOW
+    TOOL_BOW,
+    TOOL_SWORD
 } ToolType;
 
 /* Tool tiers (0 = not a tool / bare hands). Higher breaks faster. */
@@ -82,7 +85,7 @@ const ItemInfo *item_get_info(ItemId id);
  *   id: item ID.
  *
  * Returns: true for registered items (blocks 1..19 except water,
- * 100..107, 200..206).
+ * 100..107, 200..208).
  */
 bool item_is_valid(ItemId id);
 

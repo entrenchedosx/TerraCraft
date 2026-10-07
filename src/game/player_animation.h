@@ -98,6 +98,9 @@ typedef struct PlayerAnimPose {
     float dip;   /* Downward settle (sneak crouch, landing; HURT lifts). */
     float raise; /* Up/in toward the face (USE hold). */
     float punch; /* Swing envelope (ATTACK only). */
+    float arm_roll; /* Camera-plane wrist rotation in radians. */
+    float arm_pitch; /* Forward/back forearm rotation in radians. */
+    float arm_yaw; /* Side-to-side forearm rotation in radians. */
 } PlayerAnimPose;
 
 /* Pose for the controller's current state (zero pose on bad args). */

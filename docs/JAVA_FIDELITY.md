@@ -92,9 +92,9 @@ and rendering all affect what a player observes.
 
 ### Inventory and survival
 
-- **Stack-limit audit (2026-10-06):** the registered item table contains 33
-  items. Its six damageable tools (wood/stone pickaxes, axes, and shovels) and
-  its damageable bow have `max_stack = 1`. The other 26 registered items,
+- **Stack-limit audit (2026-10-07):** the registered item table contains 35
+  items. Its six damageable tools (wood/stone pickaxes, axes, and shovels),
+  bow, and wooden/stone swords have `max_stack = 1`. The other 26 registered items,
   including grass plants and flowers, have `max_stack = 64`; none of the
   implemented items uses the 16-item limit. This matches the Java Edition
   item-stack rule that counts are capped by each item's own maximum, and its
@@ -105,8 +105,15 @@ and rendering all affect what a player observes.
   `test_item_stackability_contract` exhaustively checks all registered ID
   ranges and runs every singleton through merge, add, inventory insertion,
   one-item splitting, and inventory sanitization (the save-load clamp).
-  Additional Minecraft items such as swords, hoes, armor, shields, buckets,
-  and potions are not registered yet, so their limits are outside this audit.
+  Hoe, armor, shield, bucket, and potion stack limits are outside this audit
+  because those item systems are not registered yet.
+- Wooden and stone swords are craftable at a workbench from two matching
+  materials and one stick. They use 59/131 durability, 4/5 melee damage, and
+  a 0.625-second cooldown. Iron and diamond sword tiers await corresponding
+  material-acquisition systems. `Q` drops one item from the selected hotbar
+  slot; `Ctrl+Q` drops its full stack. In the inventory/workbench screens,
+  those keys operate on the cursor stack. Source counts change only after
+  the bounded dropped-item pool accepts the entity, and tool wear is preserved.
 - Inventory and workbench screens continue advancing the world at 60 TPS
   with player movement and actions disabled. Pause and death freeze it
   (`game_state_ticks_world()` in `src/game/game_state.c`). Loading continues
@@ -129,7 +136,7 @@ and rendering all affect what a player observes.
 ### Rendering, lighting, and fluids
 
 - The atlas combines procedural pixels with optional owner-local or user
-  pack tiles. All 33 registered item types map to a named atlas tile. A
+  pack tiles. All 35 registered item types map to a named atlas tile. A
   confirmed custom-pack path alias prevented pack discovery and item texture
   overrides; the path builder and live settings reload are fixed, with
   coverage in `test_atlas_resource_pack_paths`. The user-reported visual
@@ -143,6 +150,12 @@ and rendering all affect what a player observes.
   with idle/walk/sprint/air/land/attack/use/hurt/sneak states. F5 switches
   to a third-person chase camera rendering the articulated Steve body
   (verified in-game by screenshot).
+- The first-person arm stays in camera-local coordinates; its held item shares
+  the arm pivot and rotations. Walking and sprinting add wrist/forearm motion,
+  and attack, landing, and hurt poses animate joints as well as camera-space
+  position. The camera-facing face uses Steve's front-arm UVs. Headless tests
+  cover pose motion and UV selection; final appearance still needs an in-game
+  view at several movement and camera angles.
 - Lighting uses a global day/night value, a per-column occlusion heuristic,
   and ambient occlusion. It has no separate propagated sky-light and
   block-light channels, cross-chunk light queue, or torch emission.

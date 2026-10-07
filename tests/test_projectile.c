@@ -586,7 +586,7 @@ int test_bow_policy(void)
     TEST_ASSERT(survival_bow_is_bow(ITEM_ARROW) == false);
     TEST_ASSERT(survival_bow_is_bow(ITEM_NONE) == false);
     /* Bow recipe (bench 3x3 limbs) + arrow recipe (bench 1x3 shafts). */
-    TEST_ASSERT(recipe_count() == 14);
+    TEST_ASSERT(recipe_count() == 16);
     ItemStack grid[9];
     RecipeMatch m;
     for (int i = 0; i < 9; ++i) {

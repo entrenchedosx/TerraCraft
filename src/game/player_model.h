@@ -11,6 +11,7 @@
  */
 
 #include "game/mob_model.h"
+#include "game/player_animation.h"
 
 /* Part indexes (stable for the renderer/anim wiring). */
 typedef enum PlayerModelPartIndex {
@@ -36,6 +37,22 @@ const MobSkin *player_body_skin(void);
 /* First-person arm mapping: same skin texels as the body model, with the
  * camera-facing side mapped to Steve's front arm face. */
 const MobSkinPart *player_viewmodel_arm_skin_part(void);
+
+/* Fully composed camera-space hand transform. Keeping the pose composition
+ * pure lets tests exercise the exact transform consumed by the renderer. */
+typedef struct PlayerViewmodelPose {
+    Vec3 offset;
+    float roll;
+    float swing_x;
+    float swing_y;
+} PlayerViewmodelPose;
+
+PlayerViewmodelPose player_viewmodel_pose(const PlayerAnimPose *pose, float fallback_punch,
+                                           float rest_roll);
+
+/* Transform a local arm/item point using the composed pose and base shoulder. */
+Vec3 player_viewmodel_pose_transform_point(Vec3 point, Vec3 base_shoulder,
+                                          const PlayerViewmodelPose *pose);
 
 /* Rotate a camera-local arm point around its shoulder pivot. Kept pure so
  * the renderer and pose regressions share the same viewmodel transform. */

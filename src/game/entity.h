@@ -64,6 +64,13 @@ void entity_pool_clear(EntityPool *pool);
  */
 int entity_spawn(EntityPool *pool, Vec3 pos, const ItemStack *stack);
 
+/* Transfer part or all of a stack into a dropped-item entity. The source is
+ * changed only after an entity slot is secured; on failure both are intact.
+ * Item wear is preserved for damageable single-item stacks.
+ * Returns the entity slot, or -1 when arguments are invalid or the pool is full.
+ */
+int entity_drop_stack(EntityPool *pool, ItemStack *source, uint16_t count, Vec3 pos, Vec3 vel);
+
 /* Count active entities.
  *
  * Args:

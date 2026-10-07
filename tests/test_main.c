@@ -138,6 +138,7 @@ int main(void)
     RUN_TEST(test_mesher_glass_light);
     RUN_TEST(test_esave_single);
     RUN_TEST(test_esave_multiple);
+    RUN_TEST(test_entity_drop_stack);
     RUN_TEST(test_esave_corrupt);
     RUN_TEST(test_esave_missing);
     RUN_TEST(test_esave_transient);

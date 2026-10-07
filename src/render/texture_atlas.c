@@ -162,9 +162,9 @@ static const char *TILE_FILES[] = {
     "tool_pickaxe", "tool_axe", "tool_shovel", "coal", "crack0", "crack1", "crack2", "crack3", "crack4",
     "workbench", "planks", "apple", "stick", "wood_top", "workbench_top", "workbench_side", "wood_pickaxe",
     "stone_pickaxe", "wood_axe", "stone_axe", "wood_shovel", "stone_shovel", "bow", "arrow",
-    "bone", "beef", "leather", "player_skin", "player_sleeve", "flesh",
+    "bone", "beef", "leather", "player_skin", "player_sleeve", "flesh", "wood_sword", "stone_sword",
 };
-#define TILE_FILE_COUNT 49
+#define TILE_FILE_COUNT 51
 
 /* Tile file name for overrides (NULL when out of range).
  *
@@ -792,6 +792,39 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
                 put_px(out_px, col, row, x, 3, mtools[ti].hr, mtools[ti].hg, mtools[ti].hb, 255);
                 put_px(out_px, col, row, x, 4, mtools[ti].hr, mtools[ti].hg, mtools[ti].hb, 255);
             }
+        }
+    }
+
+    /* Small transparent swords drawn on a crisp diagonal. */
+    {
+        static const struct {
+            int tile;
+            unsigned char blade[3];
+            unsigned char edge[3];
+        } swords[2] = {
+            {TILE_WOOD_SWORD, {156, 112, 62}, {208, 164, 100}},
+            {TILE_STONE_SWORD, {132, 139, 145}, {205, 210, 214}},
+        };
+        for (size_t si = 0; si < 2; ++si) {
+            int col = swords[si].tile % ATLAS_TILES;
+            int row = swords[si].tile / ATLAS_TILES;
+            for (int i = 0; i < 8; ++i) {
+                int x = 5 + i;
+                int y = 10 - i;
+                put_px(out_px, col, row, x, y, swords[si].blade[0], swords[si].blade[1], swords[si].blade[2], 255);
+                if (i < 6) {
+                    put_px(out_px, col, row, x, y + 1, swords[si].edge[0], swords[si].edge[1], swords[si].edge[2], 255);
+                }
+            }
+            /* Guard and grip. */
+            put_px(out_px, col, row, 4, 9, 91, 66, 42, 255);
+            put_px(out_px, col, row, 5, 10, 91, 66, 42, 255);
+            put_px(out_px, col, row, 6, 11, 91, 66, 42, 255);
+            put_px(out_px, col, row, 6, 9, 91, 66, 42, 255);
+            put_px(out_px, col, row, 5, 11, 91, 66, 42, 255);
+            put_px(out_px, col, row, 4, 13, 117, 78, 44, 255);
+            put_px(out_px, col, row, 3, 14, 117, 78, 44, 255);
+            put_px(out_px, col, row, 2, 15, 74, 49, 30, 255);
         }
     }
 

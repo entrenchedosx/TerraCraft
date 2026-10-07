@@ -557,15 +557,13 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
 /* Rebase one view-model vertex from camera-local coordinates into world
  * space after applying the shared shoulder swing. */
 static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up, Vec3 forward,
-                                        Vec3 shoulder, Vec3 pose_offset,
-                                        float rest_roll, float swing_x, float swing_y,
+                                        Vec3 base_shoulder, const PlayerViewmodelPose *pose,
                                         float viewmodel_scale)
 {
     Vec3 p = mmath_vec3(v[0], v[1], v[2]);
-    p = mmath_vec3_add(p, pose_offset);
-    p = player_viewmodel_arm_transform_point(p, shoulder, rest_roll, swing_x, swing_y);
+    p = player_viewmodel_pose_transform_point(p, base_shoulder, pose);
     Vec3 n = mmath_vec3(v[3], v[4], v[5]);
-    n = mob_rot_y(mob_rot_x(mob_rot_z(n, rest_roll), swing_x), swing_y);
+    n = mob_rot_y(mob_rot_x(mob_rot_z(n, pose->roll), pose->swing_x), pose->swing_y);
     /* Uniformly scaling xyz would cancel under perspective. Scale only the
      * screen axes, leaving depth intact, to keep the authored framing. */
     p.x *= viewmodel_scale;
@@ -626,11 +624,9 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     int item_part = arm_parts;
     int count = arm_parts + (has_item ? 1 : 0);
     MobModelPart parts[3];
-    /* Compact corner arm (screenshot-verified framing): a slim box low in
-     * the bottom-right, sleeve art on top, hand at the wrist end below,
-     * held item gripped beside the upper arm. No rest roll — the box is
-     * authored upright and stays upright (a roll past 90 degrees is what
-     * turned it upside down before). */
+    /* The arm's local +Y axis runs from wrist to shoulder. The rest roll
+     * places the wrist toward the crosshair and the shoulder off-screen at
+     * bottom-right. The held item shares this exact pivot and rotation. */
     parts[0] = (MobModelPart){{0.34f, -0.44f, 0.575f}, {0.07f, 0.41f, 0.075f},
                               TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE};
     if (!has_skin) {
@@ -638,37 +634,19 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
                                   TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE};
     }
     if (has_item) {
-        /* Gripped up-left of the wrist toward the crosshair (unrolled:
-         * authored directly in viewmodel space, still punches). */
-        parts[item_part] = (MobModelPart){{0.30f, -0.16f, 0.62f},
+        /* Gripped at the lower local end of the arm; the shared transform
+         * carries it beside the wrist instead of leaving it upright. */
+        parts[item_part] = (MobModelPart){{0.34f, -0.50f, 0.57f},
                                           held_block != 0 ? mmath_vec3(0.09f, 0.09f, 0.09f)
                                                           : mmath_vec3(0.11f, 0.11f, 0.02f),
                                           held_tile, -1, 0.0f, MOB_ANIM_NONE};
     }
-    /* Controller pose: stride bob, landing dip, use raise, punch envelope.
-     * NULL pose falls back to the legacy swing-phase drive. */
-    float bob_x = 0.0f;
-    float bob_y = 0.0f;
-    float dip = 0.0f;
-    float raise = 0.0f;
-    float punch = player_swing_weight(swing_phase);
-    if (pose != NULL) {
-        bob_x = pose->bob_x;
-        bob_y = pose->bob_y;
-        dip = pose->dip;
-        raise = pose->raise;
-        punch = pose->punch;
-    }
-    Vec3 pose_offset = {bob_x - raise * 0.5f, bob_y - dip + raise * 0.7f, raise * 0.3f};
-    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.42f, -0.33f, 0.60f), pose_offset);
-    /* Minecraft layout: the shoulder sits off-frame bottom-right and the
-     * hand reaches up-left toward the crosshair. Local -Y maps to up-left
-     * through a -3/4 PI roll; the item is authored unrolled at the wrist.
-     * The punch pitches forward (+X rotation drives the rolled hand toward
-     * the world, not back at the eye). */
+    /* The shoulder sits off-frame bottom-right and the hand reaches up-left
+     * toward the crosshair. A shared -3/4 PI rest roll poses the arm and held
+     * item; the punch adds a forward pitch. */
     const float rest_roll = -2.36f;
-    float swing_x = 0.70f * punch;
-    float swing_y = 0.06f * punch + bob_x * 0.8f;
+    PlayerViewmodelPose arm_pose = player_viewmodel_pose(pose, player_swing_weight(swing_phase), rest_roll);
+    Vec3 base_shoulder = mmath_vec3(0.42f, -0.33f, 0.60f);
     Vec3 eye = camera_get_position(cam);
     Vec3 forward = camera_get_forward(cam);
     Vec3 right = camera_get_right(cam);
@@ -690,12 +668,12 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
             mob_tile_uvs(&parts[p], fuv);
         }
         float *dst = r->mob_verts + (size_t)p * 36 * MESHER_FLOATS_PER_VERTEX;
+        /* mob_emit_part adds its standard PI-facing rotation internally;
+         * cancel it so camera-local X/Z and Steve's front-facing UV stay put. */
         mob_emit_part(dst, mmath_vec3(0.0f, 0.0f, 0.0f), -3.14159265f, &parts[p], 0.0f, false, fuv);
-        float part_roll = (has_item && p == item_part) ? 0.0f : rest_roll;
         for (size_t v = 0; v < 36; ++v) {
             player_arm_transform_vertex(dst + v * MESHER_FLOATS_PER_VERTEX, eye, right, up, forward,
-                                        shoulder, pose_offset, part_roll, swing_x, swing_y,
-                                        viewmodel_scale);
+                                        base_shoulder, &arm_pose, viewmodel_scale);
         }
     }
     GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);

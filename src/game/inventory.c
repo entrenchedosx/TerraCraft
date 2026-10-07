@@ -177,6 +177,25 @@ bool stack_use_tool(ItemStack *s)
     return false;
 }
 
+/* Apply Minecraft-style durability cost after an accepted melee hit. */
+bool stack_use_melee_hit(ItemStack *s)
+{
+    if (s == NULL || stack_is_empty(s) || !item_is_valid(s->item)) {
+        return false;
+    }
+    const ItemInfo *info = item_get_info(s->item);
+    if (info->max_durability == 0 || info->tool == TOOL_BOW || info->tool == TOOL_NONE) {
+        return false;
+    }
+    int uses = info->tool == TOOL_SWORD ? 1 : 2;
+    for (int i = 0; i < uses && !stack_is_empty(s); ++i) {
+        if (stack_use_tool(s)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Remaining uses (0 for empty/non-damageable/broken). */
 uint16_t stack_uses_left(const ItemStack *s)
 {

@@ -209,6 +209,7 @@ int test_mesher_glass_light(void);
 /* Entity-save tests (defined in test_esave.c). */
 int test_esave_single(void);
 int test_esave_multiple(void);
+int test_entity_drop_stack(void);
 int test_esave_corrupt(void);
 int test_esave_missing(void);
 int test_esave_transient(void);

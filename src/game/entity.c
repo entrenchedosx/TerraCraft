@@ -90,6 +90,35 @@ static bool entity_box_solid(const World *w, Vec3 mn, Vec3 mx)
     return false;
 }
 
+/* Transactionally transfer items from an inventory/UI stack into the world. */
+int entity_drop_stack(EntityPool *pool, ItemStack *source, uint16_t count, Vec3 pos, Vec3 vel)
+{
+    if (pool == NULL || source == NULL || stack_is_empty(source) || !item_is_valid(source->item) ||
+        count == 0 || count > source->count) {
+        return -1;
+    }
+    const ItemInfo *info = item_get_info(source->item);
+    if (info->max_stack == 0 || source->count > info->max_stack ||
+        (info->max_stack == 1 && count != 1) ||
+        (info->max_durability == 0 && source->durability != 0) ||
+        (info->max_durability > 0 && (source->count != 1 || source->durability > info->max_durability))) {
+        return -1;
+    }
+    ItemStack dropped = *source;
+    dropped.count = count;
+    int index = entity_spawn(pool, pos, &dropped);
+    if (index < 0) {
+        return -1;
+    }
+    pool->items[index].vel = vel;
+    if (count == source->count) {
+        stack_clear(source);
+    } else {
+        source->count = (uint16_t)(source->count - count);
+    }
+    return index;
+}
+
 /* Fraction of the item's collision AABB occupied by water. Flowing states
  * use their real bottom-up surface height. */
 static float entity_water_contact(const ItemEntity *e, const World *w)
