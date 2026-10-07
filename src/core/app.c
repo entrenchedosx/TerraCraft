@@ -1,6 +1,7 @@
 #include "core/app.h"
 #include "audio/audio.h"
 #include "core/log.h"
+#include "core/profile.h"
 #include "core/time.h"
 #include "game/audio.h"
 #include "game/entity.h"
@@ -15,6 +16,7 @@
 #include "game/survival.h"
 #include "game/time_system.h"
 #include "platform/gl_ctx.h"
+#include "platform/lan.h"
 #include "platform/window.h"
 #include "render/camera.h"
 #include "render/renderer.h"
@@ -24,6 +26,8 @@
 #include "world/chunk.h"
 #include "world/streamer.h"
 #include "world/world.h"
+#include "world/world_gen.h"
+#include "world/world_meta.h"
 #include "world/water.h"
 #include "world/world_save.h"
 
@@ -43,6 +47,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Apply tunables to live systems (vsync, FOV, sensitivity, streamer).
@@ -102,6 +107,10 @@ void app_enter_state(AppContext *app, GameState to)
     GameState from = app->state;
     app->state = to;
     window_clear_input_edges(app->window);
+    if (to != GAME_STATE_PLAYING && app->chat_open) {
+        app->chat_open = false;
+        app->chat_input[0] = '\0';
+    }
     if (!game_state_ticks_world(from) && game_state_ticks_world(to)) {
         app->discard_next_simulation_elapsed = true;
     }
@@ -110,7 +119,7 @@ void app_enter_state(AppContext *app, GameState to)
     }
     bool capture = (to == GAME_STATE_PLAYING);
     window_set_relative_mouse(app->window, capture);
-    window_text_input(to == GAME_STATE_CREATE_WORLD);
+    window_text_input(to == GAME_STATE_CREATE_WORLD || to == GAME_STATE_PROFILE || to == GAME_STATE_LAN_MENU);
     if (game_state_ticks_world(from) && to != GAME_STATE_PLAYING) {
         /* Eating and bow draws never survive a state change (interrupted
          * uses consume nothing): pause, inventory, death, and quit all
@@ -121,6 +130,7 @@ void app_enter_state(AppContext *app, GameState to)
         survival_mine_reset(&app->player);
     }
     if (to == GAME_STATE_PLAYING) {
+        app->chat_open = false;
         /* Re-entering play (resume/respawn/inventory-close): the menu click
          * that got us here must not replay as a gameplay edge (instant
          * creative break, survival mine/place), and held keys must not
@@ -211,9 +221,14 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->discard_next_simulation_elapsed = false;
     app->load_done = 0;
     app->load_total = 0;
-    app->state = GAME_STATE_MAIN_MENU;
+    app->state = GAME_STATE_PROFILE;
     app->sensitivity = MINEC_MOUSE_SENSITIVITY;
     memset(&app->menu, 0, sizeof(app->menu));
+    if (profile_load(PROFILE_PATH, app->username, sizeof(app->username)) == PROFILE_OK) {
+        app->state = GAME_STATE_MAIN_MENU;
+    } else {
+        app->menu.name_focused = true;
+    }
     entity_pool_clear(&app->entities);
     mob_pool_init(&app->mobs, 0x85EBCA6Bu);
     projectile_pool_clear(&app->projectiles);
@@ -273,6 +288,10 @@ int app_init(AppContext *app, int width, int height, const char *title)
     if (log_init() != 0) {
         return -2;
     }
+    app->lan = lan_create();
+    if (app->lan == NULL) {
+        LOG_WARN("app_init: LAN transport unavailable; singleplayer remains usable");
+    }
     LOG_INFO("TerraCraft M9 initialising (%dx%d) \"%s\"", width, height, title);
 
     app->window = window_create(title, width, height);
@@ -314,9 +333,10 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->last_frame_time = app->start_time;
     app->frame_count = 0;
     app->running = true;
+    window_text_input(app->state == GAME_STATE_PROFILE);
 
     LOG_INFO("TerraCraft M9 initialised. GL: %s / %s", gl_ctx_get_vendor(), gl_ctx_get_renderer());
-    LOG_INFO("Main menu. Singleplayer to play; F3 toggles debug in game.");
+    LOG_INFO("Startup screen: %s", game_state_name(app->state));
     return 0;
 }
 
@@ -526,6 +546,911 @@ static void app_poll_discrete_input(AppContext *app)
 
     /* Mouse actions are consumed by the fixed world tick so a press between
      * ticks remains queued until gameplay can act on it. */
+}
+
+bool app_commit_profile(AppContext *app)
+{
+    if (app == NULL || app->state != GAME_STATE_PROFILE) {
+        return false;
+    }
+    const char *chosen = app->menu.profile_buf;
+    char generated[PROFILE_NAME_MAX_LEN + 1];
+    if (chosen[0] == '\0') {
+        uint64_t seed = (uint64_t)(time_now_seconds() * 1000000000.0) ^
+                        (uint64_t)SDL_GetPerformanceCounter() ^ (uint64_t)(uintptr_t)app;
+        if (profile_generate_name(generated, sizeof(generated), seed) != PROFILE_OK) {
+            snprintf(app->menu.error, sizeof(app->menu.error), "Could not generate a username.");
+            return false;
+        }
+        chosen = generated;
+    }
+    if (!profile_name_valid(chosen)) {
+        snprintf(app->menu.error, sizeof(app->menu.error),
+                 "Use 3-24 letters, numbers, or underscores.");
+        return false;
+    }
+    if (profile_save(PROFILE_PATH, chosen) != PROFILE_OK) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not save username in config/profile.cfg.");
+        return false;
+    }
+    size_t len = strlen(chosen);
+    memcpy(app->username, chosen, len + 1);
+    memcpy(app->menu.profile_buf, chosen, len + 1);
+    app->menu.error[0] = '\0';
+    app_enter_state(app, GAME_STATE_MAIN_MENU);
+    return app->state == GAME_STATE_MAIN_MENU;
+}
+
+enum {
+    APP_LAN_MSG_HELLO = 1,
+    APP_LAN_MSG_WELCOME = 2,
+    APP_LAN_MSG_PLAYER = 3,
+    APP_LAN_MSG_CHAT = 4,
+    APP_LAN_MSG_BLOCK = 5,
+    APP_LAN_MSG_PLAYER_LEFT = 6,
+    APP_LAN_PROTOCOL_VERSION = 1,
+    APP_LAN_PORT = 25566,
+    APP_CHAT_MAX_BYTES = 160
+};
+
+static void app_net_write_u16(uint8_t *out, uint16_t value)
+{
+    out[0] = (uint8_t)(value >> 8);
+    out[1] = (uint8_t)value;
+}
+
+static uint16_t app_net_read_u16(const uint8_t *in)
+{
+    return (uint16_t)(((uint16_t)in[0] << 8) | (uint16_t)in[1]);
+}
+
+static void app_net_write_u32(uint8_t *out, uint32_t value)
+{
+    out[0] = (uint8_t)(value >> 24);
+    out[1] = (uint8_t)(value >> 16);
+    out[2] = (uint8_t)(value >> 8);
+    out[3] = (uint8_t)value;
+}
+
+static uint32_t app_net_read_u32(const uint8_t *in)
+{
+    return ((uint32_t)in[0] << 24) | ((uint32_t)in[1] << 16) |
+           ((uint32_t)in[2] << 8) | (uint32_t)in[3];
+}
+
+static void app_net_write_u64(uint8_t *out, uint64_t value)
+{
+    for (int i = 7; i >= 0; --i) {
+        out[i] = (uint8_t)value;
+        value >>= 8;
+    }
+}
+
+static uint64_t app_net_read_u64(const uint8_t *in)
+{
+    uint64_t value = 0;
+    for (int i = 0; i < 8; ++i) {
+        value = (value << 8) | in[i];
+    }
+    return value;
+}
+
+static void app_net_write_f32(uint8_t *out, float value)
+{
+    uint32_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    app_net_write_u32(out, bits);
+}
+
+static float app_net_read_f32(const uint8_t *in)
+{
+    uint32_t bits = app_net_read_u32(in);
+    float value = 0.0f;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+static void app_chat_add(AppContext *app, const char *username, const char *message)
+{
+    if (app == NULL || username == NULL || message == NULL) {
+        return;
+    }
+    unsigned slot = app->chat_line_head % 8u;
+    snprintf(app->chat_lines[slot], sizeof(app->chat_lines[slot]), "%s: %s", username, message);
+    app->chat_line_head = (slot + 1u) % 8u;
+    if (app->chat_line_count < 8u) {
+        app->chat_line_count++;
+    }
+}
+
+static bool app_chat_encode(uint8_t *out, size_t out_cap, const char *username,
+                            const char *message, size_t message_len, size_t *out_len)
+{
+    size_t name_len = username != NULL ? strlen(username) : 0;
+    if (out == NULL || out_len == NULL || !profile_name_valid(username) || name_len > PROFILE_NAME_MAX_LEN ||
+        message == NULL || message_len == 0 || message_len > APP_CHAT_MAX_BYTES ||
+        4u + name_len + message_len > out_cap) {
+        return false;
+    }
+    size_t at = 0;
+    out[at++] = APP_LAN_MSG_CHAT;
+    out[at++] = (uint8_t)name_len;
+    memcpy(out + at, username, name_len);
+    at += name_len;
+    app_net_write_u16(out + at, (uint16_t)message_len);
+    at += 2;
+    memcpy(out + at, message, message_len);
+    at += message_len;
+    *out_len = at;
+    return true;
+}
+
+static LanRemotePlayer *app_lan_find_player(AppContext *app, uint32_t player_id, bool create)
+{
+    if (app == NULL || player_id == app->lan_local_player_id) {
+        return NULL;
+    }
+    LanRemotePlayer *free_slot = NULL;
+    for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
+        LanRemotePlayer *remote = &app->lan_players[i];
+        if (remote->active && remote->peer_id == player_id) {
+            return remote;
+        }
+        if (!remote->active && free_slot == NULL) {
+            free_slot = remote;
+        }
+    }
+    if (!create || free_slot == NULL) {
+        return NULL;
+    }
+    memset(free_slot, 0, sizeof(*free_slot));
+    free_slot->active = true;
+    free_slot->peer_id = player_id;
+    app->lan_player_count++;
+    return free_slot;
+}
+
+static void app_lan_remove_player(AppContext *app, uint32_t player_id)
+{
+    if (app == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
+        if (app->lan_players[i].active && app->lan_players[i].peer_id == player_id) {
+            memset(&app->lan_players[i], 0, sizeof(app->lan_players[i]));
+            if (app->lan_player_count > 0) {
+                app->lan_player_count--;
+            }
+            break;
+        }
+    }
+}
+
+static bool app_lan_send_player(AppContext *app, uint32_t target, uint32_t player_id,
+                                const char *username, Vec3 pos, float yaw, float pitch,
+                                float walk_phase, bool sneaking, bool moving)
+{
+    if (app == NULL || app->lan == NULL || !profile_name_valid(username)) {
+        return false;
+    }
+    uint8_t payload[64];
+    size_t name_len = strlen(username);
+    size_t at = 0;
+    payload[at++] = APP_LAN_MSG_PLAYER;
+    app_net_write_u32(payload + at, player_id);
+    at += 4;
+    app_net_write_f32(payload + at, pos.x); at += 4;
+    app_net_write_f32(payload + at, pos.y); at += 4;
+    app_net_write_f32(payload + at, pos.z); at += 4;
+    app_net_write_f32(payload + at, yaw); at += 4;
+    app_net_write_f32(payload + at, pitch); at += 4;
+    app_net_write_f32(payload + at, walk_phase); at += 4;
+    payload[at++] = (uint8_t)((sneaking ? 1u : 0u) | (moving ? 2u : 0u));
+    payload[at++] = (uint8_t)name_len;
+    memcpy(payload + at, username, name_len);
+    at += name_len;
+    return lan_send(app->lan, target, payload, at);
+}
+
+static void app_lan_send_current_players(AppContext *app, uint32_t target)
+{
+    if (app == NULL || app->lan == NULL || !app->world_open) {
+        return;
+    }
+    (void)app_lan_send_player(app, target, app->lan_local_player_id, app->username,
+                              app->player.render_pos, app->player.yaw, app->player.pitch,
+                              app->player.walk_phase, app->player.sneaking,
+                              sqrtf(app->player.vel.x * app->player.vel.x + app->player.vel.z * app->player.vel.z) > 0.15f);
+    for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
+        const LanRemotePlayer *remote = &app->lan_players[i];
+        if (remote->active && remote->username[0] != '\0') {
+            (void)app_lan_send_player(app, target, remote->peer_id, remote->username,
+                                      remote->pos, remote->yaw, remote->pitch,
+                                      remote->walk_phase, remote->sneaking, remote->moving);
+        }
+    }
+}
+
+static bool app_lan_send_welcome(AppContext *app, uint32_t peer_id)
+{
+    if (app == NULL || app->lan == NULL || !app->world_open || !profile_name_valid(app->username)) {
+        return false;
+    }
+    uint8_t payload[96];
+    size_t name_len = strlen(app->username);
+    size_t at = 0;
+    payload[at++] = APP_LAN_MSG_WELCOME;
+    payload[at++] = APP_LAN_PROTOCOL_VERSION;
+    app_net_write_u32(payload + at, peer_id); at += 4;
+    app_net_write_u64(payload + at, (uint64_t)(int64_t)app->world->seed); at += 8;
+    payload[at++] = (uint8_t)app->world->terrain_version;
+    payload[at++] = (uint8_t)app->world->mode;
+    app_net_write_f32(payload + at, app->player.pos.x); at += 4;
+    app_net_write_f32(payload + at, app->player.pos.y); at += 4;
+    app_net_write_f32(payload + at, app->player.pos.z); at += 4;
+    app_net_write_f32(payload + at, app->player.yaw); at += 4;
+    app_net_write_f32(payload + at, app->clock.day_progress); at += 4;
+    payload[at++] = (uint8_t)name_len;
+    memcpy(payload + at, app->username, name_len);
+    at += name_len;
+    return lan_send(app->lan, peer_id, payload, at);
+}
+
+static void app_lan_block_changed(void *context, int wx, int wy, int wz, uint16_t block_id)
+{
+    AppContext *app = (AppContext *)context;
+    if (app == NULL || app->lan == NULL || app->lan_applying_remote_block ||
+        (!app->lan_host && !app->lan_client) || !lan_is_connected(app->lan) ||
+        (app->lan_host && lan_peer_count(app->lan) == 0)) {
+        return;
+    }
+    if (app->lan_block_queue_count >= MINEC_LAN_BLOCK_QUEUE) {
+        if (!app->lan_block_queue_warned) {
+            LOG_WARN("LAN block update queue is full; further edits may not reach peers until it drains");
+            app->lan_block_queue_warned = true;
+        }
+        return;
+    }
+    size_t slot = (app->lan_block_queue_head + app->lan_block_queue_count) % MINEC_LAN_BLOCK_QUEUE;
+    uint8_t *payload = app->lan_block_queue[slot];
+    payload[0] = APP_LAN_MSG_BLOCK;
+    app_net_write_u32(payload + 1, (uint32_t)(int32_t)wx);
+    app_net_write_u32(payload + 5, (uint32_t)(int32_t)wy);
+    app_net_write_u32(payload + 9, (uint32_t)(int32_t)wz);
+    app_net_write_u16(payload + 13, block_id);
+    app->lan_block_queue_count++;
+}
+
+bool app_lan_host(AppContext *app)
+{
+    if (app == NULL || !app->world_open || app->world == NULL || app->lan_client) {
+        return false;
+    }
+    if (app->lan_host && app->lan != NULL && lan_is_host(app->lan)) {
+        return true;
+    }
+    if (app->lan == NULL) {
+        app->lan = lan_create();
+    }
+    if (app->lan == NULL || !lan_host_start(app->lan, APP_LAN_PORT)) {
+        snprintf(app->menu.error, sizeof(app->menu.error),
+                 "Could not open LAN port %d. Check whether another game is using it.", APP_LAN_PORT);
+        return false;
+    }
+    app->lan_host = true;
+    app->lan_local_player_id = 0;
+    app->lan_player_send_timer = 0.0;
+    app->lan_connect_timer = 0.0;
+    app->lan_block_queue_head = 0;
+    app->lan_block_queue_count = 0;
+    app->lan_block_queue_warned = false;
+    app->menu.error[0] = '\0';
+    world_set_block_change_callback(app->world, app_lan_block_changed, app);
+    LOG_INFO("LAN host listening on port %d", APP_LAN_PORT);
+    return true;
+}
+
+bool app_lan_join(AppContext *app, const char *address)
+{
+    if (app == NULL || address == NULL || app->world_open || app->lan_host) {
+        return false;
+    }
+    if (!lan_ipv4_is_local_address(address)) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Enter a valid local IPv4 address.");
+        return false;
+    }
+    if (app->lan == NULL) {
+        app->lan = lan_create();
+    }
+    if (app->lan == NULL || !lan_client_start(app->lan, address, APP_LAN_PORT)) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not start LAN connection to %s.", address);
+        return false;
+    }
+    app->lan_client = true;
+    app->lan_join_pending = true;
+    app->lan_local_player_id = 0;
+    app->lan_player_send_timer = 0.0;
+    app->lan_connect_timer = 0.0;
+    app->lan_block_queue_head = 0;
+    app->lan_block_queue_count = 0;
+    app->lan_block_queue_warned = false;
+    return true;
+}
+
+void app_lan_disconnect(AppContext *app)
+{
+    if (app == NULL) {
+        return;
+    }
+    if (app->world != NULL) {
+        world_set_block_change_callback(app->world, NULL, NULL);
+    }
+    if (app->lan != NULL) {
+        lan_close(app->lan);
+    }
+    app->lan_host = false;
+    app->lan_client = false;
+    app->lan_join_pending = false;
+    app->lan_applying_remote_block = false;
+    app->lan_local_player_id = 0;
+    app->lan_player_send_timer = 0.0;
+    app->lan_connect_timer = 0.0;
+    app->lan_block_queue_head = 0;
+    app->lan_block_queue_count = 0;
+    app->lan_block_queue_warned = false;
+    app->lan_player_count = 0;
+    memset(app->lan_players, 0, sizeof(app->lan_players));
+    app->chat_open = false;
+    app->chat_input[0] = '\0';
+    app->chat_line_count = 0;
+    app->chat_line_head = 0;
+    memset(app->chat_lines, 0, sizeof(app->chat_lines));
+}
+
+static bool app_lan_open_client_world(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size < 40 || event->payload[0] != APP_LAN_MSG_WELCOME ||
+        event->payload[1] != APP_LAN_PROTOCOL_VERSION) {
+        return false;
+    }
+    const uint8_t *p = event->payload;
+    uint32_t local_id = app_net_read_u32(p + 2);
+    int64_t seed = (int64_t)app_net_read_u64(p + 6);
+    int terrain_version = p[14];
+    int mode = p[15];
+    Vec3 host_pos = mmath_vec3(app_net_read_f32(p + 16), app_net_read_f32(p + 20),
+                               app_net_read_f32(p + 24));
+    float host_yaw = app_net_read_f32(p + 28);
+    float day = app_net_read_f32(p + 32);
+    size_t name_len = p[36];
+    if (local_id == 0 || terrain_version < 1 || terrain_version > WORLD_TERRAIN_VERSION_CURRENT ||
+        (mode != WORLD_MODE_SURVIVAL && mode != WORLD_MODE_CREATIVE) || !isfinite(host_pos.x) ||
+        !isfinite(host_pos.y) || !isfinite(host_pos.z) || !isfinite(host_yaw) || !isfinite(day) ||
+        host_pos.y < 0.0f || host_pos.y > 255.0f || name_len < PROFILE_NAME_MIN_LEN ||
+        name_len > PROFILE_NAME_MAX_LEN || event->size != 37u + name_len) {
+        return false;
+    }
+    char host_name[PROFILE_NAME_MAX_LEN + 1];
+    memcpy(host_name, p + 37, name_len);
+    host_name[name_len] = '\0';
+    if (!profile_name_valid(host_name)) {
+        return false;
+    }
+    char world_name[64];
+    char seed_text[32];
+    char world_dir[512];
+    snprintf(world_name, sizeof(world_name), "LAN - %s", host_name);
+    snprintf(seed_text, sizeof(seed_text), "%lld", (long long)seed);
+    if (session_create_world(SESSION_SAVES_DIR, world_name, seed_text, mode, world_dir) != 0) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not prepare a local LAN world copy.");
+        return false;
+    }
+    WorldMeta meta;
+    if (world_meta_read(world_dir, &meta) != 0) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not read the new LAN world metadata.");
+        (void)world_save_delete(world_dir);
+        return false;
+    }
+    meta.terrain_version = terrain_version;
+    if (world_meta_write(world_dir, &meta) != 0 || session_open_world(app, world_dir) != 0) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not open the local LAN world copy.");
+        if (!app->world_open) {
+            (void)world_save_delete(world_dir);
+        }
+        return false;
+    }
+    app->lan_local_player_id = local_id;
+    app->lan_join_pending = false;
+    app->lan_client = true;
+    app->clock.day_progress = day - floorf(day);
+    if (app->clock.day_progress < 0.0f) {
+        app->clock.day_progress += 1.0f;
+    }
+    Vec3 join_pos = mmath_vec3(host_pos.x + 1.25f, host_pos.y + 0.02f, host_pos.z + 1.25f);
+    app->player.pos = join_pos;
+    app->player.render_pos = join_pos;
+    app->player.yaw = host_yaw + MMATH_PI;
+    app->spawn_point = join_pos;
+    app->has_spawn_point = true;
+    app->player_from_save = true;
+    world_set_block_change_callback(app->world, app_lan_block_changed, app);
+    LanRemotePlayer *host = app_lan_find_player(app, 0, true);
+    if (host != NULL) {
+        memcpy(host->username, host_name, name_len + 1);
+        host->pos = host_pos;
+        host->yaw = host_yaw;
+    }
+    snprintf(app->menu.error, sizeof(app->menu.error), "Connected to %s. Loading shared terrain...", host_name);
+    app_enter_state(app, GAME_STATE_LOADING);
+    return app->state == GAME_STATE_LOADING;
+}
+
+static void app_lan_handle_chat(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size < 5 || event->payload[0] != APP_LAN_MSG_CHAT) {
+        return;
+    }
+    size_t name_len = event->payload[1];
+    if (name_len < PROFILE_NAME_MIN_LEN || name_len > PROFILE_NAME_MAX_LEN || event->size < 4u + name_len) {
+        return;
+    }
+    size_t at = 2;
+    char sender[PROFILE_NAME_MAX_LEN + 1];
+    memcpy(sender, event->payload + at, name_len);
+    sender[name_len] = '\0';
+    at += name_len;
+    if (!profile_name_valid(sender) || event->size < at + 2u) {
+        return;
+    }
+    size_t message_len = app_net_read_u16(event->payload + at);
+    at += 2;
+    if (message_len == 0 || message_len > APP_CHAT_MAX_BYTES || event->size != at + message_len) {
+        return;
+    }
+    char message[APP_CHAT_MAX_BYTES + 1];
+    for (size_t i = 0; i < message_len; ++i) {
+        unsigned char c = event->payload[at + i];
+        if (c < 32 || c > 126) {
+            return;
+        }
+        message[i] = (char)c;
+    }
+    message[message_len] = '\0';
+    if (app->lan_host) {
+        LanRemotePlayer *remote = app_lan_find_player(app, event->peer_id, false);
+        if (remote == NULL || !profile_name_valid(remote->username)) {
+            return;
+        }
+        size_t size = 0;
+        uint8_t payload[LAN_MAX_FRAME_SIZE];
+        if (!app_chat_encode(payload, sizeof(payload), remote->username, message, message_len, &size) ||
+            !lan_send(app->lan, LAN_BROADCAST_PEER, payload, size)) {
+            return;
+        }
+        app_chat_add(app, remote->username, message);
+    } else {
+        app_chat_add(app, sender, message);
+    }
+}
+
+static int app_floor_div16(int value)
+{
+    int q = value / 16;
+    int r = value % 16;
+    return r < 0 ? q - 1 : q;
+}
+
+static void app_lan_handle_block(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size != 15 || event->payload[0] != APP_LAN_MSG_BLOCK ||
+        app->world == NULL) {
+        return;
+    }
+    if ((app->lan_host && app_lan_find_player(app, event->peer_id, false) == NULL) ||
+        (app->lan_client && event->peer_id != LAN_SERVER_PEER_ID)) {
+        return;
+    }
+    int32_t wx = (int32_t)app_net_read_u32(event->payload + 1);
+    int32_t wy = (int32_t)app_net_read_u32(event->payload + 5);
+    int32_t wz = (int32_t)app_net_read_u32(event->payload + 9);
+    uint16_t block_id = app_net_read_u16(event->payload + 13);
+    if (wx < -30000000 || wx > 30000000 || wz < -30000000 || wz > 30000000 ||
+        wy < 0 || wy >= CHUNK_Y || block_id >= BLOCK_COUNT) {
+        return;
+    }
+    if (app->lan_host) {
+        const LanRemotePlayer *sender = app_lan_find_player(app, event->peer_id, false);
+        if (sender == NULL) {
+            return;
+        }
+        float dx = (float)wx + 0.5f - sender->pos.x;
+        float dy = (float)wy + 0.5f - (sender->pos.y + 1.62f);
+        float dz = (float)wz + 0.5f - sender->pos.z;
+        float reach = (app->world->mode == WORLD_MODE_CREATIVE ? 5.0f : 4.5f) + 1.0f;
+        if (dx * dx + dy * dy + dz * dz > reach * reach) {
+            return;
+        }
+    }
+    int cx = app_floor_div16(wx);
+    int cz = app_floor_div16(wz);
+    if (world_get_chunk(app->world, cx, cz) == NULL) {
+        if (world_generate_chunk(app->world, cx, cz) != 0) {
+            return;
+        }
+    }
+    if (app->lan_host) {
+        /* Host is authoritative for accepting and relaying client edits. */
+        (void)world_set_block(app->world, wx, wy, wz, block_id);
+    } else if (app->lan_client) {
+        app->lan_applying_remote_block = true;
+        (void)world_set_block(app->world, wx, wy, wz, block_id);
+        app->lan_applying_remote_block = false;
+    }
+}
+
+static bool app_lan_parse_player(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size < 32 || event->payload[0] != APP_LAN_MSG_PLAYER) {
+        return false;
+    }
+    const uint8_t *p = event->payload;
+    uint32_t player_id = app_net_read_u32(p + 1);
+    Vec3 pos = mmath_vec3(app_net_read_f32(p + 5), app_net_read_f32(p + 9), app_net_read_f32(p + 13));
+    float yaw = app_net_read_f32(p + 17);
+    float pitch = app_net_read_f32(p + 21);
+    float phase = app_net_read_f32(p + 25);
+    uint8_t flags = p[29];
+    size_t name_len = p[30];
+    if (player_id == app->lan_local_player_id || !isfinite(pos.x) || !isfinite(pos.y) || !isfinite(pos.z) ||
+        !isfinite(yaw) || !isfinite(pitch) || !isfinite(phase) || pos.x < -30000000.0f ||
+        pos.x > 30000000.0f || pos.z < -30000000.0f || pos.z > 30000000.0f ||
+        pos.y < -64.0f || pos.y > 512.0f || name_len < PROFILE_NAME_MIN_LEN ||
+        name_len > PROFILE_NAME_MAX_LEN || event->size != 31u + name_len) {
+        return false;
+    }
+    char name[PROFILE_NAME_MAX_LEN + 1];
+    memcpy(name, p + 31, name_len);
+    name[name_len] = '\0';
+    if (!profile_name_valid(name)) {
+        return false;
+    }
+    if (app->lan_host) {
+        /* Ignore client-provided identity; bind the snapshot to its socket. */
+        player_id = event->peer_id;
+        LanRemotePlayer *remote = app_lan_find_player(app, player_id, false);
+        if (remote == NULL) {
+            return false;
+        }
+        memcpy(name, remote->username, sizeof(name));
+    }
+    LanRemotePlayer *remote = app_lan_find_player(app, player_id, true);
+    if (remote == NULL) {
+        return false;
+    }
+    memcpy(remote->username, name, strlen(name) + 1);
+    remote->pos = pos;
+    remote->yaw = yaw;
+    remote->pitch = pitch;
+    remote->walk_phase = phase;
+    remote->sneaking = (flags & 1u) != 0;
+    remote->moving = (flags & 2u) != 0;
+    if (app->lan_host) {
+        (void)app_lan_send_player(app, LAN_BROADCAST_PEER, player_id, name, pos, yaw, pitch,
+                                  phase, remote->sneaking, remote->moving);
+    }
+    return true;
+}
+
+static void app_lan_handle_welcome(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || !app->lan_client || !app->lan_join_pending) {
+        return;
+    }
+    if (!app_lan_open_client_world(app, event)) {
+        snprintf(app->menu.error, sizeof(app->menu.error),
+                 "Host sent invalid world data or the local copy could not be created.");
+        app_lan_disconnect(app);
+    }
+}
+
+static void app_lan_handle_message(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size == 0) {
+        return;
+    }
+    if (app->lan_host && event->payload[0] != APP_LAN_MSG_HELLO &&
+        app_lan_find_player(app, event->peer_id, false) == NULL) {
+        (void)lan_disconnect_peer(app->lan, event->peer_id);
+        return;
+    }
+    switch (event->payload[0]) {
+    case APP_LAN_MSG_HELLO: {
+        if (!app->lan_host) {
+            return;
+        }
+        if (event->size < 3 || event->payload[1] != APP_LAN_PROTOCOL_VERSION) {
+            (void)lan_disconnect_peer(app->lan, event->peer_id);
+            return;
+        }
+        size_t name_len = event->payload[2];
+        if (name_len < PROFILE_NAME_MIN_LEN || name_len > PROFILE_NAME_MAX_LEN || event->size != 3u + name_len) {
+            (void)lan_disconnect_peer(app->lan, event->peer_id);
+            return;
+        }
+        char name[PROFILE_NAME_MAX_LEN + 1];
+        memcpy(name, event->payload + 3, name_len);
+        name[name_len] = '\0';
+        if (!profile_name_valid(name)) {
+            (void)lan_disconnect_peer(app->lan, event->peer_id);
+            return;
+        }
+        if (app_lan_find_player(app, event->peer_id, false) != NULL) {
+            /* A peer may register exactly once; later HELLO frames must not
+             * replace the identity that was bound to its connection. */
+            (void)lan_disconnect_peer(app->lan, event->peer_id);
+            return;
+        }
+        LanRemotePlayer *remote = app_lan_find_player(app, event->peer_id, true);
+        if (remote == NULL) {
+            (void)lan_disconnect_peer(app->lan, event->peer_id);
+            return;
+        }
+        memcpy(remote->username, name, name_len + 1);
+        remote->pos = app->player.pos;
+        (void)app_lan_send_welcome(app, event->peer_id);
+        app_lan_send_current_players(app, event->peer_id);
+        app_chat_add(app, name, "joined the LAN world");
+        break;
+    }
+    case APP_LAN_MSG_WELCOME:
+        app_lan_handle_welcome(app, event);
+        break;
+    case APP_LAN_MSG_PLAYER:
+        (void)app_lan_parse_player(app, event);
+        break;
+    case APP_LAN_MSG_CHAT:
+        app_lan_handle_chat(app, event);
+        break;
+    case APP_LAN_MSG_BLOCK:
+        app_lan_handle_block(app, event);
+        break;
+    case APP_LAN_MSG_PLAYER_LEFT:
+        if (app->lan_client && event->size == 5) {
+            app_lan_remove_player(app, app_net_read_u32(event->payload + 1));
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static void app_lan_client_disconnected(AppContext *app)
+{
+    if (app == NULL) {
+        return;
+    }
+    bool was_joining = app->lan_join_pending;
+    if (was_joining) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not connect to that LAN world.");
+        app_lan_disconnect(app);
+        return;
+    }
+    app_lan_disconnect(app);
+    if (app->world_open) {
+        session_close_world(app, true);
+    }
+    snprintf(app->menu.error, sizeof(app->menu.error), "The LAN host disconnected.");
+    if (app->state == GAME_STATE_LOADING || app->state == GAME_STATE_PLAYING ||
+        app->state == GAME_STATE_PAUSED || app->state == GAME_STATE_INVENTORY ||
+        app->state == GAME_STATE_CRAFTING || app->state == GAME_STATE_DEAD) {
+        app_enter_state(app, GAME_STATE_MAIN_MENU);
+    }
+}
+
+static void app_lan_update(AppContext *app, double dt)
+{
+    if (app == NULL || app->lan == NULL) {
+        return;
+    }
+    LanEvent event;
+    while (lan_poll(app->lan, &event)) {
+        switch (event.type) {
+        case LAN_EVENT_PEER_CONNECTED:
+            if (app->lan_host) {
+                char peer_address[48];
+                if (!lan_peer_address(app->lan, event.peer_id, peer_address, sizeof(peer_address)) ||
+                    !lan_ipv4_is_local_endpoint(peer_address)) {
+                    (void)lan_disconnect_peer(app->lan, event.peer_id);
+                    break;
+                }
+            }
+            if (app->lan_client && event.peer_id == LAN_SERVER_PEER_ID) {
+                size_t name_len = strlen(app->username);
+                uint8_t hello[3 + PROFILE_NAME_MAX_LEN];
+                hello[0] = APP_LAN_MSG_HELLO;
+                hello[1] = APP_LAN_PROTOCOL_VERSION;
+                hello[2] = (uint8_t)name_len;
+                memcpy(hello + 3, app->username, name_len);
+                if (!lan_send(app->lan, LAN_SERVER_PEER_ID, hello, 3 + name_len)) {
+                    app_lan_client_disconnected(app);
+                }
+            }
+            break;
+        case LAN_EVENT_PEER_DISCONNECTED:
+            if (app->lan_host) {
+                app_lan_remove_player(app, event.peer_id);
+                uint8_t left[5] = {APP_LAN_MSG_PLAYER_LEFT, 0, 0, 0, 0};
+                app_net_write_u32(left + 1, event.peer_id);
+                (void)lan_send(app->lan, LAN_BROADCAST_PEER, left, sizeof(left));
+            } else if (app->lan_client && event.peer_id == LAN_SERVER_PEER_ID) {
+                app_lan_client_disconnected(app);
+                break;
+            }
+            break;
+        case LAN_EVENT_CONNECT_FAILED:
+            if (app->lan_client) {
+                app_lan_client_disconnected(app);
+            }
+            break;
+        case LAN_EVENT_MESSAGE:
+            app_lan_handle_message(app, &event);
+            break;
+        case LAN_EVENT_NONE:
+        default:
+            break;
+        }
+        if (app->lan == NULL) {
+            return;
+        }
+    }
+    if (app->lan_join_pending) {
+        app->lan_connect_timer += dt;
+        if (app->lan_connect_timer > 10.0) {
+            app_lan_client_disconnected(app);
+            return;
+        }
+    }
+    if (app->lan_host && lan_peer_count(app->lan) == 0) {
+        app->lan_block_queue_head = 0;
+        app->lan_block_queue_count = 0;
+        app->lan_block_queue_warned = false;
+    } else if ((app->lan_host || app->lan_client) && lan_is_connected(app->lan)) {
+        uint32_t target = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
+        while (app->lan_block_queue_count > 0) {
+            uint8_t *payload = app->lan_block_queue[app->lan_block_queue_head];
+            if (!lan_send(app->lan, target, payload, 15)) {
+                break;
+            }
+            app->lan_block_queue_head = (app->lan_block_queue_head + 1u) % MINEC_LAN_BLOCK_QUEUE;
+            app->lan_block_queue_count--;
+        }
+        if (app->lan_block_queue_count == 0) {
+            app->lan_block_queue_warned = false;
+        }
+    }
+    if (!app->world_open || app->state != GAME_STATE_PLAYING || !lan_is_connected(app->lan)) {
+        return;
+    }
+    app->lan_player_send_timer += dt;
+    if (app->lan_player_send_timer < 0.10) {
+        return;
+    }
+    app->lan_player_send_timer = fmod(app->lan_player_send_timer, 0.10);
+    uint32_t target = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
+    (void)app_lan_send_player(app, target, app->lan_local_player_id, app->username,
+                              app->player.render_pos, app->player.yaw, app->player.pitch,
+                              app->player.walk_phase, app->player.sneaking,
+                              sqrtf(app->player.vel.x * app->player.vel.x + app->player.vel.z * app->player.vel.z) > 0.15f);
+}
+
+static void app_chat_close(AppContext *app)
+{
+    if (app == NULL || !app->chat_open) {
+        return;
+    }
+    app->chat_open = false;
+    window_text_input(false);
+    window_set_relative_mouse(app->window, true);
+    window_clear_input_edges(app->window);
+    bool ml = window_is_mouse_down(MINEC_MOUSE_LEFT);
+    bool mr = window_is_mouse_down(MINEC_MOUSE_RIGHT);
+    app->prev_mouse_l = ml;
+    app->prev_mouse_r = mr;
+}
+
+static void app_chat_submit(AppContext *app)
+{
+    if (app == NULL) {
+        return;
+    }
+    size_t len = strlen(app->chat_input);
+    while (len > 0 && app->chat_input[len - 1] == ' ') {
+        app->chat_input[--len] = '\0';
+    }
+    if (len > 0) {
+        uint8_t payload[LAN_MAX_FRAME_SIZE];
+        size_t payload_len = 0;
+        if (app_chat_encode(payload, sizeof(payload), app->username, app->chat_input, len, &payload_len)) {
+            if (app->lan_host && app->lan != NULL && lan_peer_count(app->lan) > 0) {
+                app_chat_add(app, app->username, app->chat_input);
+                if (!lan_send(app->lan, LAN_BROADCAST_PEER, payload, payload_len)) {
+                    app_chat_add(app, "TerraCraft", "chat message could not be queued");
+                }
+            } else if (app->lan_client && app->lan != NULL && lan_is_connected(app->lan)) {
+                if (!lan_send(app->lan, LAN_SERVER_PEER_ID, payload, payload_len)) {
+                    app_chat_add(app, "TerraCraft", "chat message could not be queued");
+                }
+            } else {
+                app_chat_add(app, app->username, app->chat_input);
+            }
+        }
+    }
+    app->chat_input[0] = '\0';
+    app_chat_close(app);
+}
+
+static void app_chat_append_ascii(AppContext *app, const char *text)
+{
+    if (app == NULL || text == NULL) {
+        return;
+    }
+    size_t len = strlen(app->chat_input);
+    for (const unsigned char *p = (const unsigned char *)text; *p != '\0'; ++p) {
+        if (*p < 32 || *p > 126 || len >= APP_CHAT_MAX_BYTES) {
+            continue;
+        }
+        app->chat_input[len++] = (char)*p;
+    }
+    app->chat_input[len] = '\0';
+}
+
+static void app_chat_backspace(AppContext *app)
+{
+    if (app == NULL) {
+        return;
+    }
+    size_t len = strlen(app->chat_input);
+    if (len > 0) {
+        app->chat_input[len - 1] = '\0';
+    }
+}
+
+static void app_draw_chat(AppContext *app)
+{
+    if (app == NULL || app->renderer == NULL || (!app->chat_open && app->chat_line_count == 0)) {
+        return;
+    }
+    unsigned visible = app->chat_line_count < 6u ? app->chat_line_count : 6u;
+    float line_h = 20.0f;
+    float x = 12.0f;
+    float h = (float)(visible + (app->chat_open ? 1u : 0u)) * line_h + 12.0f;
+    float y = (float)app->height - h - 12.0f;
+    float rects[6 * 6];
+    size_t n = 0;
+    /* The UI quad helper format is x/y + RGBA, six vertices per rectangle. */
+    for (int v = 0; v < 6; ++v) {
+        static const int corner[6] = {0, 1, 2, 2, 1, 3};
+        int c = corner[v];
+        rects[n++] = x + ((c == 1 || c == 3) ? 720.0f : 0.0f);
+        rects[n++] = y + ((c >= 2) ? h : 0.0f);
+        rects[n++] = 0.0f;
+        rects[n++] = 0.0f;
+        rects[n++] = 0.0f;
+        rects[n++] = 0.64f;
+    }
+    renderer_draw_rects(app->renderer, app->width, app->height, rects, 6);
+    unsigned start = (app->chat_line_head + 8u - visible) % 8u;
+    for (unsigned i = 0; i < visible; ++i) {
+        unsigned index = (start + i) % 8u;
+        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)i * line_h,
+                           1.0f, 1.0f, 1.0f, 1.0f, 1.0f, app->chat_lines[index]);
+    }
+    if (app->chat_open) {
+        char prompt[APP_CHAT_MAX_BYTES + 8];
+        snprintf(prompt, sizeof(prompt), "> %s_", app->chat_input);
+        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)visible * line_h,
+                           1.0f, 1.0f, 0.90f, 0.70f, 1.0f, prompt);
+    }
 }
 
 /* Creative block actions are instantaneous, but still run on a world tick. */
@@ -1230,7 +2155,7 @@ static void app_tick_playing(AppContext *app, float dt)
     if (!game_state_ticks_world(app->state) || !app->world_open) {
         return;
     }
-    bool controllable = app->state == GAME_STATE_PLAYING;
+    bool controllable = app->state == GAME_STATE_PLAYING && !app->chat_open;
 
     time_system_update(&app->clock, dt);
     world_water_tick(app->world, dt);
@@ -1493,6 +2418,28 @@ static void app_tick_playing(AppContext *app, float dt)
 
 static void app_prepare_world_render(AppContext *app);
 
+static void app_draw_remote_players(AppContext *app, float aspect)
+{
+    if (app == NULL || app->renderer == NULL || app->camera == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
+        const LanRemotePlayer *remote = &app->lan_players[i];
+        if (!remote->active || remote->username[0] == '\0') {
+            continue;
+        }
+        Player avatar = app->player;
+        avatar.pos = remote->pos;
+        avatar.render_pos = remote->pos;
+        avatar.yaw = remote->yaw;
+        avatar.pitch = remote->pitch;
+        avatar.walk_phase = remote->walk_phase;
+        avatar.sneaking = remote->sneaking;
+        renderer_draw_player(app->renderer, app->camera, aspect, &app->clock, &avatar,
+                             remote->moving ? 0.9f : 0.0f);
+    }
+}
+
 /* Refresh streamed geometry once and draw the current play presentation. */
 static void app_render_playing(AppContext *app)
 {
@@ -1506,6 +2453,7 @@ static void app_render_playing(AppContext *app)
     renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                        (float)(app->last_frame_time - app->start_time), &app->mobs_drawn, &app->mobs_culled);
     app_draw_player_third(app, aspect);
+    app_draw_remote_players(app, aspect);
     renderer_draw_projectiles(app->renderer, &app->projectiles, app->camera, aspect, &app->clock,
                               &app->arrows_drawn);
     renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);
@@ -1553,6 +2501,7 @@ static void app_render_playing(AppContext *app)
     renderer_draw_hud(app->renderer, app->width, app->height, app->player.inv.slots, app->player.hotbar_sel,
                       app->player.health, app->player.max_health, app->player.hunger, app->player.max_hunger,
                       vitals, eat_frac, bow_frac, app->hurt_flash);
+    app_draw_chat(app);
     if (app->show_debug) {
         screens_draw_debug(app);
     }
@@ -1670,6 +2619,7 @@ int app_run(AppContext *app)
                 /* Window-close with a held cursor or gridded ingredients:
                  * resolve first so the stacks land in the inventory (saved
                  * below), not in limbo. */
+                app_lan_disconnect(app);
                 if (app->world_open) {
                     app_resolve_cursor(app);
                     app_resolve_crafting(app);
@@ -1707,12 +2657,37 @@ int app_run(AppContext *app)
                 continue;
             }
         }
+        app_lan_update(app, frame_elapsed);
         if (!app->running || app->state == GAME_STATE_QUIT) {
             break;
         }
+        if (app->state == GAME_STATE_PLAYING && !app->chat_open &&
+            window_take_key_pressed(app->window, SDL_SCANCODE_T)) {
+            app->chat_open = true;
+            app->chat_input[0] = '\0';
+            window_set_relative_mouse(app->window, false);
+            window_text_input(true);
+            window_clear_input_edges(app->window);
+        }
+        if (app->chat_open) {
+            app_chat_append_ascii(app, text_accum);
+            text_accum[0] = '\0';
+            bool enter = window_take_key_pressed(app->window, SDL_SCANCODE_RETURN) ||
+                         window_take_key_pressed(app->window, SDL_SCANCODE_KP_ENTER);
+            bool backspace = window_take_key_pressed(app->window, SDL_SCANCODE_BACKSPACE);
+            if (esc_edge) {
+                app->chat_input[0] = '\0';
+                app_chat_close(app);
+            } else if (enter) {
+                app_chat_submit(app);
+            } else if (backspace) {
+                app_chat_backspace(app);
+            }
+            esc_edge = false;
+        }
         ui.key_escape = esc_edge;
         /* Central ESC routing for live states (menus handle their own Back). */
-        if (esc_edge && app->state == GAME_STATE_PLAYING) {
+        if (esc_edge && app->state == GAME_STATE_PLAYING && !app->chat_open) {
             app_enter_state(app, GAME_STATE_PAUSED);
             ui.key_escape = false;
         } else if (esc_edge && app->state == GAME_STATE_PAUSED) {
@@ -1735,14 +2710,14 @@ int app_run(AppContext *app)
          * polling first keeps hotbar cycling alive (menus ignore wheel).
          * E may leave PLAYING here; the switch below then draws the new
          * state instead of simulating a stale one. */
-        if (app->state == GAME_STATE_PLAYING) {
+        if (app->state == GAME_STATE_PLAYING && !app->chat_open) {
             app_poll_discrete_input(app);
         }
 
         /* Look remains responsive at render rate, while world actions use
          * latched input edges and held movement is sampled on fixed ticks.
          */
-        if (app->state == GAME_STATE_PLAYING) {
+        if (app->state == GAME_STATE_PLAYING && !app->chat_open) {
             int mdx = 0;
             int mdy = 0;
             window_get_relative_motion(&mdx, &mdy);
@@ -1768,7 +2743,9 @@ int app_run(AppContext *app)
         app_build_uiframe(app, &ui, text_accum);
 
         switch (app->state) {
+        case GAME_STATE_PROFILE:
         case GAME_STATE_MAIN_MENU:
+        case GAME_STATE_LAN_MENU:
         case GAME_STATE_WORLD_SELECT:
         case GAME_STATE_CREATE_WORLD:
         case GAME_STATE_SETTINGS:
@@ -1795,6 +2772,7 @@ int app_run(AppContext *app)
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                                    (float)(app->last_frame_time - app->start_time), NULL, NULL);
                 app_draw_player_third(app, aspect);
+                app_draw_remote_players(app, aspect);
                 renderer_draw_projectiles(app->renderer, &app->projectiles, app->camera, aspect,
                                           &app->clock, NULL);
                 renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);
@@ -1828,6 +2806,7 @@ int app_run(AppContext *app)
                 renderer_draw_mobs(app->renderer, &app->mobs, app->camera, aspect, &app->clock,
                                    (float)(app->last_frame_time - app->start_time), NULL, NULL);
                 app_draw_player_third(app, aspect);
+                app_draw_remote_players(app, aspect);
                 renderer_draw_projectiles(app->renderer, &app->projectiles, app->camera, aspect,
                                           &app->clock, NULL);
                 renderer_draw_entities(app->renderer, &app->entities, app->camera, aspect, &app->clock);
@@ -1932,6 +2911,9 @@ void app_shutdown(AppContext *app)
         return;
     }
     app->running = false;
+    app_lan_disconnect(app);
+    lan_destroy(app->lan);
+    app->lan = NULL;
     if (app->world_open) {
         session_close_world(app, true);
     }

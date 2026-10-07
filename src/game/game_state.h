@@ -13,7 +13,9 @@
  * freeze rules as INVENTORY); DEAD freezes on the death screen.
  */
 typedef enum GameState {
-    GAME_STATE_MAIN_MENU = 0,   /* Title screen (entry point). */
+    GAME_STATE_PROFILE = 0,     /* Required local username setup. */
+    GAME_STATE_MAIN_MENU,       /* Title screen (entry point). */
+    GAME_STATE_LAN_MENU,        /* Join a nearby hosted world. */
     GAME_STATE_WORLD_SELECT,    /* Saved-world list. */
     GAME_STATE_CREATE_WORLD,    /* New-world form. */
     GAME_STATE_LOADING,         /* Staged world generation. */
@@ -36,12 +38,9 @@ typedef enum GameState {
 const char *game_state_name(GameState s);
 
 /* Check whether a direct transition is legal.
- * Legal edges: MENU->{SELECT,SETTINGS,QUIT}, SELECT->{PLAYING(via load),
- * CREATE,MENU}, CREATE->{LOADING,MENU(SELECT)}, LOADING->PLAYING,
- * PLAYING->{PAUSED,INVENTORY,CRAFTING,DEAD,QUIT}, INVENTORY->PLAYING,
- * CRAFTING->PLAYING, PAUSED->{PLAYING,SETTINGS,MENU},
- * DEAD->{PLAYING(respawn),MENU}, SETTINGS->return. QUIT accepts nothing
- * (terminal). Else rejected.
+ * Legal edges include the required PROFILE gate, title/LAN menu flows,
+ * world loading, in-world overlays, and disconnect-to-title recovery.
+ * QUIT accepts nothing (terminal). Else rejected.
  *
  * Args:
  *   from: current state.

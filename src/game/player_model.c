@@ -12,7 +12,7 @@ static const MobModelPart PLAYER_PARTS[] = {
     /* Torso. */
     {{-0.25f, 0.675f, -0.125f}, {0.50f, 0.675f, 0.25f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
     /* Head. */
-    {{-0.25f, 1.35f, -0.225f}, {0.50f, 0.45f, 0.45f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
+    {{-0.25f, 1.35f, -0.225f}, {0.50f, 0.45f, 0.45f}, TILE_PLAYER_SKIN, -1, 1.35f, MOB_ANIM_NONE},
     /* Arm L (model's left = +X when facing +Z; mirrors arm R faces). */
     {{0.25f, 0.675f, -0.125f}, {0.25f, 0.675f, 0.25f}, TILE_PLAYER_SLEEVE, -1, 1.35f, MOB_ANIM_LEG},
     /* Arm R. */

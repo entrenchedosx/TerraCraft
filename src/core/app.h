@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "core/settings.h"
+#include "core/profile.h"
 #include "audio/audio.h"
 #include "game/entity.h"
 #include "game/mob.h"
@@ -33,6 +34,22 @@ typedef struct GlContext GlContext;
 typedef struct Renderer Renderer;
 typedef struct Camera Camera;
 typedef struct World World;
+typedef struct LanSession LanSession;
+
+#define MINEC_LAN_MAX_PLAYERS 8
+#define MINEC_LAN_BLOCK_QUEUE 4096
+
+typedef struct LanRemotePlayer {
+    bool active;
+    uint32_t peer_id;
+    char username[PROFILE_NAME_MAX_LEN + 1];
+    Vec3 pos;
+    float yaw;
+    float pitch;
+    float walk_phase;
+    bool sneaking;
+    bool moving;
+} LanRemotePlayer;
 
 /* Default world seed when no session overrides it (legacy constant). */
 #define MINEC_DEFAULT_SEED 1337L
@@ -55,6 +72,8 @@ typedef struct World World;
 
 /* Menu/screen scratch state (all owned here, no globals). */
 typedef struct MenuData {
+    char profile_buf[PROFILE_NAME_MAX_LEN + 1]; /* First-run account name. */
+    char lan_address_buf[64]; /* IPv4 address of the LAN host. */
     char name_buf[64];      /* Create-world name field. */
     char seed_buf[32];      /* Create-world seed field. */
     int create_mode;        /* 0 survival, 1 creative. */
@@ -111,6 +130,26 @@ typedef struct AppContext {
     bool has_spawn_point; /* True once a spawn was recorded. */
     bool player_from_save; /* True when player pos came from metadata. */
     char world_dir[512];  /* Active session directory ("" = none). */
+    char username[PROFILE_NAME_MAX_LEN + 1]; /* Persistent local profile. */
+    LanSession *lan;     /* Optional direct LAN host/client transport. */
+    LanRemotePlayer lan_players[MINEC_LAN_MAX_PLAYERS];
+    unsigned lan_player_count;
+    bool lan_client;      /* True while this session is a LAN client. */
+    bool lan_host;        /* True while this process hosts a LAN world. */
+    bool lan_join_pending; /* Connection accepted, waiting for world hello. */
+    bool lan_applying_remote_block; /* Suppress echo while applying host changes. */
+    uint32_t lan_local_player_id; /* Host is 0; clients receive an ID in WELCOME. */
+    double lan_player_send_timer; /* Snapshot cadence for remote avatars. */
+    double lan_connect_timer; /* Timeout for pending LAN joins. */
+    uint8_t lan_block_queue[MINEC_LAN_BLOCK_QUEUE][15]; /* Bounded reliable edit backlog. */
+    size_t lan_block_queue_head;
+    size_t lan_block_queue_count;
+    bool lan_block_queue_warned;
+    bool chat_open;       /* Chat owns keyboard/mouse input while true. */
+    char chat_input[192]; /* UTF-8 outgoing chat draft. */
+    char chat_lines[8][224]; /* Recent local/LAN chat history. */
+    unsigned chat_line_count;
+    unsigned chat_line_head;
     bool world_open;      /* True while a session is open. */
     bool player_ready;    /* True once the player was spawned. */
     bool streamer_ready;  /* True once streamer_init succeeded. */
@@ -245,3 +284,13 @@ void app_resolve_cursor(AppContext *app);
  *   app: context (must not be NULL).
  */
 void app_resolve_crafting(AppContext *app);
+
+/* Save the required local profile and leave the first-run username screen.
+ * A blank field receives a generated two-word/four-digit name. */
+bool app_commit_profile(AppContext *app);
+
+/* LAN actions used by the menus. Hosting uses the already-open world; joining
+ * completes asynchronously when the host sends its world metadata. */
+bool app_lan_host(AppContext *app);
+bool app_lan_join(AppContext *app, const char *address);
+void app_lan_disconnect(AppContext *app);

@@ -161,6 +161,11 @@ int test_settings_roundtrip(void);
 int test_seed_parse(void);
 int test_bmp_parse(void);
 
+/* Local profile tests (defined in test_profile.c). */
+int test_profile_name_validation(void);
+int test_profile_generated_name(void);
+int test_profile_storage(void);
+
 /* UI/state/font tests (defined in test_ui.c). */
 int test_game_states(void);
 int test_font_basic(void);
@@ -263,6 +268,10 @@ int test_bow_policy(void);
 int test_bow_slot_switch(void);
 int test_skeleton_ai(void);
 int test_skeleton_drops_save(void);
+
+/* LAN transport tests (defined in test_lan.c). */
+int test_lan_loopback_transport(void);
+int test_lan_local_address_filter(void);
 
 /* Atlas tile tests (defined in test_texture.c). */
 int test_atlas_mcfaces(void);

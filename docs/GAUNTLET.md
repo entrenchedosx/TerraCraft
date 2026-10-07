@@ -2,12 +2,14 @@
 
 ## What this means here
 
-The [Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) is a product
-iteration method: set a clear quality bar, make a concrete result, have an
-independent critic inspect the result, close the largest gap, and repeat.
-The loop stops when the stated bar is met or a remaining dependency needs
-human input. The source describes a general method, not a software test
-standard or a TerraCraft-specific recipe.
+The [Gauntlet Loop](https://thrixel.com/learn/gauntlet-loop) is an iterative
+quality method: define a bar, produce a result, have an independent critic
+compare it with that bar, fix the largest gap, and repeat. Implementations
+can bound the review cycles and stop when the bar is met or when a human
+decision/playtest is needed. This is a general method, not a formal software
+test standard or a TerraCraft-specific recipe. A related open implementation
+uses explicit worker/reviewer cycles and a bounded iteration limit:
+[gauntlet-loop on GitHub](https://github.com/kamtS/gauntlet-loop).
 
 TerraCraft applies that idea to a fidelity pass. Each round uses evidence a
 reviewer can check: source locations, a working build, automated test
@@ -269,10 +271,51 @@ triaged against the user's report.
   0 failures. Live game visual verification remains outstanding, so arm/cow
   appearance and terrain quality are not marked visually verified.
 
+### Round 9 — F5 head pivot, profiles, and LAN play
+
+- Corrected the third-person head's pivot to the neck hinge at 1.35 blocks;
+  a focused model regression checks the pivot value. The player screenshot
+  that motivated this pass showed the camera looking down from overhead, but
+  a new running-game capture is still needed to verify the rendered pose.
+- Added a required first-run username screen. Names are validated and saved
+  locally; an empty field generates two random words and a four-digit suffix.
+- Added direct TCP LAN hosting from the pause screen, IPv4 joining from the
+  title menu, chat on `T`, and replication for player snapshots, chat, and
+  block changes made while peers are connected. The host remains the world
+  authority; there is no dedicated or internet server.
+- Joining clients generate matching terrain from the host seed/version and
+  keep a local save copy. This round does not send pre-existing block edits,
+  mobs, dropped items, inventories, or other persistent entity state to a new
+  client. The LAN scope and setup steps are recorded in
+  `docs/LAN_MULTIPLAYER.md`.
+- An independent code review found that an empty join address was reset to
+  loopback each frame, unregistered peers could submit block edits, and the
+  listener accepted routed public addresses. Those code issues are fixed:
+  the address field stays blank and validates IPv4, peers must complete one
+  username handshake before gameplay messages, and host-side peer addresses
+  must be local IPv4 ranges. Failed client-world setup also removes its
+  partial save.
+- The review also confirmed that this first LAN slice does not transfer
+  pre-existing world edits or persistent entity state. That larger snapshot
+  protocol remains explicitly tracked in the backlog and setup guide; clients
+  currently keep a generated local save copy, so repeated sessions may leave
+  additional `LAN - <host>` saves.
+- Host block reach uses client-reported positions, so it is a gameplay check
+  for honest clients, not an anti-cheat boundary. The setup guide limits LAN
+  play to trusted peers and records this constraint.
+- Debug and Release builds and CTest passed on Windows; the direct runner
+  reports 176 tests, 0 failures. The focused LAN transport tests cover
+  loopback connection, framing, payload limits, and disconnection. A
+  two-computer playtest and live F5 head check remain needed for visual and
+  end-to-end acceptance.
+- `AI_MEMORY` is ignored and excluded from the commit and push.
+
 ## Research
 
-- [Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) — original
-  description of the iterative quality method.
+- [Gauntlet Loop](https://thrixel.com/learn/gauntlet-loop) — description of
+  the iterative quality method.
+- [gauntlet-loop on GitHub](https://github.com/kamtS/gauntlet-loop) — an
+  implementation with bounded worker/reviewer cycles.
 - [Building effective agents](https://www.anthropic.com/research/building-effective-agents)
   — Anthropic's evaluator-optimizer pattern, a related research framing for
   iterating on a draft with separate evaluation feedback.

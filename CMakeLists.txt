@@ -67,8 +67,10 @@ set(TERRACRAFT_SOURCES
   src/core/path.c
   src/core/seed.c
   src/core/settings.c
+  src/core/profile.c
   src/core/bmp.c
   src/platform/window.c
+  src/platform/lan.c
   src/platform/gl_ctx.c
   src/render/renderer.c
   src/render/shader.c
@@ -135,7 +137,7 @@ endif()
 
 # Require OpenGL 3.3 availability note for MSVC (opengl32 ships with SDK).
 if(WIN32)
-  target_link_libraries(terracraft_core PUBLIC opengl32)
+  target_link_libraries(terracraft_core PUBLIC opengl32 ws2_32)
 endif()
 
 # --- Main executable ---------------------------------------------------------
@@ -186,6 +188,7 @@ add_executable(terracraft_tests
   tests/test_save.c
   tests/test_biome.c
   tests/test_settings.c
+  tests/test_profile.c
   tests/test_ui.c
   tests/test_gameplay.c
   tests/test_esave.c
@@ -194,6 +197,7 @@ add_executable(terracraft_tests
   tests/test_mob.c
   tests/test_path.c
   tests/test_projectile.c
+  tests/test_lan.c
 )
 target_link_libraries(terracraft_tests PRIVATE terracraft_core)
 

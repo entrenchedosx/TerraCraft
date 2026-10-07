@@ -1564,6 +1564,8 @@ int test_player_body_model(void)
     TEST_ASSERT_FLOAT_EQ(m->height, 1.8f, 1e-6f);
     /* Head sits on top, limbs pivot at shoulder/hip, feet at zero. */
     TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_HEAD].offset.y, 1.35f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_HEAD].pivot_y,
+                         m->parts[PLAYER_PART_HEAD].offset.y, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_ARM_L].pivot_y, 1.35f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_LEG_L].pivot_y, 0.675f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(m->parts[PLAYER_PART_LEG_R].offset.y, 0.0f, 1e-6f);

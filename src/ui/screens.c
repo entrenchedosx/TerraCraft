@@ -267,6 +267,13 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
         return;
     }
     y += SCR_BTN_H + SCR_GAP;
+    if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Multiplayer (LAN)", true)) {
+        app->menu.lan_address_buf[0] = '\0';
+        app->menu.error[0] = '\0';
+        app_enter_state(app, GAME_STATE_LAN_MENU);
+        return;
+    }
+    y += SCR_BTN_H + SCR_GAP;
     if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Settings", true)) {
         app->menu.settings_return = GAME_STATE_MAIN_MENU;
         settings_to_sliders(app);
@@ -280,8 +287,10 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
         return;
     }
     sflush(app, rects, &rn);
-    stext_c(app, "TerraCraft v0.9.1 - original engine, no Mojang assets", cx, (float)app->height - 30.0f,
-            SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    char subtitle[96];
+    snprintf(subtitle, sizeof(subtitle), "Playing as %s - LAN worlds are hosted by a player",
+             app->username[0] != '\0' ? app->username : "Player");
+    stext_c(app, subtitle, cx, (float)app->height - 30.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_QUIT);
     }
@@ -464,6 +473,86 @@ static bool sfield(AppContext *app, const UiFrame *ui, float *rects, size_t *rn,
     renderer_draw_text(app->renderer, x + 8.0f, fy + 9.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B,
                        1.0f, shown);
     return ui_text_field(ui, focused, buf, cap, x, fy, w, fh);
+}
+
+/* Required first-run profile screen. The user may choose a valid account
+ * name or leave it blank to receive the generated local name. */
+static void screen_profile(AppContext *app, const UiFrame *ui)
+{
+    float rects[SCR_MAX_RECT_VERTS * 6];
+    size_t rn = 0;
+    float cx = (float)app->width * 0.5f;
+    sbackground(app, rects, &rn);
+    float y = (float)app->height * 0.24f;
+    y = stitle(app, "Choose a Username", "This name appears to other players on your LAN", cx, y);
+    float fw = SCR_BTN_W + 80.0f;
+    float fx = cx - fw * 0.5f;
+    bool confirm = sfield(app, ui, rects, &rn, "Username (3-24 letters, numbers, underscore)",
+                          app->menu.profile_buf, sizeof(app->menu.profile_buf),
+                          &app->menu.name_focused, fx, y + 28.0f, fw);
+    y += 112.0f;
+    if (sbutton(app, ui, rects, &rn, fx, y, fw, SCR_BTN_H, "Continue", true) || confirm) {
+        (void)app_commit_profile(app);
+        return;
+    }
+    sflush(app, rects, &rn);
+    if (app->menu.error[0] != '\0') {
+        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 14.0f, SCR_TEXT_SCALE,
+                SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
+    } else if (app->menu.profile_buf[0] == '\0') {
+        stext_c(app, "Leave blank and TerraCraft will generate a name for you.", cx,
+                y + SCR_BTN_H + 14.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    }
+}
+
+/* Direct IPv4 LAN join. Hosting is offered from the in-world pause screen,
+ * so the host always owns the world being shared. */
+static void screen_lan_menu(AppContext *app, const UiFrame *ui)
+{
+    float rects[SCR_MAX_RECT_VERTS * 6];
+    size_t rn = 0;
+    float cx = (float)app->width * 0.5f;
+    sbackground(app, rects, &rn);
+    float y = (float)app->height * 0.22f;
+    y = stitle(app, "Join LAN World", NULL, cx, y);
+    float fw = SCR_BTN_W + 120.0f;
+    float fx = cx - fw * 0.5f;
+    stext_c(app, "Enter the host computer's local IPv4 address.", cx, y + 8.0f,
+            SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    stext_c(app, "Port 25566 - same Wi-Fi or wired network required.", cx, y + 34.0f,
+            SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    app->menu.name_focused = true;
+    bool confirm = sfield(app, ui, rects, &rn, "Host IPv4 (e.g. 192.168.1.20)", app->menu.lan_address_buf,
+                          sizeof(app->menu.lan_address_buf), &app->menu.name_focused,
+                          fx, y + 74.0f, fw);
+    float by = y + 144.0f;
+    bool join = sbutton(app, ui, rects, &rn, fx, by, (fw - 12.0f) * 0.5f, SCR_BTN_H,
+                        app->lan_join_pending ? "Connecting..." : "Join", !app->lan_join_pending);
+    bool back = sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, by,
+                        (fw - 12.0f) * 0.5f, SCR_BTN_H,
+                        app->lan_join_pending ? "Cancel" : "Back", true);
+    sflush(app, rects, &rn);
+    if (app->menu.error[0] != '\0') {
+        stext_c(app, app->menu.error, cx, by + SCR_BTN_H + 14.0f, SCR_SMALL_SCALE,
+                SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
+    }
+    if (join || (confirm && !app->lan_join_pending)) {
+        if (app_lan_join(app, app->menu.lan_address_buf)) {
+            app->lan_join_pending = true;
+            app->menu.error[0] = '\0';
+        } else if (app->menu.error[0] == '\0') {
+            snprintf(app->menu.error, sizeof(app->menu.error), "Could not start LAN connection.");
+        }
+    }
+    if (back || ui->key_escape) {
+        bool was_connecting = app->lan_join_pending;
+        app_lan_disconnect(app);
+        if (was_connecting) {
+            snprintf(app->menu.error, sizeof(app->menu.error), "LAN connection cancelled.");
+        } else {
+            app_enter_state(app, GAME_STATE_MAIN_MENU);
+        }
+    }
 }
 
 /* Create-world form: name, seed, mode, create/cancel. */
@@ -683,7 +772,7 @@ static void screen_paused(AppContext *app, const UiFrame *ui)
           0.0f, 0.55f);
     sflush(app, rects, &rn);
     float y = (float)app->height * 0.28f;
-    y = stitle(app, "Game Menu", NULL, cx, y);
+    y = stitle(app, "Game Menu", app->lan_host ? "LAN host active - TCP port 25566" : NULL, cx, y);
     float bx = cx - SCR_BTN_W * 0.5f;
     if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Resume Game", true)) {
         app_enter_state(app, GAME_STATE_PLAYING);
@@ -698,7 +787,19 @@ static void screen_paused(AppContext *app, const UiFrame *ui)
         return;
     }
     y += SCR_BTN_H + SCR_GAP;
+    const char *lan_label = app->lan_host ? "Close LAN World" : "Open to LAN";
+    bool lan_enabled = !app->lan_client;
+    if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, lan_label, lan_enabled)) {
+        if (app->lan_host) {
+            app_lan_disconnect(app);
+        } else if (app_lan_host(app)) {
+            app_enter_state(app, GAME_STATE_PLAYING);
+        }
+        return;
+    }
+    y += SCR_BTN_H + SCR_GAP;
     if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Save and Quit to Title", true)) {
+        app_lan_disconnect(app);
         app_resolve_cursor(app);
         app_resolve_crafting(app);
         session_close_world(app, true);
@@ -707,6 +808,13 @@ static void screen_paused(AppContext *app, const UiFrame *ui)
         return;
     }
     sflush(app, rects, &rn);
+    if (app->menu.error[0] != '\0') {
+        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 10.0f, SCR_SMALL_SCALE,
+                SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
+    } else if (app->lan_host) {
+        stext_c(app, "Share this computer's local IPv4 address with your friends.", cx,
+                y + SCR_BTN_H + 10.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    }
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_PLAYING);
     }
@@ -1299,6 +1407,7 @@ static void screen_dead(AppContext *app, const UiFrame *ui)
     if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Save and Quit to Title", true)) {
         /* Death already scattered inventory + grids as entities; resolve
          * any leftovers (kept cursor/grid slots) before the save. */
+        app_lan_disconnect(app);
         app_resolve_cursor(app);
         app_resolve_crafting(app);
         session_close_world(app, true);
@@ -1382,8 +1491,14 @@ void screens_update(AppContext *app, const UiFrame *ui)
         return;
     }
     switch (app->state) {
+    case GAME_STATE_PROFILE:
+        screen_profile(app, ui);
+        break;
     case GAME_STATE_MAIN_MENU:
         screen_main_menu(app, ui);
+        break;
+    case GAME_STATE_LAN_MENU:
+        screen_lan_menu(app, ui);
         break;
     case GAME_STATE_WORLD_SELECT:
         screen_world_select(app, ui);

@@ -273,7 +273,19 @@ bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id)
         }
     }
     world_water_notify_block_changed(w, wx, wy, wz);
+    if (w->block_change_callback != NULL) {
+        w->block_change_callback(w->block_change_context, wx, wy, wz, id);
+    }
     return true;
+}
+
+void world_set_block_change_callback(World *w, WorldBlockChangeCallback callback, void *context)
+{
+    if (w == NULL) {
+        return;
+    }
+    w->block_change_callback = callback;
+    w->block_change_context = callback != NULL ? context : NULL;
 }
 
 /* Legacy deterministic column height (frozen for tests).

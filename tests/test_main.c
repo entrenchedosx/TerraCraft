@@ -95,6 +95,9 @@ int main(void)
     RUN_TEST(test_settings_defaults);
     RUN_TEST(test_settings_parse);
     RUN_TEST(test_settings_roundtrip);
+    RUN_TEST(test_profile_name_validation);
+    RUN_TEST(test_profile_generated_name);
+    RUN_TEST(test_profile_storage);
     RUN_TEST(test_seed_parse);
     RUN_TEST(test_bmp_parse);
     RUN_TEST(test_game_states);
@@ -184,6 +187,8 @@ int main(void)
     RUN_TEST(test_bow_slot_switch);
     RUN_TEST(test_skeleton_ai);
     RUN_TEST(test_skeleton_drops_save);
+    RUN_TEST(test_lan_loopback_transport);
+    RUN_TEST(test_lan_local_address_filter);
 
     printf("==============================\n");
     printf("Ran %d test(s), %d failed\n", g_tests_run, g_tests_failed);

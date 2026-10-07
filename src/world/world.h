@@ -28,6 +28,7 @@
 /* Forward declaration (full type in chunk.h). */
 typedef struct Chunk Chunk;
 typedef struct WorldWaterUpdate WorldWaterUpdate;
+typedef void (*WorldBlockChangeCallback)(void *context, int wx, int wy, int wz, uint16_t block_id);
 
 /* World: owns up to WORLD_MAX_CHUNKS heap chunks. The dense array is the
  * iteration order; chunk_map mirrors it for O(1) lookup by chunk key.
@@ -51,6 +52,8 @@ typedef struct World {
     char name[WORLD_NAME_LEN];        /* Session display name. */
     int mode;                        /* Session game mode (WorldMode value). */
     char save_dir[512];              /* World directory ("" = no persistence). */
+    WorldBlockChangeCallback block_change_callback; /* Optional synchronous replication hook. */
+    void *block_change_context;       /* Borrowed callback context. */
 } World;
 
 /* Create an empty world (no chunks yet).
@@ -134,6 +137,10 @@ uint16_t world_get_block(const World *w, int wx, int wy, int wz);
  * chunk meshes are dirtied; nearby fluid cells are scheduled for reevaluation.
  * Returns true only when a loaded cell changed. */
 bool world_set_block(World *w, int wx, int wy, int wz, uint16_t id);
+
+/* Install an optional synchronous block-change hook. Passing NULL disables it.
+ * The callback runs after a changed block is stored and water is notified. */
+void world_set_block_change_callback(World *w, WorldBlockChangeCallback callback, void *context);
 
 /* Legacy M1 terrain height for a world (x,z) column (deterministic,
  * seed-aware). FROZEN for test determinism; new code prefers world_gen.

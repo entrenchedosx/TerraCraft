@@ -4,8 +4,12 @@
 const char *game_state_name(GameState s)
 {
     switch (s) {
+    case GAME_STATE_PROFILE:
+        return "PROFILE";
     case GAME_STATE_MAIN_MENU:
         return "MAIN_MENU";
+    case GAME_STATE_LAN_MENU:
+        return "LAN_MENU";
     case GAME_STATE_WORLD_SELECT:
         return "WORLD_SELECT";
     case GAME_STATE_CREATE_WORLD:
@@ -35,22 +39,29 @@ const char *game_state_name(GameState s)
 bool game_state_can_transition(GameState from, GameState to)
 {
     switch (from) {
+    case GAME_STATE_PROFILE:
+        return to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
     case GAME_STATE_MAIN_MENU:
-        return to == GAME_STATE_WORLD_SELECT || to == GAME_STATE_SETTINGS || to == GAME_STATE_QUIT;
+        return to == GAME_STATE_WORLD_SELECT || to == GAME_STATE_LAN_MENU ||
+               to == GAME_STATE_SETTINGS || to == GAME_STATE_QUIT;
+    case GAME_STATE_LAN_MENU:
+        return to == GAME_STATE_LOADING || to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
     case GAME_STATE_WORLD_SELECT:
         return to == GAME_STATE_CREATE_WORLD || to == GAME_STATE_LOADING || to == GAME_STATE_MAIN_MENU ||
                to == GAME_STATE_QUIT;
     case GAME_STATE_CREATE_WORLD:
         return to == GAME_STATE_LOADING || to == GAME_STATE_WORLD_SELECT || to == GAME_STATE_QUIT;
     case GAME_STATE_LOADING:
-        return to == GAME_STATE_PLAYING || to == GAME_STATE_QUIT;
+        return to == GAME_STATE_PLAYING || to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
     case GAME_STATE_PLAYING:
         return to == GAME_STATE_PAUSED || to == GAME_STATE_INVENTORY || to == GAME_STATE_CRAFTING ||
-               to == GAME_STATE_DEAD || to == GAME_STATE_QUIT;
+               to == GAME_STATE_DEAD || to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
     case GAME_STATE_INVENTORY:
-        return to == GAME_STATE_PLAYING || to == GAME_STATE_DEAD || to == GAME_STATE_QUIT;
+        return to == GAME_STATE_PLAYING || to == GAME_STATE_DEAD || to == GAME_STATE_MAIN_MENU ||
+               to == GAME_STATE_QUIT;
     case GAME_STATE_CRAFTING:
-        return to == GAME_STATE_PLAYING || to == GAME_STATE_DEAD || to == GAME_STATE_QUIT;
+        return to == GAME_STATE_PLAYING || to == GAME_STATE_DEAD || to == GAME_STATE_MAIN_MENU ||
+               to == GAME_STATE_QUIT;
     case GAME_STATE_DEAD:
         return to == GAME_STATE_PLAYING || to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
     case GAME_STATE_PAUSED:

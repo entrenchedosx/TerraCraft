@@ -18,12 +18,18 @@
 int test_game_states(void)
 {
     int failures = 0;
+    TEST_ASSERT(strcmp(game_state_name(GAME_STATE_PROFILE), "PROFILE") == 0);
     TEST_ASSERT(strcmp(game_state_name(GAME_STATE_MAIN_MENU), "MAIN_MENU") == 0);
     TEST_ASSERT(strcmp(game_state_name(GAME_STATE_QUIT), "QUIT") == 0);
     TEST_ASSERT(game_state_name((GameState)99) != NULL);
 
     /* Menu flow edges. */
+    TEST_ASSERT(game_state_can_transition(GAME_STATE_PROFILE, GAME_STATE_MAIN_MENU));
+    TEST_ASSERT(!game_state_can_transition(GAME_STATE_PROFILE, GAME_STATE_WORLD_SELECT));
     TEST_ASSERT(game_state_can_transition(GAME_STATE_MAIN_MENU, GAME_STATE_WORLD_SELECT) == true);
+    TEST_ASSERT(game_state_can_transition(GAME_STATE_MAIN_MENU, GAME_STATE_LAN_MENU));
+    TEST_ASSERT(game_state_can_transition(GAME_STATE_LAN_MENU, GAME_STATE_LOADING));
+    TEST_ASSERT(game_state_can_transition(GAME_STATE_LAN_MENU, GAME_STATE_MAIN_MENU));
     TEST_ASSERT(game_state_can_transition(GAME_STATE_MAIN_MENU, GAME_STATE_SETTINGS) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_MAIN_MENU, GAME_STATE_QUIT) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_MAIN_MENU, GAME_STATE_PLAYING) == false);
@@ -34,7 +40,7 @@ int test_game_states(void)
     TEST_ASSERT(game_state_can_transition(GAME_STATE_CREATE_WORLD, GAME_STATE_PLAYING) == false);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_LOADING, GAME_STATE_PLAYING) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_PLAYING, GAME_STATE_PAUSED) == true);
-    TEST_ASSERT(game_state_can_transition(GAME_STATE_PLAYING, GAME_STATE_MAIN_MENU) == false);
+    TEST_ASSERT(game_state_can_transition(GAME_STATE_PLAYING, GAME_STATE_MAIN_MENU) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_PAUSED, GAME_STATE_PLAYING) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_PAUSED, GAME_STATE_SETTINGS) == true);
     TEST_ASSERT(game_state_can_transition(GAME_STATE_PAUSED, GAME_STATE_MAIN_MENU) == true);

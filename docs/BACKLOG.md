@@ -118,12 +118,20 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 - [x] Add regression coverage for fluid simulation/rendering, chunk v1/v2 compatibility, and water movement.
 - [x] Round 7 verification: Debug and Release builds and CTest pass (167 tests); independent source review found no code-level blocker. Keep `AI_MEMORY` and `mcassets/` excluded from Git.
 - [x] Repose the first-person arm, rebuild the cow as a horizontal quadruped, and target/cull mobs using their rendered model bounds.
+
 - [x] Persist live mob type, position, yaw, and health in entity-save v3; keep v1/v2 readers and write on autosave, pause, and normal close.
 - [x] Add deterministic terrain profile 3 with warped continents, connected mountain ridges, foothills, and lowland channels while retaining profiles 1 and 2 for existing worlds.
 - [x] Round 8 automated verification: Debug and Release builds and CTest pass; the direct runner reports 171 tests with no failures. Independent review's model-culling finding is fixed and covered by a regression.
 - [ ] Manual game verification remains open for plant replacement/support, cow targeting and appearance, and first-person hand/swing at low and high FOV. The reported item texture issue also needs the item, screen path, and resource pack to reproduce.
 - [ ] Inspect the updated HUD, arm, terrain, and water in a running build; automated checks cannot verify visual quality or Minecraft parity.
 - Gauntlet procedure and round notes: `docs/GAUNTLET.md`.
+
+## LAN multiplayer and local player profile (current pass)
+- [x] Require a local username before the title menu; generate and persist a two-word name plus four digits when the field is blank.
+- [x] Add direct player-hosted LAN sessions on TCP port 25566, with up to eight clients and no dedicated or internet server.
+- [x] Replicate player movement, chat, and block changes made after players connect; retain a local save copy on each client.
+- [ ] Synchronize the host's pre-existing world edits and persistent entities/inventories to joining clients.
+- [ ] Verify the profile, two-computer LAN flow, chat, player models, and block updates in a live visual playtest.
 
 ## Milestone 8 — Entity Framework + Creatures + Combat (DONE)
 - [x] Living-entity framework (`game/mob.h/.c`): generational `EntityId` handles, fixed pool (64, zero per-frame alloc; no slot reuse within a tick), per-type definitions (size/HP/speed/drops/resists), shared AABB physics (gravity 32, axis-separated collision, 1-block auto step-up, ground-stick, fall damage via `survival_fall_damage`).
