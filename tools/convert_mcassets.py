@@ -138,6 +138,7 @@ for _i in range(1, 4):
     SOUNDS["cow_hurt%d" % _i] = "mob/cow/hurt%d.ogg" % _i
 # No dedicated cow death file in the set: a hurt moo doubles for death.
 SOUNDS["cow_die"] = "mob/cow/hurt1.ogg"
+SOUNDS["splash"] = "random/splash.ogg"
 
 
 # Biome tint bake (M7.1): these tiles ship grayscale and real Minecraft

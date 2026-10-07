@@ -436,3 +436,12 @@ void mob_tool_stats(ItemId held, float *out_damage, float *out_cooldown);
  *   dt: seconds to advance (> 0, already clamped).
  */
 void mob_physics_step(Mob *m, World *w, float dt);
+
+/* Fractional water contact for a mob's AABB (0 dry .. 1 submerged).
+ * Pure CPU, headless-testable; drives buoyancy and fall cushioning.
+ *
+ * Args:
+ *   m: mob (NULL reads as dry).
+ *   w: world (NULL reads as dry).
+ */
+float mob_water_contact(const Mob *m, const World *w);

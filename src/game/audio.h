@@ -31,5 +31,6 @@ typedef enum AudioEvent {
     AUDIO_BOW_DRAW,    /* Bow draw started (M9 backend). */
     AUDIO_BOW_FIRE,    /* Arrow released, player or skeleton (M9 backend). */
     AUDIO_ARROW_STICK, /* Arrow embedded in terrain (M9 backend). */
+    AUDIO_SPLASH,      /* Water entry splash (synth fallback, converted splash). */
     AUDIO_EVENT_COUNT  /* Sentinel: number of events (keep last). */
 } AudioEvent;

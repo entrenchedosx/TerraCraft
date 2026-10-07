@@ -144,6 +144,26 @@ void player_add_look(Player *p, float dx, float dy, float sensitivity);
  */
 bool player_aabb_solid(const World *w, Vec3 mn, Vec3 mx);
 
+/* Fractional water contact for the player's AABB (0 dry .. 1 submerged).
+ * Flow states count only their filled height, so wading reads smaller
+ * than full submersion. Pure CPU, headless-testable.
+ *
+ * Args:
+ *   w: world (NULL reads as dry).
+ *   p: player (NULL reads as dry).
+ *
+ * Returns: contact fraction (0 on bad args/dimensions).
+ */
+float player_water_contact(const World *w, const Player *p);
+
+/* True when the player's eye cell holds water (underwater rendering).
+ *
+ * Args:
+ *   w: world (NULL reads as false).
+ *   p: player (NULL reads as false).
+ */
+bool player_eye_in_water(const World *w, const Player *p);
+
 /* Advance the player by dt seconds using fixed 1/60 s substeps.
  * Flying: velocity set directly from input (incl. vertical), no gravity,
  * no collision (creative no-clip). Walking: horizontal velocity set from

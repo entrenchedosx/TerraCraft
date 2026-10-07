@@ -2332,6 +2332,19 @@ static void app_tick_playing(AppContext *app, float dt)
         app->player.walk_speed = saved_walk;
         app->player.sprint_speed = saved_sprint;
     }
+    /* Splashdown: dry-to-wet edge while falling reads as a real entry
+     * (particles + converted splash sound, synth fallback). */
+    {
+        float contact = player_water_contact(app->world, &app->player);
+        if (app->water_contact_prev <= 0.05f && contact > 0.4f && app->player.vel.y < -3.0f) {
+            int bx = (int)floorf(app->player.pos.x);
+            int by = (int)floorf(app->player.pos.y + 1.0f);
+            int bz = (int)floorf(app->player.pos.z);
+            particle_burst_block(&app->particles, (uint16_t)BLOCK_WATER, bx, by, bz, 14);
+            audio_play(&app->audio, AUDIO_SPLASH);
+        }
+        app->water_contact_prev = contact;
+    }
     bool creative = survival_is_creative(&app->player);
 
     /* Activity strain (survival only): sprinting while moving and jump
@@ -2392,12 +2405,15 @@ static void app_tick_playing(AppContext *app, float dt)
         app->step_dist = 0.0f;
     }
 
-    /* Fall damage (survival, non-flying): consume the landing report. */
+    /* Fall damage (survival, non-flying): consume the landing report.
+     * Water cushions the landing exactly like Minecraft: any real
+     * contact with water at touchdown forgives the fall. */
     if (!survival_is_creative(&app->player) && !app->player.flying && app->player.last_fall >= 0.0f) {
         float dist = app->player.last_fall;
         app->player.last_fall = -1.0f;
         player_anim_notify_landed(&app->panim, dist);
-        float dmg = survival_fall_damage(dist);
+        bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
+        float dmg = splashed ? 0.0f : survival_fall_damage(dist);
         if (dmg > 0.0f) {
             survival_damage_player(&app->player, dmg);
             player_anim_notify_hurt(&app->panim);
@@ -2522,7 +2538,8 @@ static void app_tick_playing(AppContext *app, float dt)
     if (app->player.mine_active) {
         app->mine_fx_t += dt;
         if (app->mine_fx_t >= 0.15f) {
-            app->mine_fx_t = 0.0f;
+    app->mine_fx_t = 0.0f;
+    app->water_contact_prev = 0.0f;
             particle_burst_block(&app->particles, app->player.mine_block, app->player.mine_bx,
                                  app->player.mine_by, app->player.mine_bz, 1);
         }
@@ -2725,6 +2742,9 @@ static void app_prepare_world_render(AppContext *app)
         }
     }
     app_position_camera(app);
+    /* Dense blue fog while the eye is submerged. */
+    renderer_set_underwater(app->renderer,
+                            player_eye_in_water(app->world, &app->player));
     streamer_update(&app->streamer, app->player.pos, MINEC_STREAM_BUDGET);
     renderer_prune_world(app->renderer, app->world);
     renderer_refresh_world(app->renderer, app->world);

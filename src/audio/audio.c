@@ -270,6 +270,13 @@ static int synth_event(AudioEvent ev, int16_t **out_pcm, size_t *out_frames)
             synth_layer_tone(pcm, 0, frames, 300.0, 180.0, 0.5f, false);
         }
         break;
+    case AUDIO_SPLASH:
+        pcm = synth_buffer(0.35, &frames);
+        if (pcm != NULL) {
+            synth_noise(pcm, frames, 0.8f, 0.25f, 0x57EA50u);
+            synth_layer_tone(pcm, 0, frames, 420.0, 140.0, 0.5f, false);
+        }
+        break;
     default:
         break;
     }
@@ -341,6 +348,8 @@ const char *audio_event_stem(AudioEvent ev)
         return "bow_fire";
     case AUDIO_ARROW_STICK:
         return "arrow_stick";
+    case AUDIO_SPLASH:
+        return "splash";
     default:
         return NULL;
     }
@@ -779,6 +788,7 @@ static const char *MC_SIMPLE_EAT[] = {"eat1", "eat2", "eat3", NULL};
 static const char *MC_SIMPLE_CRAFT[] = {"craft", NULL};
 static const char *MC_SIMPLE_COW_HURT[] = {"cow_hurt1", "cow_hurt2", "cow_hurt3", NULL};
 static const char *MC_SIMPLE_COW_DIE[] = {"cow_die", NULL};
+static const char *MC_SIMPLE_SPLASH[] = {"splash", NULL};
 
 /* Load owner-converted WAVs from a directory into one set (up to 4
  * variants, in list order). Returns variants loaded (0 keeps fallback).
@@ -844,7 +854,7 @@ int audio_load_mcassets_from(AudioSystem *sys, const char *dir)
         {AUDIO_PLAYER_DIE, MC_SIMPLE_DIE},     {AUDIO_UI_CLICK, MC_SIMPLE_CLICK},
         {AUDIO_TOOL_BREAK, MC_SIMPLE_TOOL_BREAK}, {AUDIO_EAT, MC_SIMPLE_EAT},
         {AUDIO_CRAFT, MC_SIMPLE_CRAFT},         {AUDIO_COW_HURT, MC_SIMPLE_COW_HURT},
-        {AUDIO_COW_DIE, MC_SIMPLE_COW_DIE},
+        {AUDIO_COW_DIE, MC_SIMPLE_COW_DIE}, {AUDIO_SPLASH, MC_SIMPLE_SPLASH},
     };
     for (size_t i = 0; i < sizeof(simple) / sizeof(simple[0]); ++i) {
         total += audio_load_set_from_dir(&sys->sets[simple[i].ev], dir, simple[i].names);

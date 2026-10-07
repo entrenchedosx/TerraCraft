@@ -126,6 +126,7 @@ typedef struct AppContext {
     ProjectilePool projectiles; /* Arrows in flight/embed (bounded, M9; never saved). */
     ParticlePool particles; /* M7 feedback particles (bounded pool). */
     float mine_fx_t;      /* Seconds since last mining impact puff. */
+    float water_contact_prev; /* Player water contact last tick (splash edge). */
     double arm_swing_started; /* Start time of the current first-person punch. */
     float arm_swing_repeat_t; /* Repeat gate for held mining/attacking. */
     bool arm_swing_active; /* A first-person swing has been triggered. */

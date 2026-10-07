@@ -20,6 +20,7 @@
 
 /* Exponential fog density (1/m): R=4 fades distant chunks into the sky. */
 #define RENDERER_FOG_DENSITY 0.014f
+#define RENDERER_UNDERWATER_FOG_DENSITY 0.16f
 
 /* Chunk remeshes per renderer_refresh_world call (frame pacing: a full
  * forest view queues a dozen dirty meshes at once; uncapped catch-up
@@ -102,6 +103,12 @@ void renderer_set_viewport(Renderer *r, int width, int height);
  *   r: renderer (must not be NULL).
  */
 void renderer_clear(Renderer *r);
+
+/* Underwater rendering flag (dense blue fog while the eye is submerged).
+ * NULL-safe on set; NULL reads as false.
+ */
+void renderer_set_underwater(Renderer *r, bool underwater);
+bool renderer_is_underwater(const Renderer *r);
 
 /* Rebuild GPU meshes for dirty chunks (mesher + upload) with phase timing.
  * Chunks already up to date are skipped. Logs per-chunk mesh stats.

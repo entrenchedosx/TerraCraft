@@ -90,8 +90,9 @@ Optional WAV overrides use these event names:
 break.wav       place.wav       pickup.wav       hurt.wav
 die.wav         click.wav       tool_break.wav   eat.wav
 craft.wav       step_stone.wav  step_dirt.wav    step_wood.wav
-step_sand.wav   mob_hurt.wav    mob_die.wav      bow_draw.wav
-bow_fire.wav    arrow_stick.wav
+step_sand.wav   mob_hurt.wav    mob_die.wav      cow_hurt.wav
+cow_die.wav     bow_draw.wav    bow_fire.wav     arrow_stick.wav
+splash.wav
 ```
 
 Each pack sound replaces that event. Break, place, and step events use the

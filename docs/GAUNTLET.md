@@ -385,6 +385,23 @@ triaged against the user's report.
 - CI failures from the LAN/chat commits fixed (macOS `<netdb.h>` +
   feature macros, Ubuntu `snprintf` precision cap).
 
+### Round 13 — water feel (cushion, clamber, fog, splash)
+
+- Falling into water no longer hurts (player + mobs): any real water
+  contact at touchdown forgives the fall, matching Minecraft.
+- Swimming into a 1-high shore while partially immersed steps up out
+  of the water instead of grinding; full submersion never climbs.
+- Submerged eyes switch the voxel pass to dense blue fog.
+  Proof: `docs/shots/water-underwater.png` (5-deep dive, dawn sky
+  above the murk).
+- Fast water entries burst particles and play a new `AUDIO_SPLASH`
+  event (converted `random/splash.ogg`, synth fallback); resource-pack
+  stem table updated.
+- Swim strokes advance the limb-swing clock; contact/eye helpers are
+  public and covered (`test_physics_water_*`, `test_mob_water_cushion`).
+- Known limit kept honest: the third-person body stays vertical while
+  swimming (no prone pose yet).
+
 ## Research
 
 - [Gauntlet Loop](https://thrixel.com/learn/gauntlet-loop) — description of

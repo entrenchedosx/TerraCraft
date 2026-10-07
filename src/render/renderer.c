@@ -100,6 +100,7 @@ struct Renderer {
     unsigned int *mob_idx; /* Owned identity indices for mob_verts. */
     unsigned int mob_skin_tex[3]; /* Per-model skin GL textures (0 = tile path). */
     unsigned int player_skin_tex; /* Steve skin GL texture (0 = tile path). */
+    bool underwater; /* Eye submerged: dense blue fog this frame. */
     RendererPerf perf; /* Last-frame counters. */
     char atlas_pack[64]; /* Active pack name ("Default" = procedural). */
 };
@@ -1286,6 +1287,20 @@ void renderer_clear(Renderer *r)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
+/* Underwater rendering flag (dense blue fog while the eye is submerged). */
+void renderer_set_underwater(Renderer *r, bool underwater)
+{
+    if (r == NULL) {
+        return;
+    }
+    r->underwater = underwater;
+}
+
+bool renderer_is_underwater(const Renderer *r)
+{
+    return r != NULL && r->underwater;
+}
+
 /* Rebuild dirty chunk meshes and upload to GPU (timed phases).
  * Builds both passes (opaque + transparent) per dirty chunk. Only a
  * bounded number of chunks rebuild per call: a fresh forest view can
@@ -1429,8 +1444,14 @@ static bool renderer_begin_voxel_tex(Renderer *r, const Camera *cam, float aspec
     shader_set_uniform_vec3(r->sun_dir_loc, sun.x, sun.y, sun.z);
     shader_set_uniform_float(r->light_intensity_loc, intensity);
     shader_set_uniform_vec3(r->sky_color_loc, sky.x, sky.y, sky.z);
-    shader_set_uniform_vec3(r->fog_color_loc, sky.x, sky.y, sky.z);
-    shader_set_uniform_float(r->fog_density_loc, RENDERER_FOG_DENSITY);
+    if (r->underwater) {
+        /* Submerged: short blue sightlines instead of sky haze. */
+        shader_set_uniform_vec3(r->fog_color_loc, 0.05f, 0.16f, 0.38f);
+        shader_set_uniform_float(r->fog_density_loc, RENDERER_UNDERWATER_FOG_DENSITY);
+    } else {
+        shader_set_uniform_vec3(r->fog_color_loc, sky.x, sky.y, sky.z);
+        shader_set_uniform_float(r->fog_density_loc, RENDERER_FOG_DENSITY);
+    }
     Vec3 cam_pos = camera_get_position(cam);
     shader_set_uniform_vec3(r->cam_pos_loc, cam_pos.x, cam_pos.y, cam_pos.z);
     return true;

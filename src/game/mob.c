@@ -254,9 +254,9 @@ static void mob_box(const Mob *m, Vec3 *out_mn, Vec3 *out_mx)
 }
 
 /* Water contact is the fraction of the mob's collision AABB occupied by
- * actual fluid. Flow levels only fill from the cell bottom to
+ * water. Flow states count only their filled height via
  * block_water_height(); touching a shallow surface is not full submersion. */
-static float mob_water_contact(const Mob *m, const World *w)
+float mob_water_contact(const Mob *m, const World *w)
 {
     if (m == NULL || w == NULL || !(m->width > 0.0f) || !(m->height > 0.0f)) {
         return 0.0f;
@@ -1430,9 +1430,10 @@ void mob_update_all(MobPool *pool, EntityPool *drops, World *w, const MobPlayerI
         if (hspeed > 0.1f && m->grounded) {
             m->walk_phase += hspeed * dt * 4.0f;
         }
-        /* Fall damage (same policy as the player, no knockback). */
+        /* Fall damage (same policy as the player, no knockback).
+         * Water cushions the landing: any real contact forgives it. */
         if (m->last_fall >= 0.0f) {
-            float dmg = survival_fall_damage(m->last_fall);
+            float dmg = mob_water_contact(m, w) > 0.0f ? 0.0f : survival_fall_damage(m->last_fall);
             m->last_fall = -1.0f;
             if (dmg > 0.0f) {
                 Vec3 zero = mmath_vec3(0.0f, 0.0f, 0.0f);

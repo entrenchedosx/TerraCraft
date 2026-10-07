@@ -424,3 +424,162 @@ int test_interaction_break_place(void)
     world_destroy(w);
     return failures;
 }
+
+/* Pool world: stone lakebed y 60..62; deep end x 2..4 water y 63..65;
+ * shallow x 5..7 water y 63; stone shore x 8..15 up to y 64.
+ * Shallow waders stand feet-at-63; the deep end fully submerges. */
+static World *make_pool_world(void)
+{
+    World *w = world_create();
+    if (w == NULL) {
+        return NULL;
+    }
+    Chunk *c = chunk_create(0, 0);
+    if (c == NULL) {
+        world_destroy(w);
+        return NULL;
+    }
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            for (int y = 60; y <= 62; ++y) {
+                chunk_set_block(c, x, y, z, BLOCK_STONE);
+            }
+        }
+    }
+    for (int x = 2; x <= 4; ++x) {
+        for (int z = 2; z <= 13; ++z) {
+            for (int y = 63; y <= 65; ++y) {
+                chunk_set_block(c, x, y, z, BLOCK_WATER);
+            }
+        }
+    }
+    for (int x = 5; x <= 7; ++x) {
+        for (int z = 2; z <= 13; ++z) {
+            chunk_set_block(c, x, 63, z, BLOCK_WATER);
+        }
+    }
+    for (int x = 8; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            chunk_set_block(c, x, 63, z, BLOCK_STONE);
+            chunk_set_block(c, x, 64, z, BLOCK_AIR);
+        }
+    }
+    if (world_add_chunk(w, c) != 0) {
+        chunk_destroy(c);
+        world_destroy(w);
+        return NULL;
+    }
+    return w;
+}
+
+/* Test: water contact scales with immersion; eye test tracks submersion.
+ *
+ * Returns: failure count.
+ */
+int test_physics_water_contact(void)
+{
+    int failures = 0;
+    World *w = make_pool_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player p;
+    player_init(&p);
+    /* Dry on the shore. */
+    p.pos = mmath_vec3(10.5f, 64.0f, 8.5f);
+    TEST_ASSERT_FLOAT_EQ(player_water_contact(w, &p), 0.0f, 1e-6f);
+    TEST_ASSERT(player_eye_in_water(w, &p) == false);
+    /* Wading the shallows: partial contact, head out. */
+    p.pos = mmath_vec3(6.5f, 63.0f, 8.5f);
+    float shallow = player_water_contact(w, &p);
+    TEST_ASSERT(shallow > 0.3f && shallow < 0.8f);
+    TEST_ASSERT(player_eye_in_water(w, &p) == false);
+    /* Deep end afloat: full contact, eyes under. */
+    p.pos = mmath_vec3(3.5f, 64.0f, 8.5f);
+    TEST_ASSERT_FLOAT_EQ(player_water_contact(w, &p), 1.0f, 1e-4f);
+    TEST_ASSERT(player_eye_in_water(w, &p) == true);
+    /* Bad args read dry. */
+    TEST_ASSERT_FLOAT_EQ(player_water_contact(NULL, &p), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_water_contact(w, NULL), 0.0f, 1e-6f);
+    TEST_ASSERT(player_eye_in_water(NULL, &p) == false);
+    TEST_ASSERT(player_eye_in_water(w, NULL) == false);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: swimming into a 1-high shore climbs out instead of grinding.
+ *
+ * Returns: failure count.
+ */
+int test_physics_water_step_up(void)
+{
+    int failures = 0;
+    World *w = make_pool_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(6.5f, 63.0f, 8.5f);
+    p.yaw = -1.5707963f; /* Face +X (toward the x=8 shore). */
+    PlayerInput in = no_input();
+    in.fwd = 1.0f;
+    bool climbed = false;
+    for (int i = 0; i < 120; ++i) {
+        player_update(&p, &in, w, 1.0f / 60.0f);
+        if (p.grounded && p.pos.y > 63.5f) {
+            climbed = true;
+            break;
+        }
+    }
+    /* Up on the shore (feet 64), still at the waterline, standing. */
+    TEST_ASSERT(climbed == true);
+    TEST_ASSERT_FLOAT_EQ(p.pos.y, 64.0f, 0.05f);
+    TEST_ASSERT(p.pos.x > 7.0f && p.pos.x < 10.0f);
+    TEST_ASSERT(p.grounded == true);
+    /* Essentially dry (a toe may still touch the waterline). */
+    TEST_ASSERT(player_water_contact(w, &p) < 0.05f);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: landing in the shallows reports a fall but touches water, which
+ * is exactly the cushion condition (no damage where MC forgives).
+ *
+ * Returns: failure count.
+ */
+int test_physics_water_fall_cushion(void)
+{
+    int failures = 0;
+    World *w = make_pool_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(6.5f, 75.0f, 8.5f);
+    PlayerInput in = no_input();
+    for (int i = 0; i < 400 && !p.grounded; ++i) {
+        player_update(&p, &in, w, 1.0f / 60.0f);
+    }
+    TEST_ASSERT(p.grounded == true);
+    TEST_ASSERT(p.last_fall > 9.0f);
+    TEST_ASSERT(player_water_contact(w, &p) > 0.0f);
+    /* Dry control: the same drop onto stone reports no water. */
+    p.pos = mmath_vec3(10.5f, 75.0f, 8.5f);
+    p.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
+    p.grounded = false;
+    p.fall_peak = -1.0f;
+    p.last_fall = -1.0f;
+    for (int i = 0; i < 400 && !p.grounded; ++i) {
+        player_update(&p, &in, w, 1.0f / 60.0f);
+    }
+    TEST_ASSERT(p.grounded == true);
+    TEST_ASSERT(p.last_fall > 9.0f);
+    TEST_ASSERT_FLOAT_EQ(player_water_contact(w, &p), 0.0f, 1e-6f);
+    world_destroy(w);
+    return failures;
+}

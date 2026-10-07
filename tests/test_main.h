@@ -106,6 +106,9 @@ int test_physics_high_drop(void);
 int test_physics_wall_slide(void);
 int test_physics_jump(void);
 int test_physics_water_motion(void);
+int test_physics_water_contact(void);
+int test_physics_water_step_up(void);
+int test_physics_water_fall_cushion(void);
 int test_physics_spawn(void);
 int test_interaction_break_place(void);
 
@@ -256,6 +259,7 @@ int test_player_swing_animation(void);
 int test_player_anim_states(void);
 int test_player_body_model(void);
 int test_mob_strike_pitch(void);
+int test_mob_water_cushion(void);
 
 /* Pathfinding tests (defined in test_path.c). */
 int test_path_flat(void);

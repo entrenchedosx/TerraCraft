@@ -1649,7 +1649,58 @@ int test_player_body_model(void)
     return failures;
 }
 
-/* Test: melee swipe curve (windup, release, rest) + zombie arm roles. */
+/* Test: mob water contact + the fall-cushion condition (landing wet
+ * with a fall report is exactly what the damage gate forgives).
+ */
+int test_mob_water_cushion(void)
+{
+    int failures = 0;
+    World *w = world_create();
+    TEST_ASSERT(w != NULL);
+    Chunk *c = chunk_create(0, 0);
+    TEST_ASSERT(c != NULL);
+    if (w == NULL || c == NULL) {
+        world_destroy(w);
+        if (c != NULL) {
+            chunk_destroy(c);
+        }
+        return failures + 1;
+    }
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            for (int y = 60; y <= 62; ++y) {
+                chunk_set_block(c, x, y, z, BLOCK_STONE);
+            }
+        }
+    }
+    for (int x = 4; x <= 11; ++x) {
+        for (int z = 4; z <= 11; ++z) {
+            chunk_set_block(c, x, 63, z, BLOCK_WATER);
+        }
+    }
+    TEST_ASSERT(world_add_chunk(w, c) == 0);
+    MobPool pool;
+    mob_pool_init(&pool, 42u);
+    EntityId id = mob_spawn(&pool, ENTITY_COW, mmath_vec3(7.5f, 75.0f, 7.5f), 0.0f);
+    Mob *m = mob_resolve(&pool, id);
+    TEST_ASSERT(m != NULL);
+    if (m == NULL) {
+        world_destroy(w);
+        return failures + 1;
+    }
+    TEST_ASSERT_FLOAT_EQ(mob_water_contact(m, w), 0.0f, 1e-6f);
+    for (int i = 0; i < 600 && !m->grounded; ++i) {
+        m->prev_pos = m->pos;
+        mob_physics_step(m, w, 1.0f / 60.0f);
+    }
+    TEST_ASSERT(m->grounded == true);
+    TEST_ASSERT(m->last_fall > 9.0f);
+    TEST_ASSERT(mob_water_contact(m, w) > 0.0f);
+    TEST_ASSERT_FLOAT_EQ(mob_water_contact(NULL, w), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(mob_water_contact(m, NULL), 0.0f, 1e-6f);
+    world_destroy(w);
+    return failures;
+}
 int test_mob_strike_pitch(void)
 {
     int failures = 0;

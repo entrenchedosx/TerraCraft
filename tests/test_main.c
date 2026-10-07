@@ -58,6 +58,9 @@ int main(void)
     RUN_TEST(test_physics_wall_slide);
     RUN_TEST(test_physics_jump);
     RUN_TEST(test_physics_water_motion);
+    RUN_TEST(test_physics_water_contact);
+    RUN_TEST(test_physics_water_step_up);
+    RUN_TEST(test_physics_water_fall_cushion);
     RUN_TEST(test_physics_spawn);
     RUN_TEST(test_interaction_break_place);
     RUN_TEST(test_raycast_down);
@@ -179,6 +182,7 @@ int main(void)
     RUN_TEST(test_player_anim_states);
     RUN_TEST(test_player_body_model);
     RUN_TEST(test_mob_strike_pitch);
+    RUN_TEST(test_mob_water_cushion);
     RUN_TEST(test_path_flat);
     RUN_TEST(test_path_wall);
     RUN_TEST(test_path_steps);

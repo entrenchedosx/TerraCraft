@@ -203,7 +203,7 @@ bool player_aabb_solid(const World *w, Vec3 mn, Vec3 mx)
  * occupy only block_water_height() from the bottom of their cell; divide
  * actual overlap volume by the full player volume so shallow immersion has
  * a proportionally smaller effect than full submersion. */
-static float player_water_contact(const World *w, const Player *p)
+float player_water_contact(const World *w, const Player *p)
 {
     if (w == NULL || p == NULL || !(p->width > 0.0f) || !(p->height > 0.0f)) {
         return 0.0f;
@@ -248,6 +248,41 @@ static float player_water_contact(const World *w, const Player *p)
         }
     }
     return contact;
+}
+
+bool player_eye_in_water(const World *w, const Player *p)
+{
+    if (w == NULL || p == NULL || !isfinite(p->pos.x) || !isfinite(p->pos.y) ||
+        !isfinite(p->pos.z) || !(p->eye_height > 0.0f)) {
+        return false;
+    }
+    float ey = p->pos.y + p->eye_height;
+    uint16_t id = world_get_block(w, (int)floorf(p->pos.x), (int)floorf(ey), (int)floorf(p->pos.z));
+    return block_is_water(id);
+}
+
+/* Clamber onto a shore while pushing against it from the water (only
+ * when partially immersed: full submersion never steps). Requires
+ * headroom at the raised level, like the mob step-up.
+ */
+static bool player_try_water_step_up(Player *p, World *w)
+{
+    Vec3 mn, mx;
+    player_box(p, &mn, &mx);
+    mn.y += 1.0f;
+    mx.y += 1.0f;
+    if (player_aabb_solid(w, mn, mx)) {
+        return false;
+    }
+    p->pos.y += 1.0f;
+    player_box(p, &mn, &mx);
+    if (player_aabb_solid(w, mn, mx)) {
+        p->pos.y -= 1.0f;
+        return false;
+    }
+    p->vel.y = 0.0f;
+    p->grounded = true;
+    return true;
 }
 
 /* Resolve one axis after moving: snap out and zero velocity on hit.
@@ -389,10 +424,22 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     player_resolve_axis(p, w, 0, dx, false);
     p->pos.z += dz;
     player_resolve_axis(p, w, 2, dz, false);
+    /* Shore clamber: swimming into a bank while partially immersed steps
+     * up one block instead of grinding against it. Gated on stalled
+     * horizontal motion with live input so open-water swimming never
+     * climbs. */
+    if (water_contact > 0.15f && water_contact < 0.75f &&
+        mmath_vec3_length_sq(wish) > 1e-8f) {
+        float hs = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
+        if (hs < 0.05f) {
+            player_try_water_step_up(p, w);
+        }
+    }
     p->pos.y += dy;
     player_resolve_axis(p, w, 1, dy, dy <= 0.0f);
 
     /* Fall tracking: peak while airborne, distance sampled on landing. */
+    float hspeed = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
     if (p->grounded) {
         if (p->fall_peak >= 0.0f) {
             p->last_fall = p->fall_peak - p->pos.y;
@@ -403,10 +450,16 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         p->fall_peak = -1.0f;
         /* Stride phase for third-person limb swing (same cadence as mobs:
          * distance-paced, so the swing matches ground speed at any rate). */
-        float hspeed = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
         p->walk_phase += hspeed * dt * 4.0f;
-    } else if (p->fall_peak < p->pos.y) {
-        p->fall_peak = p->pos.y;
+    } else {
+        if (p->fall_peak < p->pos.y) {
+            p->fall_peak = p->pos.y;
+        }
+        /* Swimming strokes pace off the same distance clock so the body
+         * animates while stroking through water. */
+        if (water_contact > 0.3f && hspeed > 0.5f) {
+            p->walk_phase += hspeed * dt * 6.0f;
+        }
     }
 }
 
