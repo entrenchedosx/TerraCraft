@@ -653,9 +653,11 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.42f, -0.33f, 0.60f), pose_offset);
     /* Minecraft layout: the shoulder sits off-frame bottom-right and the
      * hand reaches up-left toward the crosshair. Local -Y maps to up-left
-     * through a -3/4 PI roll; the item is authored unrolled at the wrist. */
+     * through a -3/4 PI roll; the item is authored unrolled at the wrist.
+     * The punch pitches forward (+X rotation drives the rolled hand toward
+     * the world, not back at the eye). */
     const float rest_roll = -2.36f;
-    float swing_x = -0.70f * punch;
+    float swing_x = 0.70f * punch;
     float swing_y = 0.06f * punch + bob_x * 0.8f;
     Vec3 eye = camera_get_position(cam);
     Vec3 forward = camera_get_forward(cam);

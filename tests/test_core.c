@@ -67,7 +67,7 @@ int test_player_viewmodel_arm_pose(void)
     Vec3 sleeve_end = mmath_vec3(0.375f, -0.03f, 0.61f);
     Vec3 wrist_end = mmath_vec3(0.375f, -0.44f, 0.61f);
     Vec3 item_center = mmath_vec3(0.30f, -0.16f, 0.62f);
-    const float swings[] = {0.0f, -0.70f};
+    const float swings[] = {0.0f, 0.70f};
     for (size_t i = 0; i < sizeof(swings) / sizeof(swings[0]); ++i) {
         float swing_y = i == 0 ? 0.0f : 0.06f;
         Vec3 sleeve = player_viewmodel_arm_transform_point(sleeve_end, shoulder, -2.36f,
