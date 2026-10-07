@@ -252,45 +252,252 @@ static void sliders_to_settings(AppContext *app)
     settings_clamp(&app->settings);
 }
 
-/* Main menu: title + three buttons. */
+static float smenu_mix(float a, float b, float t)
+{
+    return a + (b - a) * t;
+}
+
+/* The title screen uses a small, deterministic voxel landscape drawn from
+ * UI quads. It is intentionally self-contained: no texture allocation,
+ * asset dependency, or lifetime to leak. */
+static void smenu_tree(float *rects, size_t *rn, float x, float base, float unit)
+{
+    const float trunk_w = unit * 0.62f;
+    const float trunk_h = unit * 3.0f;
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x - trunk_w * 0.5f, base - trunk_h, trunk_w, trunk_h,
+          0.24f, 0.16f, 0.10f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x - trunk_w * 0.5f, base - trunk_h, trunk_w * 0.22f,
+          trunk_h, 0.35f, 0.23f, 0.13f, 1.0f);
+    for (int row = 0; row < 4; ++row) {
+        int half = row == 0 ? 1 : (row == 3 ? 2 : 3);
+        float y = base - trunk_h - unit * (4.0f - (float)row);
+        for (int col = -half; col <= half; ++col) {
+            float shade = ((row + col + 8) % 3 == 0) ? 0.18f : 0.0f;
+            srect(rects, rn, SCR_MAX_RECT_VERTS, x + (float)col * unit - unit * 0.5f, y,
+                  unit + 1.0f, unit + 1.0f, 0.15f + shade, 0.31f + shade, 0.15f + shade * 0.5f, 1.0f);
+        }
+    }
+}
+
+static void smenu_background(AppContext *app, float *rects, size_t *rn)
+{
+    const float w = (float)app->width;
+    const float h = (float)app->height;
+    const int sky_bands = 20;
+    renderer_set_clear_color(app->renderer, 0.36f, 0.57f, 0.69f, 1.0f);
+    renderer_clear(app->renderer);
+
+    for (int i = 0; i < sky_bands; ++i) {
+        float t = (float)i / (float)(sky_bands - 1);
+        float y = h * (float)i / (float)sky_bands;
+        float bh = h / (float)sky_bands + 1.0f;
+        srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, y, w, bh,
+              smenu_mix(0.28f, 0.83f, t), smenu_mix(0.49f, 0.55f, t),
+              smenu_mix(0.68f, 0.39f, t), 1.0f);
+    }
+
+    /* Block clouds and a square sun give the scene depth without borrowing
+     * Minecraft's title art or requiring bundled image assets. */
+    float sun = h * 0.105f;
+    float sun_x = w * 0.76f;
+    float sun_y = h * 0.19f;
+    srect(rects, rn, SCR_MAX_RECT_VERTS, sun_x - sun * 0.5f, sun_y - sun * 0.5f, sun, sun,
+          1.0f, 0.82f, 0.57f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, sun_x - sun * 0.36f, sun_y - sun * 0.36f, sun * 0.72f,
+          sun * 0.72f, 1.0f, 0.91f, 0.70f, 1.0f);
+
+    const float cloud_x[3] = {0.13f, 0.47f, 0.84f};
+    const float cloud_y[3] = {0.22f, 0.12f, 0.34f};
+    const float cloud_s[3] = {0.72f, 0.55f, 0.62f};
+    for (int i = 0; i < 3; ++i) {
+        float x = w * cloud_x[i];
+        float y = h * cloud_y[i];
+        float unit = fmaxf(5.0f, h * 0.018f) * cloud_s[i];
+        srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + unit, unit * 5.0f, unit * 1.2f,
+              0.73f, 0.78f, 0.76f, 0.9f);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, x + unit, y, unit * 2.6f, unit * 1.8f,
+              0.82f, 0.85f, 0.81f, 0.94f);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, x + unit * 3.0f, y + unit * 0.35f, unit * 1.8f,
+              unit * 1.4f, 0.78f, 0.82f, 0.79f, 0.92f);
+    }
+
+    /* Two rolling ridges form the distant terrain silhouette. */
+    const int ridge_cols = 30;
+    float cell = w / (float)ridge_cols;
+    float horizon = h * 0.57f;
+    for (int i = -1; i <= ridge_cols; ++i) {
+        float f = (float)i / (float)ridge_cols;
+        float rise = 0.035f + 0.045f * (0.5f + 0.5f * sinf(f * 18.0f + 0.4f)) +
+                     0.025f * (0.5f + 0.5f * sinf(f * 37.0f));
+        float y = horizon - h * rise;
+        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell, y, cell + 1.0f, h - y,
+              0.26f, 0.39f, 0.25f, 1.0f);
+    }
+    for (int i = -1; i <= ridge_cols; ++i) {
+        float f = (float)i / (float)ridge_cols;
+        float rise = 0.018f + 0.030f * (0.5f + 0.5f * sinf(f * 13.0f + 1.7f)) +
+                     0.020f * (0.5f + 0.5f * sinf(f * 29.0f + 0.9f));
+        float y = h * 0.63f - h * rise;
+        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell, y, cell + 1.0f, h - y,
+              0.21f, 0.34f, 0.19f, 1.0f);
+    }
+
+    /* Foreground terraces and sparse pixel patches suggest block-scale
+     * terrain while leaving the menu controls easy to read. */
+    float ground = h * 0.68f;
+    srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, ground, w, h - ground,
+          0.20f, 0.31f, 0.15f, 1.0f);
+    float patch_w = fmaxf(20.0f, w / 15.0f);
+    float patch_h = fmaxf(10.0f, h / 18.0f);
+    for (int row = 0; row < 5; ++row) {
+        for (int col = 0; col < 13; ++col) {
+            if (((row * 7 + col * 3) % 4) == 0) {
+                float x = (float)col * w / 13.0f + (row % 2 ? patch_w * 0.3f : 0.0f);
+                float y = ground + (float)row * patch_h * 1.25f;
+                if (x < w && y < h) {
+                    float tint = (float)((row + col) % 3) * 0.025f;
+                    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, patch_w, patch_h,
+                          0.22f + tint, 0.34f + tint, 0.16f + tint, 0.65f);
+                }
+            }
+        }
+    }
+
+    float tree_unit = fmaxf(6.0f, h * 0.022f);
+    smenu_tree(rects, rn, w * 0.18f, h * 0.67f, tree_unit);
+    smenu_tree(rects, rn, w * 0.89f, h * 0.68f, tree_unit * 1.15f);
+    smenu_tree(rects, rn, w * 0.96f, h * 0.70f, tree_unit * 0.78f);
+
+    /* A restrained veil keeps white menu text legible over both sky and land. */
+    srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, w, h, 0.025f, 0.035f, 0.045f, 0.34f);
+    sflush(app, rects, rn);
+}
+
+static bool smenu_button(AppContext *app, const UiFrame *ui, float *rects, size_t *rn,
+                         float x, float y, float w, float h, float text_scale, const char *label)
+{
+    bool hovered = false;
+    bool clicked = ui_button(ui, x, y, w, h, &hovered);
+    float face = hovered ? 0.47f : 0.34f;
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, h, 0.075f, 0.075f, 0.075f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + 1.0f, w - 2.0f, h - 2.0f,
+          face, face, face + 0.015f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + 1.0f, w - 2.0f, 2.0f,
+          hovered ? 0.86f : 0.62f, hovered ? 0.86f : 0.62f, hovered ? 0.86f : 0.65f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + h - 3.0f, w - 2.0f, 2.0f,
+          0.16f, 0.16f, 0.17f, 1.0f);
+    sflush(app, rects, rn);
+
+    float tw = 0.0f;
+    float th = 0.0f;
+    renderer_measure_text(label, text_scale, &tw, &th);
+    float tx = x + (w - tw) * 0.5f;
+    float ty = y + (h - th) * 0.5f;
+    renderer_draw_text(app->renderer, tx + 1.0f, ty + 1.0f, text_scale,
+                       0.08f, 0.08f, 0.08f, 0.9f, label);
+    renderer_draw_text(app->renderer, tx, ty, text_scale, 1.0f, 1.0f, 1.0f, 1.0f, label);
+    if (clicked) {
+        audio_play(&app->audio, AUDIO_UI_CLICK);
+    }
+    return clicked;
+}
+
+/* Minecraft-style title screen: panoramic block landscape, wordmark, and
+ * only live destinations. Layout is derived from the window size. */
 static void screen_main_menu(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
     float cx = (float)app->width * 0.5f;
-    sbackground(app, rects, &rn);
-    float y = (float)app->height * 0.24f;
-    y = stitle(app, "TerraCraft", "An original voxel sandbox", cx, y);
-    float bx = cx - SCR_BTN_W * 0.5f;
-    if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Singleplayer", true)) {
+    float width = (float)app->width;
+    float height = (float)app->height;
+    float panel_w = fminf(420.0f, fmaxf(220.0f, width - 24.0f));
+    float button_x = cx - panel_w * 0.5f + 16.0f;
+    float button_w = panel_w - 32.0f;
+    bool short_window = height < 300.0f;
+    float button_h = short_window ? 30.0f : (height < 430.0f ? 36.0f : 44.0f);
+    float gap = short_window ? 5.0f : (height < 430.0f ? 7.0f : 9.0f);
+    float title_scale = fminf(short_window ? 2.5f : 4.0f,
+                              fmaxf(2.5f, (width - 36.0f) / 80.0f));
+    float label_scale = fminf(button_w < 285.0f ? 1.5f : 2.0f, (button_w - 12.0f) / 128.0f);
+    float title_y = fmaxf(18.0f, height * 0.105f);
+    float panel_h = button_h * 3.0f + gap * 2.0f + 35.0f;
+    float title_bottom = title_y + title_scale * 8.0f + (short_window ? 0.0f : 15.0f);
+    float panel_y = fmaxf(title_bottom + 12.0f, (height - panel_h) * 0.54f);
+    panel_y = fminf(panel_y, fmaxf(8.0f, height - panel_h - 30.0f));
+
+    smenu_background(app, rects, &rn);
+
+    /* Framed translucent menu plate. */
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, cx - panel_w * 0.5f - 2.0f, panel_y - 2.0f,
+          panel_w + 4.0f, panel_h + 4.0f, 0.04f, 0.045f, 0.05f, 0.88f);
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, cx - panel_w * 0.5f, panel_y,
+          panel_w, panel_h, 0.10f, 0.105f, 0.11f, 0.74f);
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, cx - panel_w * 0.5f, panel_y,
+          panel_w, 2.0f, 0.58f, 0.56f, 0.49f, 0.9f);
+    sflush(app, rects, &rn);
+
+    float title_w = 0.0f;
+    float title_h = 0.0f;
+    renderer_measure_text("TerraCraft", title_scale, &title_w, &title_h);
+    float title_x = cx - title_w * 0.5f;
+    renderer_draw_text(app->renderer, title_x + 3.0f, title_y + 4.0f, title_scale,
+                       0.035f, 0.045f, 0.045f, 0.9f, "TerraCraft");
+    renderer_draw_text(app->renderer, title_x, title_y, title_scale,
+                       1.0f, 0.94f, 0.78f, 1.0f, "TerraCraft");
+    if (!short_window) {
+        stext_c(app, "BUILD. EXPLORE. SURVIVE.", cx, title_y + title_h + 7.0f,
+                SCR_SMALL_SCALE, 0.95f, 0.91f, 0.79f);
+    }
+
+    float y = panel_y + 12.0f;
+    if (smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
+                     "Singleplayer")) {
         app_enter_state(app, GAME_STATE_WORLD_SELECT);
         return;
     }
-    y += SCR_BTN_H + SCR_GAP;
-    if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Multiplayer (LAN)", true)) {
+    y += button_h + gap;
+    if (smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
+                     "Multiplayer (LAN)")) {
         app->menu.lan_address_buf[0] = '\0';
         app->menu.error[0] = '\0';
         app_enter_state(app, GAME_STATE_LAN_MENU);
         return;
     }
-    y += SCR_BTN_H + SCR_GAP;
-    if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Settings", true)) {
+
+    y += button_h + gap + 3.0f;
+    float small_gap = 8.0f;
+    float small_w = (button_w - small_gap) * 0.5f;
+    float small_label_scale = fminf(label_scale, fmaxf(1.0f, (small_w - 12.0f) / 72.0f));
+    if (smenu_button(app, ui, rects, &rn, button_x, y, small_w, button_h,
+                     small_label_scale, "Options")) {
         app->menu.settings_return = GAME_STATE_MAIN_MENU;
         settings_to_sliders(app);
         screens_refresh_packs(app);
         app_enter_state(app, GAME_STATE_SETTINGS);
         return;
     }
-    y += SCR_BTN_H + SCR_GAP;
-    if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Quit", true)) {
+    if (smenu_button(app, ui, rects, &rn, button_x + small_w + small_gap, y,
+                     small_w, button_h, small_label_scale, "Quit Game")) {
         app_enter_state(app, GAME_STATE_QUIT);
         return;
     }
-    sflush(app, rects, &rn);
-    char subtitle[96];
-    snprintf(subtitle, sizeof(subtitle), "Playing as %s - LAN worlds are hosted by a player",
-             app->username[0] != '\0' ? app->username : "Player");
-    stext_c(app, subtitle, cx, (float)app->height - 30.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+
+    if (app->username[0] != '\0') {
+        char profile[48];
+        snprintf(profile, sizeof(profile), "PLAYER: %.24s", app->username);
+        float profile_scale = fminf(SCR_SMALL_SCALE, (width - 32.0f) / ((float)strlen(profile) * 8.0f));
+        float profile_w = 0.0f;
+        float profile_h = 0.0f;
+        renderer_measure_text(profile, profile_scale, &profile_w, &profile_h);
+        float footer_y = fmaxf(4.0f, height - profile_h - 11.0f);
+        float footer_w = fminf(width - 20.0f, profile_w + 18.0f);
+        srect(rects, &rn, SCR_MAX_RECT_VERTS, 10.0f, footer_y - 4.0f, footer_w, profile_h + 8.0f,
+              0.04f, 0.045f, 0.05f, 0.78f);
+        sflush(app, rects, &rn);
+        renderer_draw_text(app->renderer, 19.0f, footer_y, profile_scale,
+                           0.88f, 0.88f, 0.84f, 1.0f, profile);
+    }
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_QUIT);
     }

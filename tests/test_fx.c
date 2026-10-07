@@ -254,6 +254,27 @@ int test_audio_wav(void)
 int test_audio_dummy(void)
 {
     int failures = 0;
+    Uint32 audio_before = SDL_WasInit(SDL_INIT_AUDIO);
+
+    /* A missing driver exercises silent re-initialization: it owns synthesized
+     * PCM even though no device id exists for audio_init to inspect. */
+    SDL_setenv("SDL_AUDIODRIVER", "terracraft_missing_driver", 1);
+    AudioSystem silent;
+    memset(&silent, 0, sizeof(silent));
+    int silent_rc = audio_init(&silent);
+    TEST_ASSERT(silent_rc == 0);
+    if (silent_rc == 0) {
+        TEST_ASSERT(audio_is_ready(&silent) == false);
+        TEST_ASSERT(silent.sets[AUDIO_UI_CLICK].pcm[0] != NULL);
+        TEST_ASSERT(audio_init(&silent) == 0);
+        TEST_ASSERT(audio_is_ready(&silent) == false);
+        audio_shutdown(&silent);
+        TEST_ASSERT(silent.sets[AUDIO_UI_CLICK].pcm[0] == NULL);
+    }
+    audio_shutdown(&silent);
+    TEST_ASSERT((SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) ==
+                (audio_before & SDL_INIT_AUDIO));
+
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     AudioSystem sys;
     memset(&sys, 0, sizeof(sys)); /* init reads device: never pass garbage. */
@@ -266,6 +287,12 @@ int test_audio_dummy(void)
         TEST_ASSERT(audio_load_pack(&sys, "Default") == 0);
         audio_shutdown(&sys);
         TEST_ASSERT(audio_is_ready(&sys) == false);
+        TEST_ASSERT((SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) ==
+                    (audio_before & SDL_INIT_AUDIO));
+        TEST_ASSERT(audio_init(&sys) == 0);
+        audio_shutdown(&sys);
+        TEST_ASSERT((SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) ==
+                    (audio_before & SDL_INIT_AUDIO));
     }
     SDL_setenv("SDL_AUDIODRIVER", "", 1);
     return failures;

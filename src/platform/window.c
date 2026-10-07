@@ -59,6 +59,9 @@ Window *window_create(const char *title, int width, int height)
         }
         return NULL;
     }
+    /* Keep the title and gameplay HUD usable when the resizable window is
+     * dragged toward a very small size. The menu also adapts below 300 px. */
+    SDL_SetWindowMinimumSize(handle, 320, 240);
 
     Window *win = (Window *)SDL_malloc(sizeof(Window));
     if (win == NULL) {

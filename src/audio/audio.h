@@ -81,6 +81,7 @@ typedef struct AudioSystem {
     float master;                          /* Master gain 0..1. */
     float sfx;                             /* Effects gain 0..1. */
     unsigned int device;                   /* SDL device id (0 = none). */
+    bool sdl_audio_owned;                   /* This system acquired one SDL audio init reference. */
     AudioVoice voices[AUDIO_MAX_VOICES];   /* Mixer voices. */
     AudioSet sets[AUDIO_EVENT_COUNT];      /* Per-event sets (BREAK/PLACE/STEP: stone material). */
     AudioSet msets[3][AUDIO_MAT_COUNT];    /* [BREAK,PLACE,STEP][material] variant sets. */
@@ -95,8 +96,7 @@ typedef struct AudioSystem {
  *
  * Args:
  *   sys: system to initialise (must not be NULL; must be zeroed memory
- *     or a previous AudioSystem — never uninitialized stack garbage,
- *     since a nonzero device id triggers a shutdown of that device).
+ *     or a previous AudioSystem — never uninitialized stack garbage).
  *
  * Returns: 0 on success (device or degraded-silent), non-zero on bad args.
  */

@@ -486,9 +486,9 @@ int audio_init(AudioSystem *sys)
     if (sys == NULL) {
         return -1;
     }
-    if (sys->device != 0) {
-        audio_shutdown(sys); /* Never leak a device across re-init. */
-    }
+    /* Zero-initialized first use is a no-op here; re-init also releases a
+     * silent bank, whose device id is zero but whose PCM buffers are owned. */
+    audio_shutdown(sys);
     memset(sys, 0, sizeof(*sys));
     sys->master = 0.8f;
     sys->sfx = 0.8f;
@@ -501,6 +501,7 @@ int audio_init(AudioSystem *sys)
         LOG_WARN("audio: SDL audio unavailable (%s); continuing silent", SDL_GetError());
         return 0;
     }
+    sys->sdl_audio_owned = true;
     SDL_AudioSpec want;
     memset(&want, 0, sizeof(want));
     want.freq = AUDIO_SAMPLE_RATE;
@@ -536,6 +537,10 @@ void audio_shutdown(AudioSystem *sys)
     if (sys->device != 0) {
         SDL_CloseAudioDevice((SDL_AudioDeviceID)sys->device);
         sys->device = 0;
+    }
+    if (sys->sdl_audio_owned) {
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        sys->sdl_audio_owned = false;
     }
     audio_free_bank(sys);
     memset(sys, 0, sizeof(*sys));
