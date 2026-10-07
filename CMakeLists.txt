@@ -71,6 +71,7 @@ set(TERRACRAFT_SOURCES
   src/core/bmp.c
   src/platform/window.c
   src/platform/lan.c
+  src/platform/lan_discover.c
   src/platform/gl_ctx.c
   src/render/renderer.c
   src/render/shader.c

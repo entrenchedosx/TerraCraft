@@ -12,6 +12,7 @@
 #include "game/session.h"
 #include "game/survival.h"
 #include "game/time_system.h"
+#include "platform/lan_discover.h"
 #include "platform/window.h"
 #include "render/renderer.h"
 #include "render/texture_atlas.h"
@@ -279,7 +280,7 @@ static void smenu_tree(float *rects, size_t *rn, float x, float base, float unit
     }
 }
 
-static void smenu_background(AppContext *app, float *rects, size_t *rn)
+static void smenu_background(AppContext *app, float *rects, size_t *rn, float anim_t)
 {
     const float w = (float)app->width;
     const float h = (float)app->height;
@@ -309,8 +310,12 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn)
     const float cloud_x[3] = {0.13f, 0.47f, 0.84f};
     const float cloud_y[3] = {0.22f, 0.12f, 0.34f};
     const float cloud_s[3] = {0.72f, 0.55f, 0.62f};
+    const float cloud_v[3] = {0.004f, 0.007f, 0.003f};
     for (int i = 0; i < 3; ++i) {
-        float x = w * cloud_x[i];
+        /* Slow drift with wraparound: the sky never sits still. */
+        float fx = cloud_x[i] + anim_t * cloud_v[i];
+        fx = fmodf(fx, 1.3f) - 0.15f;
+        float x = w * fx;
         float y = h * cloud_y[i];
         float unit = fmaxf(5.0f, h * 0.018f) * cloud_s[i];
         srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + unit, unit * 5.0f, unit * 1.2f,
@@ -321,12 +326,13 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn)
               unit * 1.4f, 0.78f, 0.82f, 0.79f, 0.92f);
     }
 
-    /* Two rolling ridges form the distant terrain silhouette. */
+    /* Two rolling ridges form the distant terrain silhouette, panning
+     * almost imperceptibly so the panorama feels alive. */
     const int ridge_cols = 30;
     float cell = w / (float)ridge_cols;
     float horizon = h * 0.57f;
     for (int i = -1; i <= ridge_cols; ++i) {
-        float f = (float)i / (float)ridge_cols;
+        float f = (float)i / (float)ridge_cols + anim_t * 0.002f;
         float rise = 0.035f + 0.045f * (0.5f + 0.5f * sinf(f * 18.0f + 0.4f)) +
                      0.025f * (0.5f + 0.5f * sinf(f * 37.0f));
         float y = horizon - h * rise;
@@ -334,7 +340,7 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn)
               0.26f, 0.39f, 0.25f, 1.0f);
     }
     for (int i = -1; i <= ridge_cols; ++i) {
-        float f = (float)i / (float)ridge_cols;
+        float f = (float)i / (float)ridge_cols + anim_t * 0.003f;
         float rise = 0.018f + 0.030f * (0.5f + 0.5f * sinf(f * 13.0f + 1.7f)) +
                      0.020f * (0.5f + 0.5f * sinf(f * 29.0f + 0.9f));
         float y = h * 0.63f - h * rise;
@@ -368,6 +374,17 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn)
     smenu_tree(rects, rn, w * 0.89f, h * 0.68f, tree_unit * 1.15f);
     smenu_tree(rects, rn, w * 0.96f, h * 0.70f, tree_unit * 0.78f);
 
+    /* Rising motes catch the light (deterministic per index + time:
+     * no per-frame allocation, no RNG state). */
+    for (int m = 0; m < 24; ++m) {
+        float mx = fmodf((float)m * 0.377f + anim_t * 0.004f * (1.0f + (float)(m % 3) * 0.4f), 1.0f);
+        float my = 1.0f - fmodf((float)m * 0.613f + anim_t * 0.016f * (1.0f + (float)(m % 5) * 0.2f), 1.0f);
+        float tw = 0.5f + 0.5f * sinf(anim_t * 3.0f + (float)m * 1.7f);
+        float ms = 2.0f + (float)(m % 3);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, mx * w, my * h, ms, ms,
+              1.0f, 0.95f, 0.75f, 0.10f + 0.25f * tw);
+    }
+
     /* A restrained veil keeps white menu text legible over both sky and land. */
     srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, w, h, 0.025f, 0.035f, 0.045f, 0.34f);
     sflush(app, rects, rn);
@@ -378,12 +395,19 @@ static bool smenu_button(AppContext *app, const UiFrame *ui, float *rects, size_
 {
     bool hovered = false;
     bool clicked = ui_button(ui, x, y, w, h, &hovered);
-    float face = hovered ? 0.47f : 0.34f;
+    /* Hover glow breathes gently so the button feels alive. */
+    float glow = 0.0f;
+    if (hovered) {
+        float wall = (float)(app->last_frame_time - app->start_time);
+        glow = 0.035f + 0.025f * sinf(wall * 6.0f);
+    }
+    float face = (hovered ? 0.47f : 0.34f) + glow;
     srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, h, 0.075f, 0.075f, 0.075f, 1.0f);
     srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + 1.0f, w - 2.0f, h - 2.0f,
           face, face, face + 0.015f, 1.0f);
     srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + 1.0f, w - 2.0f, 2.0f,
-          hovered ? 0.86f : 0.62f, hovered ? 0.86f : 0.62f, hovered ? 0.86f : 0.65f, 1.0f);
+          (hovered ? 0.86f : 0.62f) + glow, (hovered ? 0.86f : 0.62f) + glow,
+          (hovered ? 0.86f : 0.65f) + glow, 1.0f);
     srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + h - 3.0f, w - 2.0f, 2.0f,
           0.16f, 0.16f, 0.17f, 1.0f);
     sflush(app, rects, rn);
@@ -412,7 +436,13 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     float width = (float)app->width;
     float height = (float)app->height;
     float panel_w = fminf(420.0f, fmaxf(220.0f, width - 24.0f));
-    float button_x = cx - panel_w * 0.5f + 16.0f;
+    /* Panel slides in from the left on state enter. */
+    float enter_px = (float)(app->last_frame_time - app->menu.menu_anim_at);
+    if (!(enter_px >= 0.0f)) {
+        enter_px = 0.0f;
+    }
+    float panel_slide = -26.0f * (1.0f - expf(-6.0f * enter_px));
+    float button_x = cx - panel_w * 0.5f + 16.0f + panel_slide;
     float button_w = panel_w - 32.0f;
     bool short_window = height < 300.0f;
     float button_h = short_window ? 30.0f : (height < 430.0f ? 36.0f : 44.0f);
@@ -426,28 +456,50 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     float panel_y = fmaxf(title_bottom + 12.0f, (height - panel_h) * 0.54f);
     panel_y = fminf(panel_y, fmaxf(8.0f, height - panel_h - 30.0f));
 
-    smenu_background(app, rects, &rn);
+    smenu_background(app, rects, &rn, (float)(app->last_frame_time - app->start_time));
+
+    float plate_x = cx - panel_w * 0.5f + panel_slide;
 
     /* Framed translucent menu plate. */
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, cx - panel_w * 0.5f - 2.0f, panel_y - 2.0f,
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, plate_x - 2.0f, panel_y - 2.0f,
           panel_w + 4.0f, panel_h + 4.0f, 0.04f, 0.045f, 0.05f, 0.88f);
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, cx - panel_w * 0.5f, panel_y,
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, plate_x, panel_y,
           panel_w, panel_h, 0.10f, 0.105f, 0.11f, 0.74f);
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, cx - panel_w * 0.5f, panel_y,
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, plate_x, panel_y,
           panel_w, 2.0f, 0.58f, 0.56f, 0.49f, 0.9f);
     sflush(app, rects, &rn);
 
     float title_w = 0.0f;
     float title_h = 0.0f;
     renderer_measure_text("TerraCraft", title_scale, &title_w, &title_h);
+    /* Title float uses wall time. */
+    float wall = (float)(app->last_frame_time - app->start_time);
     float title_x = cx - title_w * 0.5f;
-    renderer_draw_text(app->renderer, title_x + 3.0f, title_y + 4.0f, title_scale,
+    float title_ybob = title_y + sinf(wall * 1.4f) * 3.0f;
+    renderer_draw_text(app->renderer, title_x + 3.0f, title_ybob + 4.0f, title_scale,
                        0.035f, 0.045f, 0.045f, 0.9f, "TerraCraft");
-    renderer_draw_text(app->renderer, title_x, title_y, title_scale,
+    renderer_draw_text(app->renderer, title_x, title_ybob, title_scale,
                        1.0f, 0.94f, 0.78f, 1.0f, "TerraCraft");
     if (!short_window) {
         stext_c(app, "BUILD. EXPLORE. SURVIVE.", cx, title_y + title_h + 7.0f,
                 SCR_SMALL_SCALE, 0.95f, 0.91f, 0.79f);
+        /* Splash: bouncy yellow tagline, one per boot. */
+        static const char *const splashes[] = {
+            "100% Blocks!",       "Now With LAN!",      "Punch Trees!",      "Also Try F5!",
+            "Runs At 60 TPS!",    "Hand-Baked Pixels!", "As Seen On Wi-Fi!", "No Placeholders!",
+            "Dial Up Your Dirt!", "Creeper-Free Zone!", "Steve Approved!",
+        };
+        size_t splash_n = sizeof(splashes) / sizeof(splashes[0]);
+        size_t splash_idx = (size_t)(app->start_time * 1000.0) % splash_n;
+        const char *splash = splashes[splash_idx];
+        float pulse = 1.5f + 0.18f * sinf(wall * 3.2f);
+        float sw = 0.0f, sh = 0.0f;
+        renderer_measure_text(splash, pulse, &sw, &sh);
+        float sx = title_x + title_w - sw * 0.30f;
+        float sy = title_ybob + title_h * 0.72f;
+        renderer_draw_text(app->renderer, sx + 2.0f, sy + 2.0f, pulse, 0.10f, 0.10f, 0.05f, 0.9f,
+                           splash);
+        renderer_draw_text(app->renderer, sx, sy, pulse, 1.0f, 1.0f, 0.20f, 1.0f, splash);
     }
 
     float y = panel_y + 12.0f;
@@ -712,44 +764,170 @@ static void screen_profile(AppContext *app, const UiFrame *ui)
     }
 }
 
-/* Direct IPv4 LAN join. Hosting is offered from the in-world pause screen,
- * so the host always owns the world being shared. */
+/* LAN worlds found automatically on the local network. Hosts announce
+ * themselves (see the pause-menu share option); this screen lists live
+ * beacons so players pick a world instead of typing an address. */
 static void screen_lan_menu(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
     float cx = (float)app->width * 0.5f;
     sbackground(app, rects, &rn);
-    float y = (float)app->height * 0.22f;
-    y = stitle(app, "Join LAN World", NULL, cx, y);
-    float fw = SCR_BTN_W + 120.0f;
-    float fx = cx - fw * 0.5f;
-    stext_c(app, "Enter the host computer's local IPv4 address.", cx, y + 8.0f,
-            SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
-    stext_c(app, "Port 25566 - same Wi-Fi or wired network required.", cx, y + 34.0f,
-            SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
-    app->menu.name_focused = true;
-    bool confirm = sfield(app, ui, rects, &rn, "Host IPv4 (e.g. 192.168.1.20)", app->menu.lan_address_buf,
-                          sizeof(app->menu.lan_address_buf), &app->menu.name_focused,
-                          fx, y + 74.0f, fw);
-    float by = y + 144.0f;
-    bool join = sbutton(app, ui, rects, &rn, fx, by, (fw - 12.0f) * 0.5f, SCR_BTN_H,
-                        app->lan_join_pending ? "Connecting..." : "Join", !app->lan_join_pending);
-    bool back = sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, by,
-                        (fw - 12.0f) * 0.5f, SCR_BTN_H,
-                        app->lan_join_pending ? "Cancel" : "Back", true);
-    sflush(app, rects, &rn);
-    if (app->menu.error[0] != '\0') {
-        stext_c(app, app->menu.error, cx, by + SCR_BTN_H + 14.0f, SCR_SMALL_SCALE,
-                SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
+
+    /* Pump discovery on wall-clock time (menus have no sim tick). */
+    if (app->lan_discover != NULL) {
+        double now = app->last_frame_time;
+        float dt = (float)(now - app->menu.lan_poll_at);
+        if (!(dt >= 0.0f) || dt > 1.0f) {
+            dt = 0.0f;
+        }
+        app->menu.lan_poll_at = now;
+        lan_discover_poll(app->lan_discover, dt);
     }
-    if (join || (confirm && !app->lan_join_pending)) {
-        if (app_lan_join(app, app->menu.lan_address_buf)) {
-            app->lan_join_pending = true;
+    size_t count = lan_discover_count(app->lan_discover);
+    if (count > 0 && (app->menu.lan_server_idx < 0 || (size_t)app->menu.lan_server_idx >= count)) {
+        app->menu.lan_server_idx = 0;
+    }
+    if (count == 0) {
+        app->menu.lan_server_idx = -1;
+    }
+
+    /* Keyboard navigation edges. */
+    if (ui->key_down && count > 0) {
+        app->menu.lan_server_idx++;
+    }
+    if (ui->key_up && count > 0) {
+        app->menu.lan_server_idx--;
+    }
+    if (count > 0) {
+        app->menu.lan_server_idx = ui_clampi(app->menu.lan_server_idx, 0, (int)count - 1);
+    }
+
+    float y = (float)app->height * 0.10f;
+    y = stitle(app, "Play Multiplayer", NULL, cx, y);
+
+    /* Status line with animated ellipsis while fresh beacons may arrive. */
+    {
+        char status[96];
+        int dots = (int)(app->last_frame_time * 2.0) % 4;
+        if (app->lan_discover == NULL) {
+            snprintf(status, sizeof(status), "Auto-scan unavailable");
+        } else if (count == 0) {
+            snprintf(status, sizeof(status), "Scanning for worlds on your network%.*s", dots, "...");
+        } else {
+            snprintf(status, sizeof(status), "%u world%s found on your network",
+                     (unsigned)count, count == 1 ? "" : "s");
+        }
+        stext_c(app, status, cx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        y += 8.0f * SCR_TEXT_SCALE + 12.0f;
+    }
+
+    /* Server rows (name + headcount, then address below). Fixed 5
+     * visible rows, scroll follows selection. */
+    float list_w = SCR_BTN_W + 120.0f;
+    float list_x = cx - list_w * 0.5f;
+    float row_h = 52.0f;
+    int visible = 5;
+    float list_y = y;
+    int scroll = 0;
+    if (count > 0) {
+        scroll = app->menu.lan_server_idx - visible + 1;
+        if (scroll < 0) {
+            scroll = 0;
+        }
+        if ((size_t)scroll > count - 1u) {
+            scroll = (int)count - 1;
+        }
+    }
+    if (count == 0) {
+        stext_c(app, "No worlds yet - open a world to LAN on another computer!", cx,
+                list_y + 20.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    }
+    for (int r = 0; r < visible; ++r) {
+        size_t idx = (size_t)(scroll + r);
+        if (idx >= count) {
+            break;
+        }
+        const LanServerInfo *info = lan_discover_at(app->lan_discover, idx);
+        if (info == NULL) {
+            break;
+        }
+        float ry = list_y + (float)r * row_h;
+        bool sel = (int)idx == app->menu.lan_server_idx;
+        bool hov = false;
+        bool clicked = ui_button(ui, list_x, ry, list_w, row_h - 6.0f, &hov);
+        if (sel) {
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h,
+                  SCR_ACC_R * 0.35f, SCR_ACC_G * 0.35f, SCR_ACC_B * 0.35f, 1.0f);
+        } else if (hov) {
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h,
+                  0.20f, 0.20f, 0.22f, 1.0f);
+        }
+        if (clicked) {
+            app->menu.lan_server_idx = (int)idx;
+        }
+        sflush(app, rects, &rn);
+        char head[128];
+        snprintf(head, sizeof(head), "%s  %u/%u", info->name, (unsigned)info->players,
+                 (unsigned)info->capacity);
+        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 5.0f, SCR_TEXT_SCALE, SCR_TXT_R,
+                           SCR_TXT_G, SCR_TXT_B, 1.0f, head);
+        char sub[128];
+        snprintf(sub, sizeof(sub), "%s:%u", info->address, (unsigned)info->port);
+        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 29.0f, SCR_SMALL_SCALE, SCR_DIM_R,
+                           SCR_DIM_G, SCR_DIM_B, 1.0f, sub);
+    }
+    y = list_y + (float)visible * row_h + 10.0f;
+    /* Action row: join, rescan, direct fallback, back. */
+    float bw = (list_w - 18.0f) * 0.5f;
+    float bh = SCR_BTN_H * 0.72f;
+    bool has = count > 0 && app->menu.lan_server_idx >= 0 && !app->lan_join_pending;
+    if (sbutton(app, ui, rects, &rn, list_x, y, bw, bh,
+                app->lan_join_pending ? "Connecting..." : "Join Selected World", has)) {
+        const LanServerInfo *join_info =
+            lan_discover_at(app->lan_discover, (size_t)app->menu.lan_server_idx);
+        if (join_info != NULL && app_lan_join_endpoint(app, join_info->address, join_info->port)) {
             app->menu.error[0] = '\0';
         } else if (app->menu.error[0] == '\0') {
-            snprintf(app->menu.error, sizeof(app->menu.error), "Could not start LAN connection.");
+            snprintf(app->menu.error, sizeof(app->menu.error), "Could not join that world.");
         }
+    }
+    if (sbutton(app, ui, rects, &rn, list_x + bw + 18.0f, y, bw, bh, "Scan Again", true)) {
+        if (app->lan_discover != NULL) {
+            lan_discover_scan(app->lan_discover);
+        }
+        app->menu.lan_server_idx = count > 0 ? 0 : -1;
+    }
+    y += bh + 10.0f;
+    if (sbutton(app, ui, rects, &rn, list_x, y, bw, bh,
+                app->menu.lan_show_direct ? "Hide Direct Connect" : "Direct Connect", true)) {
+        app->menu.lan_show_direct = !app->menu.lan_show_direct;
+    }
+    bool back = sbutton(app, ui, rects, &rn, list_x + bw + 18.0f, y, bw, bh,
+                        app->lan_join_pending ? "Cancel" : "Back", true);
+    y += bh + 10.0f;
+    if (app->menu.lan_show_direct) {
+        float fw = list_w;
+        app->menu.name_focused = true;
+        bool confirm = sfield(app, ui, rects, &rn, "Host IPv4 (e.g. 192.168.1.20)",
+                              app->menu.lan_address_buf, sizeof(app->menu.lan_address_buf),
+                              &app->menu.name_focused, list_x, y, fw);
+        y += 70.0f;
+        bool join = sbutton(app, ui, rects, &rn, list_x, y, fw, bh,
+                            app->lan_join_pending ? "Connecting..." : "Join Address",
+                            !app->lan_join_pending);
+        if (join || (confirm && !app->lan_join_pending)) {
+            if (app_lan_join(app, app->menu.lan_address_buf)) {
+                app->menu.error[0] = '\0';
+            } else if (app->menu.error[0] == '\0') {
+                snprintf(app->menu.error, sizeof(app->menu.error), "Could not start LAN connection.");
+            }
+        }
+        y += bh + 10.0f;
+    }
+    sflush(app, rects, &rn);
+    if (app->menu.error[0] != '\0') {
+        stext_c(app, app->menu.error, cx, y, SCR_SMALL_SCALE, SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
     }
     if (back || ui->key_escape) {
         bool was_connecting = app->lan_join_pending;

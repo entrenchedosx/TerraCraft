@@ -4,6 +4,7 @@
 
 #include "core/time.h"
 #include "platform/lan.h"
+#include "platform/lan_discover.h"
 
 #include <string.h>
 
@@ -212,5 +213,114 @@ int test_lan_local_address_filter(void)
     TEST_ASSERT(!lan_ipv4_is_local_endpoint("192.168.1.20:4294967297"));
     TEST_ASSERT(!lan_ipv4_is_local_endpoint("192.168.1.20"));
     TEST_ASSERT(!lan_ipv4_is_local_endpoint(NULL));
+    return failures;
+}
+
+/* Test: beacon codec round-trips and rejects malformed datagrams. */
+int test_lan_discover_codec(void)
+{
+    int failures = 0;
+    char body[256];
+    size_t n = lan_discover_format_beacon(body, sizeof(body), 25566, 3, 8, "sss World 2");
+    TEST_ASSERT(n > 0);
+    uint16_t port = 0u;
+    unsigned players = 0u, capacity = 0u;
+    char name[64];
+    memset(name, 0xAA, sizeof(name));
+    TEST_ASSERT(lan_discover_parse_beacon(body, n, &port, &players, &capacity, name, sizeof(name)));
+    TEST_ASSERT(port == 25566u);
+    TEST_ASSERT(players == 3u);
+    TEST_ASSERT(capacity == 8u);
+    TEST_ASSERT(strcmp(name, "sss World 2") == 0);
+    /* Skipped fields stay untouched. */
+    TEST_ASSERT(lan_discover_parse_beacon(body, n, NULL, NULL, NULL, NULL, 0));
+    /* Bad inputs rejected, outputs never written. */
+    TEST_ASSERT(lan_discover_format_beacon(NULL, 64, 25566, 1, 8, "x") == 0);
+    TEST_ASSERT(lan_discover_format_beacon(body, 4, 25566, 1, 8, "x") == 0);
+    TEST_ASSERT(lan_discover_format_beacon(body, sizeof(body), 0, 1, 8, "x") == 0);
+    TEST_ASSERT(!lan_discover_parse_beacon(NULL, 10, &port, &players, &capacity, name, sizeof(name)));
+    TEST_ASSERT(!lan_discover_parse_beacon(body, 0, &port, &players, &capacity, name, sizeof(name)));
+    TEST_ASSERT(!lan_discover_parse_beacon("NOPE 1 2/3 x", 13, &port, &players, &capacity, name,
+                                           sizeof(name)));
+    TEST_ASSERT(!lan_discover_parse_beacon("TCRAFT1 0 1/8 x", 15, &port, &players, &capacity, name,
+                                           sizeof(name)));
+    TEST_ASSERT(!lan_discover_parse_beacon("TCRAFT1 70000 1/8 x", 19, &port, &players, &capacity,
+                                           name, sizeof(name)));
+    TEST_ASSERT(!lan_discover_parse_beacon("TCRAFT1 1 999/8 x", 17, &port, &players, &capacity, name,
+                                           sizeof(name)));
+    TEST_ASSERT(!lan_discover_parse_beacon("TCRAFT1 1 1/8 ", 14, &port, &players, &capacity, name,
+                                           sizeof(name)));
+    TEST_ASSERT(!lan_discover_parse_beacon("TCRAFT1 1 1/8 \x01\x02", 16, &port, &players, &capacity,
+                                           name, sizeof(name)));
+    /* Unsanitary names are cleaned, never stored raw. */
+    n = lan_discover_format_beacon(body, sizeof(body), 1, 300, 9999, "a\x01"
+                                                                        "b\nc");
+    TEST_ASSERT(n > 0);
+    TEST_ASSERT(lan_discover_parse_beacon(body, n, &port, &players, &capacity, name, sizeof(name)));
+    TEST_ASSERT(strcmp(name, "abc") == 0);
+    TEST_ASSERT(players == 255u);
+    TEST_ASSERT(capacity == 255u);
+    n = lan_discover_format_beacon(body, sizeof(body), 1, 1, 8, "");
+    TEST_ASSERT(n > 0);
+    TEST_ASSERT(lan_discover_parse_beacon(body, n, &port, &players, &capacity, name, sizeof(name)));
+    TEST_ASSERT(strcmp(name, "TerraCraft World") == 0);
+    return failures;
+}
+
+/* Pump polls until an entry appears (loopback query/answer). */
+static bool lan_test_wait_server(LanDiscover *d)
+{
+    double deadline = time_now_seconds() + 4.0;
+    while (time_now_seconds() < deadline) {
+        lan_discover_poll(d, 0.05f);
+        if (lan_discover_count(d) > 0) {
+            return true;
+        }
+        lan_test_yield();
+    }
+    return false;
+}
+
+/* Test: live loopback discovery (own query answered, beacon stored,
+ * entries expire) plus NULL-safety. */
+int test_lan_discover_scan(void)
+{
+    int failures = 0;
+    lan_discover_destroy(NULL);
+    TEST_ASSERT(!lan_discover_scan(NULL));
+    lan_discover_poll(NULL, 0.1f);
+    TEST_ASSERT(lan_discover_count(NULL) == 0);
+    TEST_ASSERT(lan_discover_at(NULL, 0) == NULL);
+    lan_discover_host(NULL, "x", 1, 8, 25566, 0.1f);
+    TEST_ASSERT(lan_discover_format_beacon(NULL, 0, 0, 0, 0, NULL) == 0);
+
+    LanDiscover *d = lan_discover_create();
+    TEST_ASSERT(d != NULL);
+    if (d == NULL) {
+        return failures;
+    }
+    TEST_ASSERT(lan_discover_count(d) == 0);
+    TEST_ASSERT(lan_discover_at(d, 0) == NULL);
+    lan_discover_host(d, "Loopback World", 2, 8, 25566, 2.0f);
+    TEST_ASSERT(lan_discover_scan(d));
+    TEST_ASSERT(lan_test_wait_server(d));
+    TEST_ASSERT(lan_discover_count(d) == 1);
+    const LanServerInfo *info = lan_discover_at(d, 0);
+    TEST_ASSERT(info != NULL);
+    if (info != NULL) {
+        /* Loopback self-delivery reports 127.0.0.1 or the LAN address. */
+        TEST_ASSERT(lan_ipv4_is_local_address(info->address));
+        TEST_ASSERT(info->port == 25566u);
+        TEST_ASSERT(strcmp(info->name, "Loopback World") == 0);
+        TEST_ASSERT(info->players == 2u);
+        TEST_ASSERT(info->capacity == 8u);
+    }
+    TEST_ASSERT(lan_discover_at(d, 1) == NULL);
+    /* Stale entries age out (poll clamps dt to 1 s per call). */
+    for (int i = 0; i < 10; ++i) {
+        lan_discover_poll(d, 10.0f);
+    }
+    TEST_ASSERT(lan_discover_count(d) == 0);
+    lan_discover_destroy(d);
     return failures;
 }

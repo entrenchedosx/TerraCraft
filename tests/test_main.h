@@ -280,6 +280,8 @@ int test_skeleton_drops_save(void);
 /* LAN transport tests (defined in test_lan.c). */
 int test_lan_loopback_transport(void);
 int test_lan_local_address_filter(void);
+int test_lan_discover_codec(void);
+int test_lan_discover_scan(void);
 
 /* Atlas tile tests (defined in test_texture.c). */
 int test_atlas_mcfaces(void);

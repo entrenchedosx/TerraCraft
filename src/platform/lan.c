@@ -1,3 +1,13 @@
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+/* Strict ISO C hides getaddrinfo on Apple; request it explicitly. */
+#define _DARWIN_C_SOURCE 1
+#endif
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+/* Strict ISO C (C_EXTENSIONS OFF) hides POSIX declarations such as
+ * getaddrinfo on glibc; request them explicitly before any header. */
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "platform/lan.h"
 
 #include <stdio.h>
@@ -19,6 +29,7 @@ typedef int LanSockLen;
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/select.h>

@@ -35,6 +35,7 @@ typedef struct Renderer Renderer;
 typedef struct Camera Camera;
 typedef struct World World;
 typedef struct LanSession LanSession;
+typedef struct LanDiscover LanDiscover;
 
 #define MINEC_LAN_MAX_PLAYERS 8
 #define MINEC_LAN_BLOCK_QUEUE 4096
@@ -74,6 +75,10 @@ typedef struct LanRemotePlayer {
 typedef struct MenuData {
     char profile_buf[PROFILE_NAME_MAX_LEN + 1]; /* First-run account name. */
     char lan_address_buf[64]; /* IPv4 address of the LAN host. */
+    int lan_server_idx;   /* Selected discovered server (-1 = none). */
+    bool lan_show_direct; /* Direct-IP fallback field visible. */
+    double lan_poll_at;   /* Last discovery poll timestamp. */
+    double menu_anim_at;  /* State-enter time (menu transitions). */
     char name_buf[64];      /* Create-world name field. */
     char seed_buf[32];      /* Create-world seed field. */
     int create_mode;        /* 0 survival, 1 creative. */
@@ -132,6 +137,7 @@ typedef struct AppContext {
     char world_dir[512];  /* Active session directory ("" = none). */
     char username[PROFILE_NAME_MAX_LEN + 1]; /* Persistent local profile. */
     LanSession *lan;     /* Optional direct LAN host/client transport. */
+    LanDiscover *lan_discover; /* Optional discovery beacons/scans. */
     LanRemotePlayer lan_players[MINEC_LAN_MAX_PLAYERS];
     unsigned lan_player_count;
     bool lan_client;      /* True while this session is a LAN client. */
@@ -298,4 +304,5 @@ bool app_commit_profile(AppContext *app);
  * completes asynchronously when the host sends its world metadata. */
 bool app_lan_host(AppContext *app);
 bool app_lan_join(AppContext *app, const char *address);
+bool app_lan_join_endpoint(AppContext *app, const char *address, uint16_t port);
 void app_lan_disconnect(AppContext *app);

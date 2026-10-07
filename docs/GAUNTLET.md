@@ -367,6 +367,24 @@ triaged against the user's report.
   capture of the corrected build has not yet been made, so the final visual
   check remains open.
 
+### Round 12 — arm MC layout, menu beauty, LAN discovery
+
+- Arm rebuilt to the true Minecraft layout (hand up-left, sleeve
+  off-frame bottom-right, compact framing) after two audit agents split
+  the math trace and the value history; punch direction fixed to swing
+  forward. Proof: `docs/shots/arm-mc-layout.png`, `arm-punch.png`.
+- Menu: animated panorama (drifting clouds, panning ridges, rising
+  motes), floating wordmark, per-boot yellow splash, slide-in panel,
+  breathing button hover. Proof: `docs/shots/menu-animated.png`.
+- Font replaced with Monocraft (OFL 1.1, `thirdparty/`) baked offline
+  to the 8x8 table by `tools/bake_font.py`; renderer untouched.
+- Multiplayer screen lists auto-discovered LAN worlds (UDP beacons,
+  `src/platform/lan_discover.c`) with player counts and addresses;
+  direct-IP kept as fallback. Two-instance live test showed the real
+  hosted world in the list. Proof: `docs/shots/menu-servers.png`.
+- CI failures from the LAN/chat commits fixed (macOS `<netdb.h>` +
+  feature macros, Ubuntu `snprintf` precision cap).
+
 ## Research
 
 - [Gauntlet Loop](https://thrixel.com/learn/gauntlet-loop) — description of

@@ -197,6 +197,8 @@ int main(void)
     RUN_TEST(test_skeleton_drops_save);
     RUN_TEST(test_lan_loopback_transport);
     RUN_TEST(test_lan_local_address_filter);
+    RUN_TEST(test_lan_discover_codec);
+    RUN_TEST(test_lan_discover_scan);
 
     printf("==============================\n");
     printf("Ran %d test(s), %d failed\n", g_tests_run, g_tests_failed);

@@ -17,6 +17,7 @@
 #include "game/time_system.h"
 #include "platform/gl_ctx.h"
 #include "platform/lan.h"
+#include "platform/lan_discover.h"
 #include "platform/window.h"
 #include "render/camera.h"
 #include "render/renderer.h"
@@ -106,6 +107,24 @@ void app_enter_state(AppContext *app, GameState to)
     LOG_INFO("state: %s -> %s", game_state_name(app->state), game_state_name(to));
     GameState from = app->state;
     app->state = to;
+    app->menu.menu_anim_at = app->last_frame_time;
+    if (to == GAME_STATE_LAN_MENU) {
+        /* Fresh scan every visit: stale entries never greet the player. */
+        app->menu.lan_server_idx = -1;
+        app->menu.lan_show_direct = false;
+        app->menu.lan_poll_at = app->last_frame_time;
+        app->menu.error[0] = '\0';
+        lan_discover_destroy(app->lan_discover);
+        app->lan_discover = lan_discover_create();
+        if (app->lan_discover == NULL) {
+            snprintf(app->menu.error, sizeof(app->menu.error),
+                     "Auto-scan unavailable; use direct connect below.");
+        }
+    }
+    if (from == GAME_STATE_LAN_MENU && (to == GAME_STATE_PLAYING || to == GAME_STATE_MAIN_MENU)) {
+        lan_discover_destroy(app->lan_discover);
+        app->lan_discover = NULL;
+    }
     window_clear_input_edges(app->window);
     if (to != GAME_STATE_PLAYING && app->chat_open) {
         app->chat_open = false;
@@ -224,6 +243,7 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->state = GAME_STATE_PROFILE;
     app->sensitivity = MINEC_MOUSE_SENSITIVITY;
     memset(&app->menu, 0, sizeof(app->menu));
+    app->menu.lan_server_idx = -1;
     if (profile_load(PROFILE_PATH, app->username, sizeof(app->username)) == PROFILE_OK) {
         app->state = GAME_STATE_MAIN_MENU;
     } else {
@@ -292,6 +312,7 @@ int app_init(AppContext *app, int width, int height, const char *title)
     if (app->lan == NULL) {
         LOG_WARN("app_init: LAN transport unavailable; singleplayer remains usable");
     }
+    app->lan_discover = NULL;
     LOG_INFO("TerraCraft M9 initialising (%dx%d) \"%s\"", width, height, title);
 
     app->window = window_create(title, width, height);
@@ -862,6 +883,21 @@ static bool app_lan_gravity_event(void *context, bool landed, int wx, int wy, in
     return queued;
 }
 
+/* Save-directory leaf for LAN beacons ("saves/sss" -> "sss"). */
+static const char *app_world_basename(const AppContext *app)
+{
+    const char *dir = app->world_dir;
+    const char *fwd = strrchr(dir, '/');
+    const char *bwd = strrchr(dir, '\\');
+    const char *base = dir;
+    if (fwd != NULL && (bwd == NULL || fwd > bwd)) {
+        base = fwd + 1;
+    } else if (bwd != NULL) {
+        base = bwd + 1;
+    }
+    return base[0] != '\0' ? base : "world";
+}
+
 bool app_lan_host(AppContext *app)
 {
     if (app == NULL || !app->world_open || app->world == NULL || app->lan_client) {
@@ -883,6 +919,9 @@ bool app_lan_host(AppContext *app)
     app->lan_player_send_timer = 0.0;
     app->lan_connect_timer = 0.0;
     app->lan_block_queue_head = 0;
+    /* Best-effort beacons so joiners see this world without an IP. */
+    lan_discover_destroy(app->lan_discover);
+    app->lan_discover = lan_discover_create();
     app->lan_block_queue_count = 0;
     app->lan_block_queue_warned = false;
     app->lan_gravity_echo_pending = false;
@@ -896,6 +935,11 @@ bool app_lan_host(AppContext *app)
 
 bool app_lan_join(AppContext *app, const char *address)
 {
+    return app_lan_join_endpoint(app, address, APP_LAN_PORT);
+}
+
+bool app_lan_join_endpoint(AppContext *app, const char *address, uint16_t port)
+{
     if (app == NULL || address == NULL || app->world_open || app->lan_host) {
         return false;
     }
@@ -903,11 +947,16 @@ bool app_lan_join(AppContext *app, const char *address)
         snprintf(app->menu.error, sizeof(app->menu.error), "Enter a valid local IPv4 address.");
         return false;
     }
+    if (port == 0u) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Server port is invalid.");
+        return false;
+    }
     if (app->lan == NULL) {
         app->lan = lan_create();
     }
-    if (app->lan == NULL || !lan_client_start(app->lan, address, APP_LAN_PORT)) {
-        snprintf(app->menu.error, sizeof(app->menu.error), "Could not start LAN connection to %s.", address);
+    if (app->lan == NULL || !lan_client_start(app->lan, address, port)) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not start LAN connection to %s.",
+                 address);
         return false;
     }
     app->lan_client = true;
@@ -935,6 +984,8 @@ void app_lan_disconnect(AppContext *app)
     if (app->lan != NULL) {
         lan_close(app->lan);
     }
+    lan_discover_destroy(app->lan_discover);
+    app->lan_discover = NULL;
     app->lan_host = false;
     app->lan_client = false;
     app->lan_join_pending = false;
@@ -1412,6 +1463,14 @@ static void app_lan_update(AppContext *app, double dt)
             app->lan_block_queue_warned = false;
         }
     }
+    /* Hosting announcements (answers queries, beacons the world name);
+     * silent when discovery is unavailable. */
+    if (app->lan_host && app->lan != NULL && lan_is_host(app->lan)) {
+        size_t peers = lan_peer_count(app->lan);
+        unsigned announced = peers > 255u ? 255u : (unsigned)peers;
+        lan_discover_host(app->lan_discover, app_world_basename(app), announced, LAN_MAX_PEERS,
+                          APP_LAN_PORT, (float)dt);
+    }
     if (!app->world_open || app->state != GAME_STATE_PLAYING || !lan_is_connected(app->lan)) {
         return;
     }
@@ -1531,7 +1590,8 @@ static void app_draw_chat(AppContext *app)
     }
     if (app->chat_open) {
         char prompt[APP_CHAT_MAX_BYTES + 8];
-        snprintf(prompt, sizeof(prompt), "> %s_", app->chat_input);
+        /* Precision-capped: provably fits (GCC -Wformat-truncation). */
+        snprintf(prompt, sizeof(prompt), "> %.*s_", (int)(sizeof(prompt) - 4), app->chat_input);
         renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)visible * line_h,
                            1.0f, 1.0f, 0.90f, 0.70f, 1.0f, prompt);
     }
@@ -3002,6 +3062,8 @@ void app_shutdown(AppContext *app)
     }
     app->running = false;
     app_lan_disconnect(app);
+    lan_discover_destroy(app->lan_discover);
+    app->lan_discover = NULL;
     lan_destroy(app->lan);
     app->lan = NULL;
     if (app->world_open) {
