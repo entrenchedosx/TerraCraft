@@ -173,16 +173,38 @@ static float stitle(AppContext *app, const char *title, const char *sub, float c
     return y;
 }
 
-/* Full-screen dim background. Clears first so menus never present
- * uninitialized backbuffer contents (pause/loading overlays draw over the
- * world instead, which clears itself).
+/* Full-screen dim background. Dirt tiling like Minecraft's menu
+ * screens (procedural atlas tile through the icon pipe), darkened with
+ * a flat veil so text stays legible. Falls back to the dark clear color
+ * when the textured pipe or atlas is unavailable.
  */
 static void sbackground(AppContext *app, float *rects, size_t *rn)
 {
-    renderer_set_clear_color(app->renderer, SCR_BG_R, SCR_BG_G, SCR_BG_B, 1.0f);
+    renderer_set_clear_color(app->renderer, 0.08f, 0.07f, 0.06f, 1.0f);
     renderer_clear(app->renderer);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, SCR_BG_R,
-          SCR_BG_G, SCR_BG_B, 1.0f);
+    float w = (float)app->width;
+    float h = (float)app->height;
+    float cell = 64.0f;
+    int cols = (int)(w / cell) + 2;
+    int rows = (int)(h / cell) + 2;
+    IconBatch batch;
+    icons_clear(&batch);
+    for (int ty = 0; ty < rows; ++ty) {
+        for (int tx = 0; tx < cols; ++tx) {
+            if (batch.quads >= ICON_MAX_QUADS) {
+                renderer_draw_item_icons(app->renderer, app->width, app->height, &batch);
+                icons_clear(&batch);
+            }
+            /* Slight checker offset so the tiling reads as blocks. */
+            float ox = (ty % 2 == 0) ? 0.0f : -cell * 0.5f;
+            icons_push(&batch, (float)tx * cell + ox, (float)ty * cell, cell, TILE_DIRT);
+        }
+    }
+    if (batch.quads > 0) {
+        renderer_draw_item_icons(app->renderer, app->width, app->height, &batch);
+    }
+    icons_clear(&batch);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, w, h, 0.02f, 0.02f, 0.03f, 0.62f);
     sflush(app, rects, rn);
 }
 
@@ -298,9 +320,11 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
     }
 
     /* Block clouds and a square sun give the scene depth without borrowing
-     * Minecraft's title art or requiring bundled image assets. */
+     * Minecraft's title art or requiring bundled image assets. The whole
+     * panorama sways almost imperceptibly (ping-pong, never a seam). */
+    float sway = sinf(anim_t * 0.05f) * 20.0f;
     float sun = h * 0.105f;
-    float sun_x = w * 0.76f;
+    float sun_x = w * 0.76f + sway;
     float sun_y = h * 0.19f;
     srect(rects, rn, SCR_MAX_RECT_VERTS, sun_x - sun * 0.5f, sun_y - sun * 0.5f, sun, sun,
           1.0f, 0.82f, 0.57f, 1.0f);
@@ -315,7 +339,7 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
         /* Slow drift with wraparound: the sky never sits still. */
         float fx = cloud_x[i] + anim_t * cloud_v[i];
         fx = fmodf(fx, 1.3f) - 0.15f;
-        float x = w * fx;
+        float x = w * fx + sway;
         float y = h * cloud_y[i];
         float unit = fmaxf(5.0f, h * 0.018f) * cloud_s[i];
         srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + unit, unit * 5.0f, unit * 1.2f,
@@ -331,20 +355,20 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
     const int ridge_cols = 30;
     float cell = w / (float)ridge_cols;
     float horizon = h * 0.57f;
-    for (int i = -1; i <= ridge_cols; ++i) {
+    for (int i = -2; i <= ridge_cols + 2; ++i) {
         float f = (float)i / (float)ridge_cols + anim_t * 0.002f;
         float rise = 0.035f + 0.045f * (0.5f + 0.5f * sinf(f * 18.0f + 0.4f)) +
                      0.025f * (0.5f + 0.5f * sinf(f * 37.0f));
         float y = horizon - h * rise;
-        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell, y, cell + 1.0f, h - y,
+        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell + sway, y, cell + 1.0f, h - y,
               0.26f, 0.39f, 0.25f, 1.0f);
     }
-    for (int i = -1; i <= ridge_cols; ++i) {
+    for (int i = -2; i <= ridge_cols + 2; ++i) {
         float f = (float)i / (float)ridge_cols + anim_t * 0.003f;
         float rise = 0.018f + 0.030f * (0.5f + 0.5f * sinf(f * 13.0f + 1.7f)) +
                      0.020f * (0.5f + 0.5f * sinf(f * 29.0f + 0.9f));
         float y = h * 0.63f - h * rise;
-        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell, y, cell + 1.0f, h - y,
+        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell + sway, y, cell + 1.0f, h - y,
               0.21f, 0.34f, 0.19f, 1.0f);
     }
 
@@ -370,9 +394,9 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
     }
 
     float tree_unit = fmaxf(6.0f, h * 0.022f);
-    smenu_tree(rects, rn, w * 0.18f, h * 0.67f, tree_unit);
-    smenu_tree(rects, rn, w * 0.89f, h * 0.68f, tree_unit * 1.15f);
-    smenu_tree(rects, rn, w * 0.96f, h * 0.70f, tree_unit * 0.78f);
+    smenu_tree(rects, rn, w * 0.18f + sway, h * 0.67f, tree_unit);
+    smenu_tree(rects, rn, w * 0.89f + sway, h * 0.68f, tree_unit * 1.15f);
+    smenu_tree(rects, rn, w * 0.96f + sway, h * 0.70f, tree_unit * 0.78f);
 
     /* Rising motes catch the light (deterministic per index + time:
      * no per-frame allocation, no RNG state). */
@@ -401,15 +425,20 @@ static bool smenu_button(AppContext *app, const UiFrame *ui, float *rects, size_
         float wall = (float)(app->last_frame_time - app->start_time);
         glow = 0.035f + 0.025f * sinf(wall * 6.0f);
     }
-    float face = (hovered ? 0.47f : 0.34f) + glow;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, h, 0.075f, 0.075f, 0.075f, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + 1.0f, w - 2.0f, h - 2.0f,
-          face, face, face + 0.015f, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + 1.0f, w - 2.0f, 2.0f,
-          (hovered ? 0.86f : 0.62f) + glow, (hovered ? 0.86f : 0.62f) + glow,
-          (hovered ? 0.86f : 0.65f) + glow, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + h - 3.0f, w - 2.0f, 2.0f,
-          0.16f, 0.16f, 0.17f, 1.0f);
+    /* Java-style frame: 2px black border, vertical gray gradient face,
+     * bright top edge; hover tints the face faintly blue-white. */
+    float top = 0.55f + glow;
+    float mid = 0.42f + glow;
+    float bot = 0.30f + glow * 0.5f;
+    float tint_b = hovered ? 0.06f : 0.0f;
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x - 2.0f, y - 2.0f, w + 4.0f, h + 4.0f,
+          0.02f, 0.02f, 0.02f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, h * 0.5f, top, top, top + 0.015f + tint_b, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + h * 0.5f, w, h - h * 0.5f, mid, mid,
+          mid + 0.015f + tint_b, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + h - 4.0f, w, 4.0f, bot, bot, bot, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, 2.0f, 0.80f + glow, 0.80f + glow, 0.82f + glow,
+          1.0f);
     sflush(app, rects, rn);
 
     float tw = 0.0f;
@@ -495,11 +524,19 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
         float pulse = 1.5f + 0.18f * sinf(wall * 3.2f);
         float sw = 0.0f, sh = 0.0f;
         renderer_measure_text(splash, pulse, &sw, &sh);
+        /* Tilted like the real splash: stepped -20 degrees, rising right. */
+        float tilt = -0.364f;
         float sx = title_x + title_w - sw * 0.30f;
         float sy = title_ybob + title_h * 0.72f;
-        renderer_draw_text(app->renderer, sx + 2.0f, sy + 2.0f, pulse, 0.10f, 0.10f, 0.05f, 0.9f,
-                           splash);
-        renderer_draw_text(app->renderer, sx, sy, pulse, 1.0f, 1.0f, 0.20f, 1.0f, splash);
+        float charw = 8.0f * pulse;
+        for (size_t ci = 0; splash[ci] != '\0'; ++ci) {
+            char glyph[2] = {(char)splash[ci], '\0'};
+            float gx = sx + (float)ci * charw;
+            float gy = sy + (float)ci * charw * tilt;
+            renderer_draw_text(app->renderer, gx + 2.0f, gy + 2.0f, pulse, 0.10f, 0.10f, 0.05f,
+                               0.9f, glyph);
+            renderer_draw_text(app->renderer, gx, gy, pulse, 1.0f, 1.0f, 0.20f, 1.0f, glyph);
+        }
     }
 
     float y = panel_y + 12.0f;
@@ -552,6 +589,14 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     }
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_QUIT);
+    }
+    /* Bottom-right honesty line (Minecraft shows branding here). */
+    {
+        const char *note = "Original engine - not affiliated with Mojang";
+        float nw = 0.0f, nh = 0.0f;
+        renderer_measure_text(note, SCR_SMALL_SCALE, &nw, &nh);
+        renderer_draw_text(app->renderer, width - nw - 10.0f, height - nh - 8.0f, SCR_SMALL_SCALE,
+                           0.55f, 0.55f, 0.52f, 1.0f, note);
     }
 }
 
@@ -1818,6 +1863,25 @@ static void screen_loading(AppContext *app)
     float cy = (float)app->height * 0.5f;
     stext_c(app, line1, cx, cy - 20.0f, SCR_TEXT_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
     stext_c(app, line2, cx, cy + 24.0f, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    /* Green progress bar under the text (fills with chunk progress). */
+    if (app->load_total > 0) {
+        float frac = (float)app->load_done / (float)app->load_total;
+        if (frac < 0.0f) {
+            frac = 0.0f;
+        }
+        if (frac > 1.0f) {
+            frac = 1.0f;
+        }
+        float bw = fminf(420.0f, (float)app->width - 80.0f);
+        float bx = cx - bw * 0.5f;
+        float by = cy + 56.0f;
+        float rects[SCR_MAX_RECT_VERTS * 6];
+        size_t rn = 0;
+        srect(rects, &rn, SCR_MAX_RECT_VERTS, bx - 2.0f, by - 2.0f, bw + 4.0f, 10.0f,
+              0.05f, 0.05f, 0.05f, 1.0f);
+        srect(rects, &rn, SCR_MAX_RECT_VERTS, bx, by, bw * frac, 6.0f, 0.25f, 0.75f, 0.25f, 1.0f);
+        sflush(app, rects, &rn);
+    }
 }
 
 /* F3 debug overlay lines (PLAYING only). */
