@@ -135,6 +135,14 @@ and rendering all affect what a player observes.
 
 ### Rendering, lighting, and fluids
 
+- The sky uses a camera-aware procedural pass: day/night gradients, a moving
+  solar disk and glow, a moon, fading stars, and a softly animated cloud layer
+  at world height 144. Clouds have world-space parallax and add subtle moving
+  shading to upward-facing blocks. Voxel lighting blends directional warm
+  sunlight with sky/ground hemisphere fill and the existing ambient occlusion
+  and distance fog. The sky pass uses one static triangle and no downloaded
+  assets. Geometry-cast shadows, volumetric clouds, weather, and post-process
+  bloom remain outside the renderer's current feature set.
 - The atlas combines procedural pixels with optional owner-local or user
   pack tiles. All 35 registered item types map to a named atlas tile. A
   confirmed custom-pack path alias prevented pack discovery and item texture

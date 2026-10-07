@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* Particle scratch capacity: worst case every pool slot alive. */
 #define PARTICLE_SCRATCH_VERTS ((size_t)PARTICLE_MAX * 36)
@@ -70,6 +71,23 @@ struct Renderer {
     int fog_color_loc;
     int fog_density_loc;
     int cam_pos_loc;
+    int voxel_cloud_time_loc;
+    int voxel_cloud_altitude_loc;
+    Shader *sky_shader; /* Procedural world-space sky, optional on limited GL. */
+    unsigned int sky_vao;
+    unsigned int sky_vbo;
+    int sky_camera_pos_loc;
+    int sky_camera_forward_loc;
+    int sky_camera_right_loc;
+    int sky_camera_up_loc;
+    int sky_sun_dir_loc;
+    int sky_horizon_color_loc;
+    int sky_aspect_loc;
+    int sky_tan_half_fov_loc;
+    int sky_time_loc;
+    int sky_light_intensity_loc;
+    int sky_cloud_altitude_loc;
+    int sky_underwater_loc;
     Shader *ui_shader; /* Owned flat UI program (NULL when GL limited). */
     unsigned int ui_vao; /* UI quad array (0 when unavailable). */
     unsigned int ui_vbo; /* UI quad buffer (dynamic, re-uploaded per frame). */
@@ -104,6 +122,56 @@ struct Renderer {
     RendererPerf perf; /* Last-frame counters. */
     char atlas_pack[64]; /* Active pack name ("Default" = procedural). */
 };
+
+/* Build a single static full-screen triangle for the procedural sky. It is
+ * kept separate from the world buffers so sky drawing adds one small pass
+ * and no per-frame allocation or upload. */
+static void renderer_init_sky(Renderer *r)
+{
+    if (r == NULL) {
+        return;
+    }
+    r->sky_shader = shader_create(shader_sky_vert_src(), shader_sky_frag_src());
+    if (r->sky_shader == NULL) {
+        LOG_WARN("renderer: procedural sky shader unavailable; using clear-color fallback");
+        return;
+    }
+    r->sky_camera_pos_loc = shader_get_uniform_location(r->sky_shader, "uCameraPosition");
+    r->sky_camera_forward_loc = shader_get_uniform_location(r->sky_shader, "uCameraForward");
+    r->sky_camera_right_loc = shader_get_uniform_location(r->sky_shader, "uCameraRight");
+    r->sky_camera_up_loc = shader_get_uniform_location(r->sky_shader, "uCameraUp");
+    r->sky_sun_dir_loc = shader_get_uniform_location(r->sky_shader, "uSunDir");
+    r->sky_horizon_color_loc = shader_get_uniform_location(r->sky_shader, "uSkyColor");
+    r->sky_aspect_loc = shader_get_uniform_location(r->sky_shader, "uAspect");
+    r->sky_tan_half_fov_loc = shader_get_uniform_location(r->sky_shader, "uTanHalfFov");
+    r->sky_time_loc = shader_get_uniform_location(r->sky_shader, "uTime");
+    r->sky_light_intensity_loc = shader_get_uniform_location(r->sky_shader, "uLightIntensity");
+    r->sky_cloud_altitude_loc = shader_get_uniform_location(r->sky_shader, "uCloudAltitude");
+    r->sky_underwater_loc = shader_get_uniform_location(r->sky_shader, "uUnderwater");
+
+    if (minec_glGenVertexArrays == NULL || minec_glGenBuffers == NULL ||
+        minec_glBindVertexArray == NULL || minec_glBindBuffer == NULL ||
+        minec_glBufferData == NULL || minec_glVertexAttribPointer == NULL ||
+        minec_glEnableVertexAttribArray == NULL || minec_glDrawArrays == NULL) {
+        LOG_WARN("renderer: sky geometry entry points unavailable; using clear-color fallback");
+        return;
+    }
+    static const float triangle[] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+    minec_glGenVertexArrays(1, &r->sky_vao);
+    minec_glGenBuffers(1, &r->sky_vbo);
+    if (r->sky_vao == 0 || r->sky_vbo == 0) {
+        LOG_WARN("renderer: sky geometry allocation failed; using clear-color fallback");
+        return;
+    }
+    minec_glBindVertexArray(r->sky_vao);
+    minec_glBindBuffer((MinecGLenum)MINEC_GL_ARRAY_BUFFER, r->sky_vbo);
+    minec_glBufferData((MinecGLenum)MINEC_GL_ARRAY_BUFFER, (MinecGLsizeiptr)sizeof(triangle), triangle,
+                       (MinecGLenum)MINEC_GL_STATIC_DRAW);
+    minec_glVertexAttribPointer(0, 2, (MinecGLenum)MINEC_GL_FLOAT, (MinecGLboolean)MINEC_GL_FALSE,
+                                (MinecGLsizei)(2 * sizeof(float)), NULL);
+    minec_glEnableVertexAttribArray(0);
+    minec_glBindVertexArray(0);
+}
 
 /* Find the GPU slot for chunk (cx,cz), or a free slot. Either pass being
  * live counts as occupied; both passes share the slot index.
@@ -941,6 +1009,8 @@ Renderer *renderer_create(GlContext *gl)
     r->fog_color_loc = -1;
     r->fog_density_loc = -1;
     r->cam_pos_loc = -1;
+    r->voxel_cloud_time_loc = -1;
+    r->voxel_cloud_altitude_loc = -1;
     r->ui_ortho_loc = -1;
     r->ui_tex_ortho_loc = -1;
     r->ui_tex_atlas_loc = -1;
@@ -965,10 +1035,13 @@ Renderer *renderer_create(GlContext *gl)
         r->fog_color_loc = shader_get_uniform_location(r->shader, "uFogColor");
         r->fog_density_loc = shader_get_uniform_location(r->shader, "uFogDensity");
         r->cam_pos_loc = shader_get_uniform_location(r->shader, "uCamPos");
+        r->voxel_cloud_time_loc = shader_get_uniform_location(r->shader, "uCloudTime");
+        r->voxel_cloud_altitude_loc = shader_get_uniform_location(r->shader, "uCloudAltitude");
         if (r->mvp_loc < 0 || r->atlas_loc < 0) {
             LOG_WARN("renderer_create: core uniforms missing (mvp=%d atlas=%d)", r->mvp_loc, r->atlas_loc);
         }
     }
+    renderer_init_sky(r);
 
     r->atlas = texture_atlas_generate();
     if (r->atlas == 0) {
@@ -1191,6 +1264,13 @@ void renderer_destroy(Renderer *r)
     if (r->line_vao != 0 && minec_glDeleteVertexArrays != NULL) {
         minec_glDeleteVertexArrays(1, &r->line_vao);
     }
+    if (r->sky_vbo != 0 && minec_glDeleteBuffers != NULL) {
+        minec_glDeleteBuffers(1, &r->sky_vbo);
+    }
+    if (r->sky_vao != 0 && minec_glDeleteVertexArrays != NULL) {
+        minec_glDeleteVertexArrays(1, &r->sky_vao);
+    }
+    shader_destroy(r->sky_shader);
     shader_destroy(r->line_shader);
     shader_destroy(r->ui_shader);
     shader_destroy(r->ui_tex_shader);
@@ -1432,6 +1512,8 @@ static bool renderer_begin_voxel_tex(Renderer *r, const Camera *cam, float aspec
     }
     Vec3 cam_pos = camera_get_position(cam);
     shader_set_uniform_vec3(r->cam_pos_loc, cam_pos.x, cam_pos.y, cam_pos.z);
+    shader_set_uniform_float(r->voxel_cloud_time_loc, (float)fmod(time_now_seconds(), 8192.0));
+    shader_set_uniform_float(r->voxel_cloud_altitude_loc, 144.0f);
     return true;
 }
 
@@ -1442,6 +1524,70 @@ static void renderer_end_voxel(Renderer *r)
     if (minec_glBindTexture != NULL) {
         minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, 0);
     }
+    shader_unbind();
+}
+
+/* Draw an animated world-space sky before the opaque world pass. All sky
+ * uniforms are camera-relative so yaw, pitch, aspect ratio, and FOV remain
+ * correct without rebuilding geometry. Missing optional GL resources retain
+ * the existing clear-color sky fallback. */
+static void renderer_draw_sky(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts)
+{
+    if (r == NULL || cam == NULL || r->sky_shader == NULL || r->sky_vao == 0 || r->sky_vbo == 0 ||
+        !shader_is_ready(r->sky_shader) || minec_glBindVertexArray == NULL || minec_glDrawArrays == NULL) {
+        return;
+    }
+
+    Vec3 sky = ts != NULL ? time_get_sky_color(ts) : mmath_vec3(0.529f, 0.808f, 0.922f);
+    Vec3 sun = ts != NULL ? time_get_sun_dir(ts) : mmath_vec3_normalize(mmath_vec3(-0.45f, 0.85f, 0.30f));
+    float intensity = ts != NULL ? time_get_light_intensity(ts) : 1.0f;
+    Vec3 position = camera_get_position(cam);
+    Vec3 forward = camera_get_forward(cam);
+    Vec3 right = camera_get_right(cam);
+    Vec3 up = mmath_vec3_normalize(mmath_vec3_cross(right, forward));
+    float safe_aspect = aspect > 0.0f ? aspect : (16.0f / 9.0f);
+    Mat4 projection = camera_get_proj(cam, safe_aspect);
+    float tan_half_fov = projection.m[5] > 1e-6f ? 1.0f / projection.m[5] : 0.7002075f;
+    float shader_time = (float)fmod(time_now_seconds(), 8192.0);
+
+    if (shader_bind(r->sky_shader) != MINEC_SHADER_OK) {
+        return;
+    }
+    shader_set_uniform_vec3(r->sky_camera_pos_loc, position.x, position.y, position.z);
+    shader_set_uniform_vec3(r->sky_camera_forward_loc, forward.x, forward.y, forward.z);
+    shader_set_uniform_vec3(r->sky_camera_right_loc, right.x, right.y, right.z);
+    shader_set_uniform_vec3(r->sky_camera_up_loc, up.x, up.y, up.z);
+    shader_set_uniform_vec3(r->sky_sun_dir_loc, sun.x, sun.y, sun.z);
+    shader_set_uniform_vec3(r->sky_horizon_color_loc, sky.x, sky.y, sky.z);
+    shader_set_uniform_float(r->sky_aspect_loc, safe_aspect);
+    shader_set_uniform_float(r->sky_tan_half_fov_loc, tan_half_fov);
+    shader_set_uniform_float(r->sky_time_loc, shader_time);
+    shader_set_uniform_float(r->sky_light_intensity_loc, intensity);
+    shader_set_uniform_float(r->sky_cloud_altitude_loc, 144.0f);
+    shader_set_uniform_float(r->sky_underwater_loc, r->underwater ? 1.0f : 0.0f);
+
+    GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean cull_was_enabled = glIsEnabled(GL_CULL_FACE);
+    GLboolean blend_was_enabled = glIsEnabled(GL_BLEND);
+    GLboolean depth_mask_was_enabled = (GLboolean)GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask_was_enabled);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask((GLboolean)GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    minec_glBindVertexArray(r->sky_vao);
+    minec_glDrawArrays((MinecGLenum)MINEC_GL_TRIANGLES, 0, 3);
+    minec_glBindVertexArray(0);
+    if (depth_was_enabled) {
+        glEnable(GL_DEPTH_TEST);
+    }
+    if (cull_was_enabled) {
+        glEnable(GL_CULL_FACE);
+    }
+    if (blend_was_enabled) {
+        glEnable(GL_BLEND);
+    }
+    glDepthMask(depth_mask_was_enabled);
     shader_unbind();
 }
 
@@ -1476,6 +1622,7 @@ void renderer_draw_world(Renderer *r, const World *w, const Camera *cam, float a
     r->perf.drawn = 0;
     r->perf.drawn_t = 0;
     r->perf.culled = 0;
+    renderer_draw_sky(r, cam, aspect, ts);
     if (!renderer_begin_voxel(r, cam, aspect, ts)) {
         r->perf.draw_ms = (time_now_seconds() - t0) * 1000.0;
         return;

@@ -37,6 +37,8 @@ open.
   render pass.
 - Chunk streaming, block editing, lighting, ambient occlusion, fog, and a
   day/night cycle.
+- A procedural sky with a moving sun and moon, fading stars, warm dawn/dusk,
+  animated parallax clouds, soft cloud shading, and hemisphere-lit blocks.
 - Creative flight and Survival health, hunger, mining, tool wear, food,
   crafting, item drops, and death recovery.
 - Pixel-art full/half/empty heart and hunger icons in Survival.

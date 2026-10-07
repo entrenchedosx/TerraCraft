@@ -110,6 +110,11 @@ void shader_set_uniform_vec3(int location, float x, float y, float z);
 const char *shader_voxel_vert_src(void);
 const char *shader_voxel_frag_src(void);
 
+/* Camera-aware procedural sky shader with day/night lighting, sun/moon,
+ * stars, atmospheric gradient, and animated cloud layer. */
+const char *shader_sky_vert_src(void);
+const char *shader_sky_frag_src(void);
+
 /* Embedded M3 UI shaders (GLSL 330 core, flat unlit quads).
  * Vertex: layout 0 pos (vec2 pixels), 1 color (vec4); uniform uOrtho.
  * Fragment: outputs the interpolated color (no lighting, no texture).
