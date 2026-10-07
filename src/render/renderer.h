@@ -350,4 +350,9 @@ void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, fl
  *   scale: pixel scale (> 0).
  *   out_w/out_h: receive extents (each may be NULL).
  */
-void renderer_measure_text(const char *text, float scale, float *out_w, float *out_h);
+void renderer_measure_text(Renderer *r, const char *text, float scale, float *out_w, float *out_h);
+
+/* Draw a locally converted Minecraft title panorama with a slow camera drift.
+ * Returns false when the owner-local panorama is absent or drawing is unavailable.
+ */
+bool renderer_draw_menu_panorama(Renderer *r, int width, int height, float seconds);

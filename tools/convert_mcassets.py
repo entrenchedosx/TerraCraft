@@ -8,6 +8,8 @@ Writes: mcassets/generated/tiles/<stem>.bmp   (16x16 32-bit BMP, alpha kept)
         mcassets/generated/sounds/<name>.wav  (22050 Hz mono 16-bit WAV)
         mcassets/generated/mobs/<name>.bmp    (native-size 32-bit BMP: mob
             skins keep their 64x32/64x64 layout so part UVs map 1:1)
+        mcassets/generated/menu/menu_font.bmp (Minecraft ASCII bitmap font)
+        mcassets/generated/menu/menu_panorama.bmp (stitched title panorama)
 
 The engine loads generated/ with its existing BMP/WAV parsers (no PNG or
 Vorbis code in the C build); missing outputs fall back to procedural art
@@ -31,6 +33,8 @@ SND = os.path.join(MC, "sounds")
 GEN_TILES = os.path.join(REPO, "mcassets", "generated", "tiles")
 GEN_SOUNDS = os.path.join(REPO, "mcassets", "generated", "sounds")
 GEN_MOBS = os.path.join(REPO, "mcassets", "generated", "mobs")
+GEN_MENU = os.path.join(REPO, "mcassets", "generated", "menu")
+DOWNLOADED_MENU = os.path.join(REPO, "mcassets", "downloaded", "menu")
 
 TILE_SIZE = 16
 AUDIO_RATE = 22050
@@ -194,6 +198,111 @@ def convert_tiles():
     return ok, missing
 
 
+def _write_rgba_bmp(img, dst):
+    """Write top-down Pillow RGBA pixels as a bottom-up 32-bit BMP."""
+    import struct
+    import numpy as np
+    rgba = np.asarray(img.convert("RGBA"), dtype=np.uint8)
+    height, width, _ = rgba.shape
+    bgra = rgba[:, :, [2, 1, 0, 3]]
+    body = bgra[::-1].copy().tobytes()
+    hdr = struct.pack("<2sIHHI", b"BM", 54 + len(body), 0, 0, 54)
+    dib = struct.pack("<IIIHHIIIIII", 40, width, height, 1, 32, 0,
+                      len(body), 0, 0, 0, 0)
+    with open(dst, "wb") as f:
+        f.write(hdr + dib + body)
+
+
+def convert_menu_font():
+    """Stage the owner-local vanilla ASCII font sheet, preserving its mask."""
+    from PIL import Image
+    import numpy as np
+    rel = "font/ascii.png"
+    src = os.path.join(DOWNLOADED_MENU, "ascii.png")
+    if not os.path.isfile(src):
+        src = os.path.join(TEX, *rel.split("/"))
+    if not os.path.isfile(src):
+        return False
+    img = Image.open(src).convert("RGBA")
+    if img.size != (128, 128):
+        print("  bad menu font size %s: %s" % (rel, img.size))
+        return False
+    # Mojangles' glyph alpha is the shape. White RGB allows the renderer to
+    # tint it for normal, dimmed, warning, and highlighted menu text.
+    pixels = np.asarray(img, dtype=np.uint8).copy()
+    pixels[:, :, :3] = 255
+    _write_rgba_bmp(Image.fromarray(pixels, "RGBA"),
+                    os.path.join(GEN_MENU, "menu_font.bmp"))
+    return True
+
+
+def convert_menu_panorama():
+    """Project the local six-face vanilla title cubemap into a 2:1 panorama."""
+    from PIL import Image
+    import numpy as np
+    source_dir = os.path.join(TEX, "gui", "title", "background")
+    faces = []
+    downloaded_faces = [os.path.join(DOWNLOADED_MENU, "panorama_%d.png" % i) for i in range(6)]
+    local_faces = [os.path.join(source_dir, "panorama_%d.png" % i) for i in range(6)]
+    face_paths = downloaded_faces if all(os.path.isfile(p) for p in downloaded_faces) else local_faces
+    for i in range(6):
+        path = face_paths[i]
+        if not os.path.isfile(path):
+            return False
+        img = Image.open(path).convert("RGB")
+        if img.width != img.height or (faces and img.size != faces[0].shape[:2][::-1]):
+            print("  bad panorama face size: %s" % path)
+            return False
+        faces.append(np.asarray(img, dtype=np.uint8))
+
+    width, height = 1024, 512
+    lon = ((np.arange(width, dtype=np.float32) + 0.5) / width) * (2.0 * np.pi) - np.pi
+    lat = np.pi * 0.5 - ((np.arange(height, dtype=np.float32) + 0.5) / height) * np.pi
+    cos_lat = np.cos(lat)[:, None]
+    dx = cos_lat * np.cos(lon)[None, :]
+    dy = np.broadcast_to(np.sin(lat)[:, None], dx.shape)
+    dz = cos_lat * np.sin(lon)[None, :]
+    ax, ay, az = np.abs(dx), np.abs(dy), np.abs(dz)
+    face_index = np.empty(dx.shape, dtype=np.uint8)
+    sc = np.empty(dx.shape, dtype=np.float32)
+    tc = np.empty(dx.shape, dtype=np.float32)
+
+    # Minecraft's title panorama face sequence runs around the horizon in
+    # adjacent order 0,1,2,3, followed by zenith and nadir at 4 and 5.
+    # With longitude increasing from -X through -Z, +X, and +Z, preserve
+    # that order and mirror the horizontal cube coordinate to match the
+    # left/right edges captured in the source images.
+    x_major = (ax >= ay) & (ax >= az)
+    y_major = (ay > ax) & (ay >= az)
+    z_major = ~(x_major | y_major)
+    pos_x = x_major & (dx >= 0)
+    neg_x = x_major & (dx < 0)
+    pos_y = y_major & (dy >= 0)
+    neg_y = y_major & (dy < 0)
+    pos_z = z_major & (dz >= 0)
+    neg_z = z_major & (dz < 0)
+    face_index[pos_x], sc[pos_x], tc[pos_x] = 2, dz[pos_x] / ax[pos_x], -dy[pos_x] / ax[pos_x]
+    face_index[neg_x], sc[neg_x], tc[neg_x] = 0, -dz[neg_x] / ax[neg_x], -dy[neg_x] / ax[neg_x]
+    face_index[pos_y], sc[pos_y], tc[pos_y] = 4, dx[pos_y] / ay[pos_y], dz[pos_y] / ay[pos_y]
+    face_index[neg_y], sc[neg_y], tc[neg_y] = 5, dx[neg_y] / ay[neg_y], -dz[neg_y] / ay[neg_y]
+    face_index[pos_z], sc[pos_z], tc[pos_z] = 3, -dx[pos_z] / az[pos_z], -dy[pos_z] / az[pos_z]
+    face_index[neg_z], sc[neg_z], tc[neg_z] = 1, dx[neg_z] / az[neg_z], -dy[neg_z] / az[neg_z]
+
+    face_size = faces[0].shape[0]
+    px = np.clip(((sc + 1.0) * 0.5 * face_size).astype(np.int32), 0, face_size - 1)
+    # Source PNG rows are top-down and panorama faces are rendered as camera
+    # views (sky at row 0). In the cube projection tc decreases as the view
+    # direction moves up, so map it directly to top-down rows here.
+    py = np.clip((((tc + 1.0) * 0.5) * face_size).astype(np.int32), 0, face_size - 1)
+    panorama = np.empty((height, width, 3), dtype=np.uint8)
+    for i, face in enumerate(faces):
+        mask = face_index == i
+        panorama[mask] = face[py[mask], px[mask]]
+    out = Image.fromarray(panorama, "RGB").convert("RGBA")
+    _write_rgba_bmp(out, os.path.join(GEN_MENU, "menu_panorama.bmp"))
+    return True
+
+
 def convert_skins():
     """Convert mob skins at native size (no resize, no crop, no tint)."""
     from PIL import Image
@@ -295,10 +404,13 @@ def main():
     os.makedirs(GEN_TILES, exist_ok=True)
     os.makedirs(GEN_SOUNDS, exist_ok=True)
     os.makedirs(GEN_MOBS, exist_ok=True)
+    os.makedirs(GEN_MENU, exist_ok=True)
     tiles_ok, tiles_missing = convert_tiles()
     arm_ok, arm_missing = convert_player_arm()
     sounds_ok, sounds_missing = convert_sounds()
     skins_ok, skins_missing = convert_skins()
+    menu_font_ok = convert_menu_font()
+    menu_panorama_ok = convert_menu_panorama()
     print("tiles: %d converted, %d missing" % (tiles_ok, len(tiles_missing)))
     for m in tiles_missing:
         print("  missing tile source: %s" % m)
@@ -311,6 +423,8 @@ def main():
     print("skins: %d converted, %d missing" % (skins_ok, len(skins_missing)))
     for m in skins_missing:
         print("  missing skin source: %s" % m)
+    print("menu font: %s" % ("converted" if menu_font_ok else "optional source missing"))
+    print("menu panorama: %s" % ("converted" if menu_panorama_ok else "optional source missing"))
     bad = tiles_missing + arm_missing + sounds_missing + skins_missing
     return 0 if not bad else 1
 

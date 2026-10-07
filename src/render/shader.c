@@ -347,13 +347,15 @@ const char *shader_ui_tex_frag_src(void)
     return "#version 330 core\n"
            "in vec2 vUV;\n"
            "uniform sampler2D uAtlas;\n"
+           "uniform vec3 uTint;\n"
+           "uniform float uAlpha;\n"
            "out vec4 FragColor;\n"
            "void main() {\n"
            "    vec4 tex = texture(uAtlas, vUV);\n"
            "    if (tex.a < 0.05) {\n"
            "        discard;\n"
            "    }\n"
-           "    FragColor = tex;\n"
+           "    FragColor = vec4(tex.rgb * uTint, tex.a * uAlpha);\n"
            "}\n";
 }
 

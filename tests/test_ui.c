@@ -109,13 +109,18 @@ int test_font_basic(void)
 
     float w = 0.0f, h = 0.0f;
     font_measure("AB", 1.0f, &w, &h);
-    TEST_ASSERT_FLOAT_EQ(w, 16.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(w, (float)(font_advance('A') + font_advance('B')), 1e-5f);
     TEST_ASSERT_FLOAT_EQ(h, 8.0f, 1e-5f);
     font_measure("AB", 2.0f, &w, &h);
-    TEST_ASSERT_FLOAT_EQ(w, 32.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(w, 2.0f * (float)(font_advance('A') + font_advance('B')), 1e-5f);
     font_measure("A\nBC", 1.0f, &w, &h);
-    TEST_ASSERT_FLOAT_EQ(w, 16.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(w, fmaxf((float)font_advance('A'),
+                                  (float)(font_advance('B') + font_advance('C'))), 1e-5f);
     TEST_ASSERT_FLOAT_EQ(h, 16.0f, 1e-5f);
+    TEST_ASSERT(font_advance(' ') == 4);
+    TEST_ASSERT(font_advance('i') < font_advance('W'));
+    font_measure("iiii", 1.0f, &w, &h);
+    TEST_ASSERT_FLOAT_EQ(w, (float)(font_advance('i') * 4), 1e-5f);
     font_measure(NULL, 1.0f, &w, &h);
     TEST_ASSERT_FLOAT_EQ(w, 0.0f, 1e-5f);
     font_measure("AB", 0.0f, &w, &h);

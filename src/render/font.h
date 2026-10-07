@@ -1,9 +1,9 @@
 #pragma once
 
-/* Original 8x8 monospace bitmap font (M5): ASCII 32..126, hand-designed
- * for TerraCraft (no copied font data). MSB of each row byte is the left pixel.
- * Pure CPU, headless-testable. Rendered as colored quads through the
- * existing flat UI shader (no texture upload needed).
+/* Original 8x8 TerraCraft bitmap fallback (ASCII 32..126), baked from the
+ * OFL-licensed Monocraft font. MSB of each row byte is the left pixel.
+ * Pure CPU, headless-testable. The renderer may use an owner-local Minecraft
+ * font sheet when available; this fallback remains for clean checkouts.
  */
 
 #include <stddef.h>
@@ -22,6 +22,11 @@
  *   out_rows: receives 8 bytes, MSB-left (must not be NULL).
  */
 void font_glyph(char c, uint8_t out_rows[8]);
+
+/* Proportional advance in bitmap pixels (includes one pixel of spacing;
+ * spaces advance four pixels). Unknown characters use the space advance.
+ */
+int font_advance(char c);
 
 /* Measure text extents (supports '\n' line breaks; '\t' = 4 spaces).
  *

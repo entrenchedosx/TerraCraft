@@ -1,5 +1,7 @@
 #include "render/renderer.h"
+#include "core/bmp.h"
 #include "core/log.h"
+#include "core/path.h"
 #include "core/time.h"
 #include "game/entity.h"
 #include "game/inventory.h"
@@ -77,6 +79,13 @@ struct Renderer {
     unsigned int ui_tex_vbo; /* Icon quad buffer (dynamic, per frame). */
     int ui_tex_ortho_loc; /* uOrtho location (-1 when unavailable). */
     int ui_tex_atlas_loc; /* uAtlas location (-1 when unavailable). */
+    int ui_tex_tint_loc; /* uTint location (-1 when unavailable). */
+    int ui_tex_alpha_loc; /* uAlpha location (-1 when unavailable). */
+    unsigned int menu_panorama_tex; /* Optional owner-local Minecraft panorama. */
+    unsigned int menu_font_tex; /* Optional owner-local Minecraft ASCII font. */
+    unsigned char menu_font_left[128];
+    unsigned char menu_font_width[128];
+    unsigned char menu_font_advance[128];
     Shader *line_shader; /* Owned 3D line program for the block outline. */
     unsigned int line_vao; /* Line segment array (0 when unavailable). */
     unsigned int line_vbo; /* Line segment buffer (dynamic, per outline). */
@@ -825,6 +834,101 @@ void renderer_draw_projectiles(Renderer *r, const ProjectilePool *pool, const Ca
     renderer_end_voxel(r);
 }
 
+/* Load an optional owner-local menu bitmap and upload it as a UI texture.
+ * Generated copies live under mcassets/generated/menu and are ignored by Git.
+ * If the source assets are absent, the procedural font/background remain.
+ */
+static unsigned int renderer_load_menu_bitmap(const char *leaf, int expected_w, int expected_h,
+                                              bool linear, bool repeat_s, BmpImage *out_image)
+{
+    if (out_image != NULL) {
+        memset(out_image, 0, sizeof(*out_image));
+    }
+    if (leaf == NULL || expected_w <= 0 || expected_h <= 0 ||
+        minec_glGenTextures == NULL || minec_glBindTexture == NULL || minec_glTexImage2D == NULL ||
+        minec_glTexParameteri == NULL || minec_glDeleteTextures == NULL) {
+        return 0;
+    }
+    char dir[PATH_MAX_LEN];
+    char file[PATH_MAX_LEN];
+    if (path_mcassets_dir(dir, sizeof(dir), "generated/menu") != 0 ||
+        path_join(file, sizeof(file), dir, leaf) != 0) {
+        return 0;
+    }
+    BmpImage image = {0};
+    if (bmp_load_file(file, &image) != 0 || image.px == NULL || image.width != expected_w ||
+        image.height != expected_h) {
+        bmp_free(&image);
+        return 0;
+    }
+    unsigned int texture = 0;
+    minec_glGenTextures(1, &texture);
+    if (texture == 0) {
+        bmp_free(&image);
+        return 0;
+    }
+    minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, texture);
+    minec_glTexImage2D((MinecGLenum)MINEC_GL_TEXTURE_2D, 0, (MinecGLint)MINEC_GL_RGBA,
+                       (MinecGLsizei)image.width, (MinecGLsizei)image.height, 0,
+                       (MinecGLenum)MINEC_GL_RGBA, (MinecGLenum)MINEC_GL_UNSIGNED_BYTE, image.px);
+    minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_MIN_FILTER,
+                          (MinecGLint)(linear ? MINEC_GL_LINEAR : MINEC_GL_NEAREST));
+    minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_MAG_FILTER,
+                          (MinecGLint)(linear ? MINEC_GL_LINEAR : MINEC_GL_NEAREST));
+    minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_WRAP_S,
+                          (MinecGLint)(repeat_s ? MINEC_GL_REPEAT : MINEC_GL_CLAMP_TO_EDGE));
+    minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_WRAP_T,
+                          (MinecGLint)MINEC_GL_CLAMP_TO_EDGE);
+    minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, 0);
+    if (out_image != NULL) {
+        *out_image = image;
+    } else {
+        bmp_free(&image);
+    }
+    return texture;
+}
+
+/* Cache proportional metrics from the owner's 16x16 Minecraft ASCII sheet.
+ * BMP pixels are top-down RGBA; each glyph occupies an 8x8 cell.
+ */
+static void renderer_read_menu_font_metrics(Renderer *r, const BmpImage *image)
+{
+    if (r == NULL || image == NULL || image->px == NULL || image->width != 128 || image->height != 128) {
+        return;
+    }
+    for (int c = FONT_FIRST; c < FONT_FIRST + FONT_COUNT; ++c) {
+        int left = 8;
+        int right = -1;
+        int cell_x = (c % 16) * 8;
+        int cell_y = (c / 16) * 8;
+        for (int y = 0; y < 8; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                size_t pixel = ((size_t)(cell_y + y) * 128u + (size_t)(cell_x + x)) * 4u;
+                if (image->px[pixel + 3] > 16u) {
+                    if (x < left) {
+                        left = x;
+                    }
+                    if (x > right) {
+                        right = x;
+                    }
+                }
+            }
+        }
+        if (right < left) {
+            r->menu_font_left[c] = 0;
+            r->menu_font_width[c] = 0;
+            r->menu_font_advance[c] = (unsigned char)(c == ' ' ? 4 : font_advance((char)c));
+            continue;
+        }
+        r->menu_font_left[c] = (unsigned char)left;
+        r->menu_font_width[c] = (unsigned char)(right - left + 1);
+        r->menu_font_advance[c] = (unsigned char)(right - left + 2);
+    }
+    r->menu_font_width[' '] = 0;
+    r->menu_font_left[' '] = 0;
+    r->menu_font_advance[' '] = 4;
+}
+
 /* Create a renderer.
  *
  * Args:
@@ -861,6 +965,8 @@ Renderer *renderer_create(GlContext *gl)
     r->ui_ortho_loc = -1;
     r->ui_tex_ortho_loc = -1;
     r->ui_tex_atlas_loc = -1;
+    r->ui_tex_tint_loc = -1;
+    r->ui_tex_alpha_loc = -1;
 
     /* Depth + culling + single-pass alpha blending (system GL, 1.1 tokens). */
     glEnable(GL_DEPTH_TEST);
@@ -998,6 +1104,8 @@ Renderer *renderer_create(GlContext *gl)
     } else {
         r->ui_tex_ortho_loc = shader_get_uniform_location(r->ui_tex_shader, "uOrtho");
         r->ui_tex_atlas_loc = shader_get_uniform_location(r->ui_tex_shader, "uAtlas");
+        r->ui_tex_tint_loc = shader_get_uniform_location(r->ui_tex_shader, "uTint");
+        r->ui_tex_alpha_loc = shader_get_uniform_location(r->ui_tex_shader, "uAlpha");
         if (minec_glGenVertexArrays != NULL && minec_glGenBuffers != NULL) {
             minec_glGenVertexArrays(1, &r->ui_tex_vao);
             minec_glGenBuffers(1, &r->ui_tex_vbo);
@@ -1019,6 +1127,25 @@ Renderer *renderer_create(GlContext *gl)
         } else {
             LOG_WARN("renderer_create: icon buffers unavailable; item icons will be hidden");
         }
+    }
+
+    /* Optional exact Minecraft menu assets are converted into ignored local
+     * BMPs by tools/convert_mcassets.py; clean installs keep TerraCraft's
+     * proportional Monocraft font and generated background fallback. */
+    r->menu_panorama_tex = renderer_load_menu_bitmap("menu_panorama.bmp", 1024, 512,
+                                                     true, true, NULL);
+    if (r->menu_panorama_tex != 0) {
+        LOG_INFO("renderer_create: loaded owner-local menu panorama");
+    }
+    {
+        BmpImage font_image = {0};
+        r->menu_font_tex = renderer_load_menu_bitmap("menu_font.bmp", 128, 128,
+                                                     false, false, &font_image);
+        if (r->menu_font_tex != 0) {
+            renderer_read_menu_font_metrics(r, &font_image);
+            LOG_INFO("renderer_create: loaded owner-local Minecraft ASCII menu font");
+        }
+        bmp_free(&font_image);
     }
 
     /* 3D line pipeline (block selection outline). Same degrade-silently
@@ -1096,6 +1223,10 @@ void renderer_destroy(Renderer *r)
     }
     texture_atlas_delete(r->player_skin_tex);
     r->player_skin_tex = 0;
+    texture_atlas_delete(r->menu_panorama_tex);
+    r->menu_panorama_tex = 0;
+    texture_atlas_delete(r->menu_font_tex);
+    r->menu_font_tex = 0;
     shader_destroy(r->shader);
     free(r->part_verts);
     free(r->part_idx);
@@ -1846,13 +1977,58 @@ static bool renderer_ui_ready(const Renderer *r)
            minec_glDrawArrays != NULL;
 }
 
-/* Icon pipe readiness check. */
-static bool renderer_ui_tex_ready(const Renderer *r)
+/* Textured UI pipe readiness check. */
+static bool renderer_ui_tex_pipeline_ready(const Renderer *r)
 {
     return r != NULL && r->ui_tex_shader != NULL && shader_is_ready(r->ui_tex_shader) &&
-           r->ui_tex_vao != 0 && r->ui_tex_vbo != 0 && r->atlas != 0 &&
+           r->ui_tex_vao != 0 && r->ui_tex_vbo != 0 &&
            minec_glBindVertexArray != NULL && minec_glBindBuffer != NULL && minec_glBufferData != NULL &&
            minec_glDrawArrays != NULL && minec_glBindTexture != NULL;
+}
+
+/* Atlas icon draws additionally require the atlas texture. */
+static bool renderer_ui_tex_ready(const Renderer *r)
+{
+    return renderer_ui_tex_pipeline_ready(r) && r->atlas != 0;
+}
+
+/* Shared textured UI pass for atlas icons, the optional panorama, and the
+ * optional bitmap font. Vertices use x,y,u,v (four floats per vertex).
+ */
+static bool renderer_draw_ui_texture_verts(Renderer *r, int width, int height, unsigned int texture,
+                                           const float *verts, size_t vertex_count,
+                                           float tint_r, float tint_g, float tint_b, float alpha)
+{
+    if (r == NULL || width <= 0 || height <= 0 || texture == 0 || verts == NULL || vertex_count == 0 ||
+        !renderer_ui_tex_pipeline_ready(r)) {
+        return false;
+    }
+    if (shader_bind(r->ui_tex_shader) != MINEC_SHADER_OK) {
+        return false;
+    }
+    Mat4 ortho = mmath_mat4_ortho(0.0f, (float)width, (float)height, 0.0f, -1.0f, 1.0f);
+    shader_set_uniform_mat4(r->ui_tex_ortho_loc, ortho.m);
+    if (minec_glActiveTexture != NULL) {
+        minec_glActiveTexture((MinecGLenum)MINEC_GL_TEXTURE0);
+    }
+    minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, texture);
+    shader_set_uniform_int(r->ui_tex_atlas_loc, 0);
+    shader_set_uniform_vec3(r->ui_tex_tint_loc, tint_r, tint_g, tint_b);
+    shader_set_uniform_float(r->ui_tex_alpha_loc, alpha);
+    minec_glBindVertexArray(r->ui_tex_vao);
+    minec_glBindBuffer((MinecGLenum)MINEC_GL_ARRAY_BUFFER, r->ui_tex_vbo);
+    minec_glBufferData((MinecGLenum)MINEC_GL_ARRAY_BUFFER,
+                       (MinecGLsizeiptr)(vertex_count * 4u * sizeof(float)), verts,
+                       (MinecGLenum)MINEC_GL_STATIC_DRAW);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    minec_glDrawArrays((MinecGLenum)MINEC_GL_TRIANGLES, 0, (MinecGLsizei)vertex_count);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, 0);
+    minec_glBindVertexArray(0);
+    shader_unbind();
+    return true;
 }
 
 /* Draw textured item icons (atlas tiles) as 2D quads. depth off, blend
@@ -1871,31 +2047,45 @@ void renderer_draw_item_icons(Renderer *r, int width, int height, const IconBatc
     if (!renderer_ui_tex_ready(r)) {
         return;
     }
-    if (shader_bind(r->ui_tex_shader) != MINEC_SHADER_OK) {
-        return;
-    }
-    Mat4 ortho = mmath_mat4_ortho(0.0f, (float)width, (float)height, 0.0f, -1.0f, 1.0f);
-    shader_set_uniform_mat4(r->ui_tex_ortho_loc, ortho.m);
-    if (minec_glActiveTexture != NULL) {
-        minec_glActiveTexture((MinecGLenum)MINEC_GL_TEXTURE0);
-    }
-    minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, r->atlas);
-    shader_set_uniform_int(r->ui_tex_atlas_loc, 0);
-    minec_glBindVertexArray(r->ui_tex_vao);
-    minec_glBindBuffer((MinecGLenum)MINEC_GL_ARRAY_BUFFER, r->ui_tex_vbo);
     size_t verts = (size_t)b->quads * 6;
-    minec_glBufferData((MinecGLenum)MINEC_GL_ARRAY_BUFFER,
-                       (MinecGLsizeiptr)(verts * ICON_FLOATS_PER_VERT * sizeof(float)), b->verts,
-                       (MinecGLenum)MINEC_GL_STATIC_DRAW);
-    /* Same overlay convention as the flat pass: no culling, no depth. */
-    glDisable(GL_CULL_FACE);
-    glDisable(GL_DEPTH_TEST);
-    minec_glDrawArrays((MinecGLenum)MINEC_GL_TRIANGLES, 0, (MinecGLsizei)verts);
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
-    minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, 0);
-    minec_glBindVertexArray(0);
-    shader_unbind();
+    (void)renderer_draw_ui_texture_verts(r, width, height, r->atlas, b->verts, verts,
+                                         1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+/* Draw the owner-local Minecraft title panorama with a slow horizontal
+ * camera drift. It returns false when local game assets were not supplied;
+ * callers then draw TerraCraft's own animated fallback scene.
+ */
+bool renderer_draw_menu_panorama(Renderer *r, int width, int height, float seconds)
+{
+    if (r == NULL || r->menu_panorama_tex == 0 || width <= 0 || height <= 0) {
+        return false;
+    }
+    float aspect = (float)width / (float)height;
+    float u_span = atanf(aspect) / 3.14159265358979323846f;
+    if (u_span < 0.12f) {
+        u_span = 0.12f;
+    } else if (u_span > 0.48f) {
+        u_span = 0.48f;
+    }
+    float phase = fmodf(fmaxf(0.0f, seconds) * 0.0018f, 1.0f);
+    float u0 = 0.5f - u_span * 0.5f + phase;
+    float u1 = u0 + u_span;
+    float v_span = 0.25f;
+    float v0 = 0.5f - v_span * 0.5f + sinf(seconds * 0.025f) * 0.004f;
+    float v1 = v0 + v_span;
+    float w = (float)width;
+    float h = (float)height;
+    const float verts[24] = {
+        0.0f, 0.0f, u0, v0,
+        w,    0.0f, u1, v0,
+        0.0f, h,    u0, v1,
+        0.0f, h,    u0, v1,
+        w,    0.0f, u1, v0,
+        w,    h,    u1, v1,
+    };
+    return renderer_draw_ui_texture_verts(r, width, height, r->menu_panorama_tex,
+                                          verts, 6, 1.0f, 1.0f, 1.0f, 1.0f);
 }
 
 /* Count drawable buffers (opaque pass; semantics unchanged from M4).
@@ -2030,16 +2220,9 @@ void renderer_draw_rects(Renderer *r, int width, int height, const float *verts,
 void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, float cg, float cb, float ca,
                         const char *text)
 {
-    if (r == NULL || text == NULL || text[0] == '\0' || !(scale > 0.0f) || !renderer_ui_ready(r)) {
-        return;
-    }
-    /* Scratch cap: per-pixel quads, worst case 64 px/char x 6 verts =
-     * 384 verts/char, so dense fills truncate early (font_build_quads stops
-     * at the cap, never overflows). Typical sparse glyphs (~1/4 fill) fit
-     * ~200 chars; hard clip is 160. */
-    enum { TEXT_MAX_VERTS = 20000 };
-    float *verts = (float *)malloc((size_t)TEXT_MAX_VERTS * HUD_FLOATS_PER_VERT * sizeof(float));
-    if (verts == NULL) {
+    bool textured_font = r != NULL && r->menu_font_tex != 0 && renderer_ui_tex_pipeline_ready(r);
+    if (r == NULL || text == NULL || text[0] == '\0' || !(scale > 0.0f) ||
+        (!textured_font && !renderer_ui_ready(r))) {
         return;
     }
     char clipped[161];
@@ -2049,6 +2232,66 @@ void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, fl
     }
     memcpy(clipped, text, n);
     clipped[n] = '\0';
+
+    if (textured_font) {
+        /* One 8x8 texture quad per printable glyph; bounded stack scratch
+         * avoids per-label allocations on the menu and HUD paths. */
+        float verts[160 * 6 * 4];
+        size_t floats = 0;
+        float cx = x;
+        float cy = y;
+        for (const unsigned char *p = (const unsigned char *)clipped; *p != '\0'; ++p) {
+            unsigned char c = *p;
+            if (c == '\n') {
+                cx = x;
+                cy += 8.0f * scale;
+                continue;
+            }
+            if (c == '\t') {
+                cx += (float)(r->menu_font_advance[' '] * 4u) * scale;
+                continue;
+            }
+            int advance = (c >= FONT_FIRST && c < FONT_FIRST + FONT_COUNT)
+                              ? r->menu_font_advance[c]
+                              : font_advance((char)c);
+            if (c >= FONT_FIRST && c < FONT_FIRST + FONT_COUNT) {
+                int width = r->menu_font_width[c];
+                if (width > 0 && floats + 24u <= sizeof(verts) / sizeof(verts[0])) {
+                    int left = r->menu_font_left[c];
+                    int atlas_x = (c % 16u) * 8u;
+                    int atlas_y = (c / 16u) * 8u;
+                    float u0 = (float)(atlas_x + left) / 128.0f;
+                    float u1 = (float)(atlas_x + left + width) / 128.0f;
+                    float v0 = (float)atlas_y / 128.0f;
+                    float v1 = (float)(atlas_y + 8) / 128.0f;
+                    float x1 = cx + (float)width * scale;
+                    float y1 = cy + 8.0f * scale;
+                    verts[floats++] = cx; verts[floats++] = cy; verts[floats++] = u0; verts[floats++] = v0;
+                    verts[floats++] = x1; verts[floats++] = cy; verts[floats++] = u1; verts[floats++] = v0;
+                    verts[floats++] = cx; verts[floats++] = y1; verts[floats++] = u0; verts[floats++] = v1;
+                    verts[floats++] = cx; verts[floats++] = y1; verts[floats++] = u0; verts[floats++] = v1;
+                    verts[floats++] = x1; verts[floats++] = cy; verts[floats++] = u1; verts[floats++] = v0;
+                    verts[floats++] = x1; verts[floats++] = y1; verts[floats++] = u1; verts[floats++] = v1;
+                }
+            }
+            cx += (float)advance * scale;
+        }
+        if (floats > 0) {
+            (void)renderer_draw_ui_texture_verts(r, r->vp_width, r->vp_height, r->menu_font_tex,
+                                                 verts, floats / 4u, cr, cg, cb, ca);
+        }
+        return;
+    }
+
+    /* Scratch cap: per-pixel quads, worst case 64 px/char x 6 verts =
+     * 384 verts/char, so dense fills truncate early (font_build_quads stops
+     * at the cap, never overflows). Typical sparse glyphs (~1/4 fill) fit
+     * ~200 chars; hard clip is 160. */
+    enum { TEXT_MAX_VERTS = 20000 };
+    float *verts = (float *)malloc((size_t)TEXT_MAX_VERTS * HUD_FLOATS_PER_VERT * sizeof(float));
+    if (verts == NULL) {
+        return;
+    }
     size_t count = font_build_quads(clipped, x, y, scale, cr, cg, cb, ca, verts, TEXT_MAX_VERTS);
     if (count > 0) {
         /* Viewport size only feeds the ortho matrix; reuse last known size. */
@@ -2063,7 +2306,43 @@ void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, fl
  *   text, scale: string and pixel scale.
  *   out_w/out_h: receivers.
  */
-void renderer_measure_text(const char *text, float scale, float *out_w, float *out_h)
+void renderer_measure_text(Renderer *r, const char *text, float scale, float *out_w, float *out_h)
 {
-    font_measure(text, scale, out_w, out_h);
+    if (text == NULL || !(scale > 0.0f) || r == NULL || r->menu_font_tex == 0 ||
+        !renderer_ui_tex_pipeline_ready(r)) {
+        font_measure(text, scale, out_w, out_h);
+        return;
+    }
+    float width = 0.0f;
+    float height = 0.0f;
+    float line = 0.0f;
+    float max_width = 0.0f;
+    unsigned lines = 1;
+    for (const unsigned char *p = (const unsigned char *)text; *p != '\0'; ++p) {
+        unsigned char c = *p;
+        if (c == '\n') {
+            if (line > max_width) {
+                max_width = line;
+            }
+            line = 0.0f;
+            ++lines;
+        } else if (c == '\t') {
+            line += (float)(r->menu_font_advance[' '] * 4u) * scale;
+        } else if (c >= FONT_FIRST && c < FONT_FIRST + FONT_COUNT) {
+            line += (float)r->menu_font_advance[c] * scale;
+        } else {
+            line += (float)font_advance((char)c) * scale;
+        }
+    }
+    if (line > max_width) {
+        max_width = line;
+    }
+    width = max_width;
+    height = (float)lines * 8.0f * scale;
+    if (out_w != NULL) {
+        *out_w = width;
+    }
+    if (out_h != NULL) {
+        *out_h = height;
+    }
 }

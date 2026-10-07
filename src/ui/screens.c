@@ -58,7 +58,7 @@
 #define SCR_GAP 12.0f
 #define SCR_TITLE_SCALE 4.0f
 #define SCR_TEXT_SCALE 2.0f
-#define SCR_SMALL_SCALE 1.0f
+#define SCR_SMALL_SCALE 1.5f
 
 /* Scratch rect buffer for one screen (stack-friendly, bounded). */
 #define SCR_MAX_RECT_VERTS 2048
@@ -125,7 +125,7 @@ static void stext_c(AppContext *app, const char *s, float cx, float y, float sca
 {
     float w = 0.0f;
     float h = 0.0f;
-    renderer_measure_text(s, scale, &w, &h);
+    renderer_measure_text(app->renderer, s, scale, &w, &h);
     renderer_draw_text(app->renderer, cx - w * 0.5f, y, scale, r, g, b, 1.0f, s);
 }
 
@@ -149,7 +149,7 @@ static bool sbutton(AppContext *app, const UiFrame *ui, float *rects, size_t *rn
     sflush(app, rects, rn);
     float tw = 0.0f;
     float th = 0.0f;
-    renderer_measure_text(label, SCR_TEXT_SCALE, &tw, &th);
+    renderer_measure_text(app->renderer, label, SCR_TEXT_SCALE, &tw, &th);
     float tr = enabled ? SCR_TXT_R : SCR_DIM_R;
     float tg = enabled ? SCR_TXT_G : SCR_DIM_G;
     float tb = enabled ? SCR_TXT_B : SCR_DIM_B;
@@ -173,39 +173,31 @@ static float stitle(AppContext *app, const char *title, const char *sub, float c
     return y;
 }
 
-/* Full-screen dim background. Dirt tiling like Minecraft's menu
- * screens (procedural atlas tile through the icon pipe), darkened with
- * a flat veil so text stays legible. Falls back to the dark clear color
- * when the textured pipe or atlas is unavailable.
+static void smenu_background(AppContext *app, float *rects, size_t *rn, float anim_t);
+
+/* Full-screen moving panorama shared by the title and menu screens. It uses
+ * the owner's local Minecraft cube faces when converted; clean checkouts
+ * keep the original TerraCraft animated landscape as their fallback.
  */
+static void sbackground_frame(AppContext *app, float *rects, size_t *rn, float shade)
+{
+    float anim_t = (float)(app->last_frame_time - app->start_time);
+    renderer_set_clear_color(app->renderer, 0.04f, 0.05f, 0.07f, 1.0f);
+    renderer_clear(app->renderer);
+    if (!renderer_draw_menu_panorama(app->renderer, app->width, app->height, anim_t)) {
+        smenu_background(app, rects, rn, anim_t);
+        return;
+    }
+    if (shade > 0.0f) {
+        srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height,
+              0.015f, 0.02f, 0.03f, shade);
+        sflush(app, rects, rn);
+    }
+}
+
 static void sbackground(AppContext *app, float *rects, size_t *rn)
 {
-    renderer_set_clear_color(app->renderer, 0.08f, 0.07f, 0.06f, 1.0f);
-    renderer_clear(app->renderer);
-    float w = (float)app->width;
-    float h = (float)app->height;
-    float cell = 64.0f;
-    int cols = (int)(w / cell) + 2;
-    int rows = (int)(h / cell) + 2;
-    IconBatch batch;
-    icons_clear(&batch);
-    for (int ty = 0; ty < rows; ++ty) {
-        for (int tx = 0; tx < cols; ++tx) {
-            if (batch.quads >= ICON_MAX_QUADS) {
-                renderer_draw_item_icons(app->renderer, app->width, app->height, &batch);
-                icons_clear(&batch);
-            }
-            /* Slight checker offset so the tiling reads as blocks. */
-            float ox = (ty % 2 == 0) ? 0.0f : -cell * 0.5f;
-            icons_push(&batch, (float)tx * cell + ox, (float)ty * cell, cell, TILE_DIRT);
-        }
-    }
-    if (batch.quads > 0) {
-        renderer_draw_item_icons(app->renderer, app->width, app->height, &batch);
-    }
-    icons_clear(&batch);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, w, h, 0.02f, 0.02f, 0.03f, 0.62f);
-    sflush(app, rects, rn);
+    sbackground_frame(app, rects, rn, 0.44f);
 }
 
 /* Refresh the cached world list (resets cursor/scroll/confirm). */
@@ -443,7 +435,7 @@ static bool smenu_button(AppContext *app, const UiFrame *ui, float *rects, size_
 
     float tw = 0.0f;
     float th = 0.0f;
-    renderer_measure_text(label, text_scale, &tw, &th);
+    renderer_measure_text(app->renderer, label, text_scale, &tw, &th);
     float tx = x + (w - tw) * 0.5f;
     float ty = y + (h - th) * 0.5f;
     renderer_draw_text(app->renderer, tx + 1.0f, ty + 1.0f, text_scale,
@@ -485,7 +477,7 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     float panel_y = fmaxf(title_bottom + 12.0f, (height - panel_h) * 0.54f);
     panel_y = fminf(panel_y, fmaxf(8.0f, height - panel_h - 30.0f));
 
-    smenu_background(app, rects, &rn, (float)(app->last_frame_time - app->start_time));
+    sbackground_frame(app, rects, &rn, 0.10f);
 
     float plate_x = cx - panel_w * 0.5f + panel_slide;
 
@@ -500,7 +492,7 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
 
     float title_w = 0.0f;
     float title_h = 0.0f;
-    renderer_measure_text("TerraCraft", title_scale, &title_w, &title_h);
+    renderer_measure_text(app->renderer, "TerraCraft", title_scale, &title_w, &title_h);
     /* Title float uses wall time. */
     float wall = (float)(app->last_frame_time - app->start_time);
     float title_x = cx - title_w * 0.5f;
@@ -523,19 +515,22 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
         const char *splash = splashes[splash_idx];
         float pulse = 1.5f + 0.18f * sinf(wall * 3.2f);
         float sw = 0.0f, sh = 0.0f;
-        renderer_measure_text(splash, pulse, &sw, &sh);
+        renderer_measure_text(app->renderer, splash, pulse, &sw, &sh);
         /* Tilted like the real splash: stepped -20 degrees, rising right. */
         float tilt = -0.364f;
         float sx = title_x + title_w - sw * 0.30f;
         float sy = title_ybob + title_h * 0.72f;
-        float charw = 8.0f * pulse;
+        float char_x = 0.0f;
         for (size_t ci = 0; splash[ci] != '\0'; ++ci) {
             char glyph[2] = {(char)splash[ci], '\0'};
-            float gx = sx + (float)ci * charw;
-            float gy = sy + (float)ci * charw * tilt;
+            float charw = 0.0f;
+            renderer_measure_text(app->renderer, glyph, pulse, &charw, NULL);
+            float gx = sx + char_x;
+            float gy = sy + char_x * tilt;
             renderer_draw_text(app->renderer, gx + 2.0f, gy + 2.0f, pulse, 0.10f, 0.10f, 0.05f,
                                0.9f, glyph);
             renderer_draw_text(app->renderer, gx, gy, pulse, 1.0f, 1.0f, 0.20f, 1.0f, glyph);
+            char_x += charw;
         }
     }
 
@@ -575,10 +570,12 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     if (app->username[0] != '\0') {
         char profile[48];
         snprintf(profile, sizeof(profile), "PLAYER: %.24s", app->username);
-        float profile_scale = fminf(SCR_SMALL_SCALE, (width - 32.0f) / ((float)strlen(profile) * 8.0f));
+        float profile_unit_w = 0.0f;
+        renderer_measure_text(app->renderer, profile, 1.0f, &profile_unit_w, NULL);
+        float profile_scale = fminf(SCR_SMALL_SCALE, (width - 32.0f) / fmaxf(1.0f, profile_unit_w));
         float profile_w = 0.0f;
         float profile_h = 0.0f;
-        renderer_measure_text(profile, profile_scale, &profile_w, &profile_h);
+        renderer_measure_text(app->renderer, profile, profile_scale, &profile_w, &profile_h);
         float footer_y = fmaxf(4.0f, height - profile_h - 11.0f);
         float footer_w = fminf(width - 20.0f, profile_w + 18.0f);
         srect(rects, &rn, SCR_MAX_RECT_VERTS, 10.0f, footer_y - 4.0f, footer_w, profile_h + 8.0f,
@@ -594,7 +591,7 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     {
         const char *note = "Original engine - not affiliated with Mojang";
         float nw = 0.0f, nh = 0.0f;
-        renderer_measure_text(note, SCR_SMALL_SCALE, &nw, &nh);
+        renderer_measure_text(app->renderer, note, SCR_SMALL_SCALE, &nw, &nh);
         renderer_draw_text(app->renderer, width - nw - 10.0f, height - nh - 8.0f, SCR_SMALL_SCALE,
                            0.55f, 0.55f, 0.52f, 1.0f, note);
     }
@@ -1148,7 +1145,7 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     snprintf(pack_label, sizeof(pack_label), "%s", pack_name);
     float pw = 0.0f;
     float ph = 0.0f;
-    renderer_measure_text(pack_label, SCR_TEXT_SCALE, &pw, &ph);
+    renderer_measure_text(app->renderer, pack_label, SCR_TEXT_SCALE, &pw, &ph);
     renderer_draw_text(app->renderer, fx + sw + 12.0f, y, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B,
                        1.0f, pack_label);
     if (sbutton(app, ui, rects, &rn, fx + sw + 24.0f + pw, y - 6.0f, 40.0f, 36.0f, ">", app->menu.pack_count > 1)) {
@@ -1289,7 +1286,7 @@ static void sslot_count(AppContext *app, float x, float y, const ItemStack *slot
     snprintf(cb, sizeof(cb), "%u", (unsigned)slot->count);
     float tw = 0.0f;
     float th = 0.0f;
-    renderer_measure_text(cb, SCR_SMALL_SCALE + 1.0f, &tw, &th);
+    renderer_measure_text(app->renderer, cb, SCR_SMALL_SCALE + 1.0f, &tw, &th);
     renderer_draw_text(app->renderer, x + SINV_SLOT - tw - 3.0f, y + SINV_SLOT - th - 2.0f,
                        SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, cb);
 }

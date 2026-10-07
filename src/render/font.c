@@ -119,10 +119,48 @@ void font_glyph(char c, uint8_t out_rows[8])
     memcpy(out_rows, FONT[uc - FONT_FIRST], 8);
 }
 
-/* Advance helper: cell width in scaled pixels. */
-static float cell_w(float scale)
+/* Ink bounds in the fallback glyph cell. Empty glyphs return left=0,
+ * right=-1 and receive the dedicated space advance below.
+ */
+static void glyph_bounds(char c, int *out_left, int *out_right)
 {
-    return (float)FONT_W * scale;
+    uint8_t rows[FONT_H];
+    int left = FONT_W;
+    int right = -1;
+    font_glyph(c, rows);
+    for (int y = 0; y < FONT_H; ++y) {
+        for (int x = 0; x < FONT_W; ++x) {
+            if ((rows[y] & (uint8_t)(0x80u >> x)) != 0) {
+                if (x < left) {
+                    left = x;
+                }
+                if (x > right) {
+                    right = x;
+                }
+            }
+        }
+    }
+    if (left == FONT_W) {
+        left = 0;
+    }
+    if (out_left != NULL) {
+        *out_left = left;
+    }
+    if (out_right != NULL) {
+        *out_right = right;
+    }
+}
+
+/* Proportional glyph advance, including one pixel of tracking. */
+int font_advance(char c)
+{
+    if (c == ' ') {
+        return 4;
+    }
+    int left = 0;
+    int right = -1;
+    glyph_bounds(c, &left, &right);
+    return right >= left ? right - left + 2 : 4;
 }
 
 /* Measure text extents. */
@@ -142,9 +180,9 @@ void font_measure(const char *text, float scale, float *out_w, float *out_h)
                 line = 0.0f;
                 ++lines;
             } else if (*p == '\t') {
-                line += cell_w(scale) * 4.0f;
+                line += (float)(font_advance(' ') * 4) * scale;
             } else {
-                line += cell_w(scale);
+                line += (float)font_advance(*p) * scale;
             }
         }
         if (line > maxw) {
@@ -229,15 +267,19 @@ size_t font_build_quads(const char *text, float x, float y, float scale, float r
             continue;
         }
         if (c == '\t') {
-            cx += cell_w(scale) * 4.0f;
+            cx += (float)(font_advance(' ') * 4) * scale;
             continue;
         }
         font_glyph(c, rows);
+        int left = 0;
+        int right = -1;
+        glyph_bounds(c, &left, &right);
         for (int row = 0; row < FONT_H; ++row) {
             uint8_t bits = rows[row];
-            for (int col = 0; col < FONT_W; ++col) {
+            for (int col = left; col <= right; ++col) {
                 if (bits & (0x80u >> col)) {
-                    n = emit_px(out_verts, cap_verts, n, cx + (float)col * scale, cy + (float)row * scale,
+                    n = emit_px(out_verts, cap_verts, n,
+                                cx + (float)(col - left) * scale, cy + (float)row * scale,
                                 scale, r, g, b, a);
                     if (n + 6 > cap_verts) {
                         return n; /* Full: stop mid-glyph rather than overflow. */
@@ -245,7 +287,7 @@ size_t font_build_quads(const char *text, float x, float y, float scale, float r
                 }
             }
         }
-        cx += cell_w(scale);
+        cx += (float)font_advance(c) * scale;
     }
     return n;
 }

@@ -26,6 +26,20 @@ for building or running a fresh checkout. The build copies generated files
 beside the executable when the local directory exists. The game logs the
 number of tiles loaded; missing assets use procedural/synthesized fallbacks.
 
+When `mcassets/downloaded/menu/` contains the six title faces, the converter
+uses those; otherwise it checks the local Java asset tree. It likewise uses
+`mcassets/downloaded/menu/ascii.png` when supplied, then falls back to
+`textures/font/ascii.png` in the local tree. The converter writes
+`mcassets/generated/menu/menu_panorama.bmp` and `menu_font.bmp`; the game
+slowly pans the panorama behind menus and uses the proportional ASCII glyphs.
+This workspace's downloaded cache is from the official Minecraft Java 1.21.11
+release. It is verified and converted locally; the game does not make network
+requests. These extracted assets remain owner-local and ignored by Git; clean
+checkouts use TerraCraft's animated landscape and the bundled OFL Monocraft
+fallback.
+Do not add extracted Minecraft assets to Git; see the
+[Minecraft EULA](https://www.minecraft.net/en-us/eula).
+
 ## User pack layout
 
 ```text
