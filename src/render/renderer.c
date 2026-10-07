@@ -646,7 +646,9 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     }
     Vec3 pose_offset = {bob_x - raise * 0.5f, bob_y - dip + raise * 0.7f, raise * 0.3f};
     Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.62f, -0.30f, 0.98f), pose_offset);
-    const float rest_roll = -2.20f;
+    /* Keep the sleeve/shoulder end above the wrist in view space. The former
+     * -2.20 rad roll crossed 90 degrees and turned the arm upside down. */
+    const float rest_roll = -0.35f;
     float swing_x = 0.70f * punch;
     float swing_y = 0.06f * punch + bob_x * 0.8f;
     Vec3 eye = camera_get_position(cam);

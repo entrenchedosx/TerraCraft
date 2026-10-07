@@ -58,8 +58,8 @@ int test_camera_viewmodel_fov_compensation(void)
     return failures;
 }
 
-/* The first-person sleeve must enter from lower-right and the wrist must
- * sit inward and higher at rest and during a normal punch. */
+/* The sleeve stays at the shoulder end, above and to the right of the wrist;
+ * the held item remains attached at the wrist through a punch. */
 int test_player_viewmodel_arm_pose(void)
 {
     int failures = 0;
@@ -67,15 +67,26 @@ int test_player_viewmodel_arm_pose(void)
     Vec3 sleeve_end = mmath_vec3(0.84f, -0.04f, 1.00f);
     Vec3 wrist_end = mmath_vec3(0.84f, -0.52f, 1.00f);
     const float swings[] = {0.0f, 0.70f};
+    /* Centers of the block and tool models authored by the renderer. */
+    const Vec3 item_centers[] = {
+        {0.81f, -0.43f, 0.87f},
+        {0.815f, -0.425f, 0.89f}
+    };
     for (size_t i = 0; i < sizeof(swings) / sizeof(swings[0]); ++i) {
         Vec3 sleeve = player_viewmodel_arm_transform_point(sleeve_end, shoulder,
-                                                           -2.20f, swings[i], 0.06f * swings[i]);
+                                                           -0.35f, swings[i], 0.06f * swings[i]);
         Vec3 wrist = player_viewmodel_arm_transform_point(wrist_end, shoulder,
-                                                          -2.20f, swings[i], 0.06f * swings[i]);
-        TEST_ASSERT(sleeve.x > wrist.x);
-        TEST_ASSERT(sleeve.y < wrist.y);
-        TEST_ASSERT(wrist.x > 0.0f && sleeve.x < 1.0f);
-        TEST_ASSERT(wrist.y > -0.8f && sleeve.y > -1.1f);
+                                                          -0.35f, swings[i], 0.06f * swings[i]);
+        TEST_ASSERT(sleeve.y > wrist.y);
+        TEST_ASSERT(wrist.x < sleeve.x);
+        TEST_ASSERT(wrist.x > 0.45f && sleeve.x < 1.10f);
+        TEST_ASSERT(wrist.y > -0.80f && sleeve.y < 0.10f);
+        for (size_t item_index = 0; item_index < sizeof(item_centers) / sizeof(item_centers[0]); ++item_index) {
+            Vec3 item = player_viewmodel_arm_transform_point(
+                item_centers[item_index], shoulder, -0.35f + 0.28f,
+                swings[i], 0.06f * swings[i]);
+            TEST_ASSERT(mmath_vec3_length(mmath_vec3_sub(item, wrist)) < 0.26f);
+        }
     }
     return failures;
 }

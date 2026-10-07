@@ -354,6 +354,19 @@ triaged against the user's report.
   unimplemented. `docs/WORLD_PHYSICS.md` records the implemented rules and
   remaining limits.
 
+### Round 11 — first-person arm orientation
+
+- The latest screenshot still showed the forearm turned upside down. The
+  camera-space roll was -2.20 radians, rotating the arm past vertical; the
+  previous pose regression expected that reversed shoulder/wrist order and
+  therefore protected the bug.
+- Changed the rest cant to -0.35 radians. The regression now requires the
+  shoulder/sleeve end above and to the right of the wrist, with the held item
+  kept near the hand both at rest and during a swing.
+- Debug and Release builds and CTest pass after the change. A new in-game
+  capture of the corrected build has not yet been made, so the final visual
+  check remains open.
+
 ## Research
 
 - [Gauntlet Loop](https://thrixel.com/learn/gauntlet-loop) — description of
