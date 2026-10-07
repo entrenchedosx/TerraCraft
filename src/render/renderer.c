@@ -616,18 +616,23 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     int item_part = arm_parts;
     int count = arm_parts + (has_item ? 1 : 0);
     MobModelPart parts[3];
-    /* Keep the authored 4:12:4 arm proportions. The shoulder enters from
-     * the lower-right while the wrist turns inward and up toward center. */
-    parts[0] = (MobModelPart){{0.76f, -0.52f, 0.92f}, {0.16f, 0.48f, 0.16f},
+    /* Compact corner arm (screenshot-verified framing): a slim box low in
+     * the bottom-right, sleeve art on top, hand at the wrist end below,
+     * held item gripped beside the upper arm. No rest roll — the box is
+     * authored upright and stays upright (a roll past 90 degrees is what
+     * turned it upside down before). */
+    parts[0] = (MobModelPart){{0.34f, -0.44f, 0.575f}, {0.07f, 0.41f, 0.075f},
                               TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE};
     if (!has_skin) {
-        parts[1] = (MobModelPart){{0.76f, -0.58f, 0.88f}, {0.16f, 0.12f, 0.16f},
+        parts[1] = (MobModelPart){{0.34f, -0.44f, 0.57f}, {0.07f, 0.07f, 0.08f},
                                   TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE};
     }
     if (has_item) {
-        parts[item_part] = (MobModelPart){{0.76f, -0.48f, held_block != 0 ? 0.82f : 0.87f},
-                                          held_block != 0 ? mmath_vec3(0.10f, 0.10f, 0.10f)
-                                                          : mmath_vec3(0.11f, 0.11f, 0.04f),
+        /* Gripped up-left of the wrist toward the crosshair (unrolled:
+         * authored directly in viewmodel space, still punches). */
+        parts[item_part] = (MobModelPart){{0.30f, -0.16f, 0.62f},
+                                          held_block != 0 ? mmath_vec3(0.09f, 0.09f, 0.09f)
+                                                          : mmath_vec3(0.11f, 0.11f, 0.02f),
                                           held_tile, -1, 0.0f, MOB_ANIM_NONE};
     }
     /* Controller pose: stride bob, landing dip, use raise, punch envelope.
@@ -645,11 +650,12 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
         punch = pose->punch;
     }
     Vec3 pose_offset = {bob_x - raise * 0.5f, bob_y - dip + raise * 0.7f, raise * 0.3f};
-    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.62f, -0.30f, 0.98f), pose_offset);
-    /* Keep the sleeve/shoulder end above the wrist in view space. The former
-     * -2.20 rad roll crossed 90 degrees and turned the arm upside down. */
-    const float rest_roll = -0.35f;
-    float swing_x = 0.70f * punch;
+    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.42f, -0.33f, 0.60f), pose_offset);
+    /* Minecraft layout: the shoulder sits off-frame bottom-right and the
+     * hand reaches up-left toward the crosshair. Local -Y maps to up-left
+     * through a -3/4 PI roll; the item is authored unrolled at the wrist. */
+    const float rest_roll = -2.36f;
+    float swing_x = -0.70f * punch;
     float swing_y = 0.06f * punch + bob_x * 0.8f;
     Vec3 eye = camera_get_position(cam);
     Vec3 forward = camera_get_forward(cam);
@@ -673,7 +679,7 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
         }
         float *dst = r->mob_verts + (size_t)p * 36 * MESHER_FLOATS_PER_VERTEX;
         mob_emit_part(dst, mmath_vec3(0.0f, 0.0f, 0.0f), -3.14159265f, &parts[p], 0.0f, false, fuv);
-        float part_roll = rest_roll + ((has_item && p == item_part) ? 0.28f : 0.0f);
+        float part_roll = (has_item && p == item_part) ? 0.0f : rest_roll;
         for (size_t v = 0; v < 36; ++v) {
             player_arm_transform_vertex(dst + v * MESHER_FLOATS_PER_VERTEX, eye, right, up, forward,
                                         shoulder, pose_offset, part_roll, swing_x, swing_y,
