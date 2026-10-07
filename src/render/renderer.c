@@ -48,10 +48,10 @@
 
 /* Particle scratch capacity: worst case every pool slot alive. */
 #define PARTICLE_SCRATCH_VERTS ((size_t)PARTICLE_MAX * 36)
-/* Mob scratch capacity: every slot alive with the largest model
- * (6 parts x 36 triangle-soup verts; identity indices apply). */
-#define MOB_SCRATCH_VERTS ((size_t)MOB_MAX * 6 * 36)
-#define MOB_SCRATCH_IDX ((size_t)MOB_MAX * 6 * 36)
+/* Mob scratch capacity: every slot alive with the largest supported model
+ * (bounded part count x 36 triangle-soup verts; identity indices apply). */
+#define MOB_SCRATCH_VERTS ((size_t)MOB_MAX * MOB_MODEL_MAX_PARTS * 36)
+#define MOB_SCRATCH_IDX ((size_t)MOB_MAX * MOB_MODEL_MAX_PARTS * 36)
 
 /* Concrete renderer type. */
 struct Renderer {
@@ -367,12 +367,23 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4
             continue; /* Skin pass takes one model only. */
         }
         bool skinned = has_live_skin && skin != NULL;
-        /* Frustum cull on the collision box (cheap, conservative).
-         * Cull on the RENDER position (smoothed): culling on the raw
-         * sim pos would pop mobs a frame early at 20 Hz. */
-        float hw = m->width * 0.5f;
-        Vec3 mn = mmath_vec3(m->render_pos.x - hw, m->render_pos.y, m->render_pos.z - hw);
-        Vec3 mx = mmath_vec3(m->render_pos.x + hw, m->render_pos.y + m->height, m->render_pos.z + hw);
+        /* Model parts can extend beyond their collision box (notably the
+         * cow's long torso/muzzle and the skeleton's arms). Enclose the full
+         * articulated model around its smoothed render position so visible
+         * geometry never disappears at a frustum edge. Small padding covers
+         * hurt shake, idle bob, and the corpse sink. */
+        float model_radius = m->width * 0.5f;
+        float model_min_y = 0.0f;
+        float model_max_y = m->height;
+        (void)mob_model_culling_bounds(model, m->dead, &model_radius, &model_min_y, &model_max_y);
+        const float horizontal_pad = 0.06f;
+        const float vertical_pad = 0.20f;
+        Vec3 mn = mmath_vec3(m->render_pos.x - model_radius - horizontal_pad,
+                             m->render_pos.y + model_min_y - vertical_pad,
+                             m->render_pos.z - model_radius - horizontal_pad);
+        Vec3 mx = mmath_vec3(m->render_pos.x + model_radius + horizontal_pad,
+                             m->render_pos.y + model_max_y + 0.03f,
+                             m->render_pos.z + model_radius + horizontal_pad);
         if (!camera_aabb_visible(planes, mn, mx)) {
             ++(*culled);
             continue;
@@ -412,7 +423,9 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4
         for (int p = 0; p < model->nparts; ++p) {
             const MobModelPart *part = &model->parts[p];
             float pitch = 0.0f;
-            if (part->anim == MOB_ANIM_LEG) {
+            if (part->anim == MOB_ANIM_COW_BODY_X90) {
+                pitch = 1.57079632679f;
+            } else if (part->anim == MOB_ANIM_LEG) {
                 float phase = m->walk_phase + ((p % 2) ? 3.14159265f : 0.0f);
                 pitch = sinf(phase) * 0.6f * stride_blend;
             } else if (part->anim == MOB_ANIM_HEAD) {
@@ -540,9 +553,7 @@ static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up,
 {
     Vec3 p = mmath_vec3(v[0], v[1], v[2]);
     p = mmath_vec3_add(p, pose_offset);
-    Vec3 rel = mmath_vec3_sub(p, shoulder);
-    rel = mob_rot_y(mob_rot_x(mob_rot_z(rel, rest_roll), swing_x), swing_y);
-    p = mmath_vec3_add(shoulder, rel);
+    p = player_viewmodel_arm_transform_point(p, shoulder, rest_roll, swing_x, swing_y);
     Vec3 n = mmath_vec3(v[3], v[4], v[5]);
     n = mob_rot_y(mob_rot_x(mob_rot_z(n, rest_roll), swing_x), swing_y);
     /* Uniformly scaling xyz would cancel under perspective. Scale only the
@@ -605,9 +616,8 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     int item_part = arm_parts;
     int count = arm_parts + (has_item ? 1 : 0);
     MobModelPart parts[3];
-    /* Keep the authored 4:12:4 arm proportions. The stronger inward cant
-     * carries the wrist toward the crosshair, like the vanilla first-person
-     * arm, instead of leaving a vertical post at screen right. */
+    /* Keep the authored 4:12:4 arm proportions. The shoulder enters from
+     * the lower-right while the wrist turns inward and up toward center. */
     parts[0] = (MobModelPart){{0.76f, -0.52f, 0.92f}, {0.16f, 0.48f, 0.16f},
                               TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE};
     if (!has_skin) {
@@ -635,8 +645,8 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
         punch = pose->punch;
     }
     Vec3 pose_offset = {bob_x - raise * 0.5f, bob_y - dip + raise * 0.7f, raise * 0.3f};
-    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.84f, -0.10f, 0.98f), pose_offset);
-    const float rest_roll = -0.62f;
+    Vec3 shoulder = mmath_vec3_add(mmath_vec3(0.62f, -0.30f, 0.98f), pose_offset);
+    const float rest_roll = -2.20f;
     float swing_x = 0.70f * punch;
     float swing_y = 0.06f * punch + bob_x * 0.8f;
     Vec3 eye = camera_get_position(cam);

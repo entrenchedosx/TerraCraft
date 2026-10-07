@@ -16,8 +16,9 @@
 /* Forward declaration (full type in world.h). */
 typedef struct World World;
 
-/* Column height for world (x,z): continental base + mountain lift +
- * hills + detail. Typical range roughly [25..155]; clamped to [4..200].
+/* Legacy profile-1 column height for world (x,z): continental base +
+ * mountain lift + hills + detail. Typical range roughly [25..155];
+ * clamped to [4..200].
  *
  * Args:
  *   seed: world seed.
@@ -28,7 +29,8 @@ typedef struct World World;
 int world_gen_height(long seed, int wx, int wz);
 
 /* Versioned surface field used by saved sessions. Version 1 preserves the
- * original terrain; version 2 adds broad warped landforms and river valleys. */
+ * original terrain, version 2 adds warped landforms, and version 3 adds
+ * connected mountain ranges and sea-level river channels. */
 int world_gen_height_version(long seed, int wx, int wz, int terrain_version);
 
 /* Surface block for a column of height h at (wx,wz): biome-driven

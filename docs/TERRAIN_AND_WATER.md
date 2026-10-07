@@ -21,9 +21,10 @@ then clamps the surface to Y 4 through 200. Existing worlds without a
 an untouched chunk is generated later prevents a boundary between terrain
 shapes inside one save.
 
-### Profile 2: new worlds
+### Profile 2: previous new-world profile
 
-Newly created worlds use profile 2. Its height calculation combines:
+Worlds created during the previous terrain pass use profile 2. Its height
+calculation combines:
 
 - A low-frequency warp (about 104 blocks in either horizontal direction)
   applied before sampling the main fields. The warp breaks up regular noise
@@ -42,10 +43,31 @@ valleys, but does not guarantee a continuous river channel at every seed or
 turn every valley into flowing water. Terrain profile 2 is intentionally
 versioned rather than silently replacing profile 1 in older worlds.
 
+### Profile 3: new worlds
+
+Newly created worlds use profile 3. It improves the large-scale structure
+while preserving deterministic shared chunk borders:
+
+- A stronger low-frequency warp feeds a broad continental field, so coastlines
+  and inland landforms vary at different scales.
+- Separate mountain-range and ridge fields form connected highlands with
+  sharper peaks, while an erosion field leaves quieter foothills and plains.
+- A meandering river field cuts lowland channels down to the sea-level water
+  table. Existing basin filling turns those channel cells into water.
+- The surface is clamped to Y 4 through 224. Mountain slopes are stone, with
+  snow caps on the highest peaks; existing biome, cave, ore, tree, and
+  vegetation systems continue to use the generated surface.
+
+This is a substantial height-map upgrade, not a reproduction of Minecraft's
+full 3D density router: terrain still has one top surface per X/Z column. The
+existing 3D cave carver remains separate, and profile 3 does not add
+overhangs, aquifers, or cave biomes.
+
 The metadata file remains format version 1 with an optional
-`terrain_version=1` or `terrain_version=2` key. New-world creation writes 2;
-older metadata that omits the key reads as 1. Unknown terrain versions are
-rejected rather than blended with a known generator. See
+`terrain_version=1`, `terrain_version=2`, or `terrain_version=3` key.
+New-world creation writes 3; existing profile 1 and 2 worlds retain their
+generator, and older metadata that omits the key reads as 1. Unknown terrain
+versions are rejected rather than blended with a known generator. See
 `src/world/world_meta.c` and `src/game/session.c`.
 
 ## Water states and update order

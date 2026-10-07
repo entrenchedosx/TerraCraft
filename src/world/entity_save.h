@@ -8,9 +8,9 @@
  * file. Worlds without the file (M5/M6/M7 saves) load zero entities.
  * Pure CPU, headless-testable.
  *
- * Format v2 (all multi-byte fields little-endian, no struct padding ever):
+ * Format v3 (all multi-byte fields little-endian, no struct padding ever):
  *   char magic[4]      "MNCE"
- *   u16 version        ENTITY_SAVE_VERSION (currently 2)
+ *   u16 version        ENTITY_SAVE_VERSION (currently 3)
  *   u32 count          total records (0..ENTITY_SAVE_MAX_RECORDS)
  *   per record:
  *     u8 kind          1 = item, 2 = cow, 3 = zombie, 4 = skeleton
@@ -22,21 +22,23 @@
  *       u16 durability tool wear (0 unless damageable, <= max)
  *       f32 age        seconds since spawn (0..ENTITY_LIFETIME)
  *       f32 pickup_t   pickup delay remaining (0..ENTITY_PICKUP_DELAY)
- *     mob payload (28 bytes):
+ *     mob payload (24 bytes):
  *       u8 type        EntityType (2..4, must match kind)
- *       u8 state       MobState (0..6, never DEAD on disk)
- *       u8 reserved[2] zeros (must be 0)
+ *       u8 reserved[3] zeros (must be 0)
  *       f32 x,y,z      feet position (finite, |v| <= 1e6)
  *       f32 yaw        facing radians (finite)
  *       f32 hp         health (0 < hp <= type max)
- *       f32 state_t    seconds in state (>= 0, finite)
  *
  * Version 1 files (M6.1/M7: items only, 38-byte records without the kind
- * byte) still load. Any violation (bad magic/version/count, truncation,
+ * byte) and v2 files (items + 28-byte mob payloads) still load. Legacy mob
+ * AI state is validated, then reset safely: mobs resume at their saved
+ * position with saved type, yaw, and health, but start idle with zero
+ * velocity/cooldowns and no target/path. Any violation (bad
+ * magic/version/count, truncation,
  * trailing bytes, invalid field, unknown kind) rejects the whole file
  * safely: pools are left cleared and a clear log is emitted. Runtime
- * EntityId handles, velocities (mobs restart at rest), AI targets, and
- * cached paths are intentionally NOT persisted (rebuilt live).
+ * EntityId handles, mob AI/state timers, velocities, targets, cooldowns,
+ * and cached paths are intentionally NOT persisted (rebuilt live).
  */
 
 #include <stdbool.h>
@@ -50,8 +52,8 @@ typedef struct MobPool MobPool;
 /* Entity save file name inside a world directory. */
 #define ENTITY_SAVE_FILE "entities.bin"
 
-/* Current entity save format version (v1 = M6.1 items only). */
-#define ENTITY_SAVE_VERSION 2
+/* Current entity save format version (v1 = items; v2 = legacy mob state). */
+#define ENTITY_SAVE_VERSION 3
 
 /* Maximum records per file (128 item drops + 64 living mobs). */
 #define ENTITY_SAVE_MAX_RECORDS 192
@@ -78,7 +80,7 @@ int entity_save_write(const char *dir, const EntityPool *pool, const MobPool *mo
  * Args:
  *   dir: world directory (must not be NULL).
  *   pool: item-drop pool to fill (must not be NULL).
- *   mobs: living-mob pool to fill (may be NULL; mob records skipped).
+ *   mobs: living-mob pool to fill (may be NULL only if no mob records exist).
  *
  * Returns: 0 on success (including missing file), non-zero on corrupt/
  * unreadable data (pools left cleared).

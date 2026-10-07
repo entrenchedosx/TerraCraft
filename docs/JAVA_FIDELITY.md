@@ -146,11 +146,13 @@ and rendering all affect what a player observes.
 - Lighting uses a global day/night value, a per-column occlusion heuristic,
   and ambient occlusion. It has no separate propagated sky-light and
   block-light channels, cross-chunk light queue, or torch emission.
-- New worlds use terrain profile 2: warped continental noise, broad rolling
-  terrain, ridge-shaped highlands, and carved meandering river valleys. The
-  surface is still a 2D column field rather than Minecraft's full 3D density
-  system. Worlds with no `terrain_version` key stay on profile 1, so newly
-  generated chunks do not create seams in old saves.
+- New worlds use terrain profile 3: warped continental shapes, connected
+  mountain ranges, sharper ridges, erosion-shaped foothills, and lowland river
+  channels that reach sea-level water. Existing profile 1 and 2 worlds retain
+  their stored generator. The new surface still uses one top height per X/Z
+  column rather than Minecraft's full 3D density router, so it does not create
+  terrain overhangs or cave biomes. Worlds with no `terrain_version` key stay
+  on profile 1, so newly generated chunks do not create seams in old saves.
 - Water has a source, seven horizontal flow-depth states, and a falling state.
   It attempts downward flow first, then spreads horizontally up to seven
   cells, can refill between two sources over a solid floor, and retracts

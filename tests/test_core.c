@@ -2,6 +2,7 @@
 
 #include "core/mem.h"
 #include "core/path.h"
+#include "game/player_model.h"
 #include "math/mmath.h"
 #include "render/camera.h"
 #include "world/block.h"
@@ -54,6 +55,28 @@ int test_camera_viewmodel_fov_compensation(void)
     TEST_ASSERT_FLOAT_EQ(camera_get_viewmodel_xy_scale(cam, 121.0f), 1.0f, 1e-6f);
     camera_destroy(cam);
     TEST_ASSERT_FLOAT_EQ(camera_get_viewmodel_xy_scale(NULL, 70.0f), 1.0f, 1e-6f);
+    return failures;
+}
+
+/* The first-person sleeve must enter from lower-right and the wrist must
+ * sit inward and higher at rest and during a normal punch. */
+int test_player_viewmodel_arm_pose(void)
+{
+    int failures = 0;
+    Vec3 shoulder = mmath_vec3(0.62f, -0.30f, 0.98f);
+    Vec3 sleeve_end = mmath_vec3(0.84f, -0.04f, 1.00f);
+    Vec3 wrist_end = mmath_vec3(0.84f, -0.52f, 1.00f);
+    const float swings[] = {0.0f, 0.70f};
+    for (size_t i = 0; i < sizeof(swings) / sizeof(swings[0]); ++i) {
+        Vec3 sleeve = player_viewmodel_arm_transform_point(sleeve_end, shoulder,
+                                                           -2.20f, swings[i], 0.06f * swings[i]);
+        Vec3 wrist = player_viewmodel_arm_transform_point(wrist_end, shoulder,
+                                                          -2.20f, swings[i], 0.06f * swings[i]);
+        TEST_ASSERT(sleeve.x > wrist.x);
+        TEST_ASSERT(sleeve.y < wrist.y);
+        TEST_ASSERT(wrist.x > 0.0f && sleeve.x < 1.0f);
+        TEST_ASSERT(wrist.y > -0.8f && sleeve.y > -1.1f);
+    }
     return failures;
 }
 

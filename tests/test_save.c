@@ -1,8 +1,11 @@
 #include "test_main.h"
 
 #include "core/path.h"
+#include "core/app.h"
 #include "game/player.h"
+#include "game/mob.h"
 #include "game/session.h"
+#include "world/entity_save.h"
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/world.h"
@@ -22,6 +25,7 @@
 static void save_tmp_cleanup(const char *dir)
 {
     char chunks[1024];
+    char entities[1024];
     char names[256][64];
     size_t count = 0;
     if (path_join(chunks, sizeof(chunks), dir, "chunks") == 0) {
@@ -40,6 +44,9 @@ static void save_tmp_cleanup(const char *dir)
         if (path_join(meta, sizeof(meta), dir, WORLD_META_FILE) == 0) {
             path_remove_file(meta);
         }
+    }
+    if (path_join(entities, sizeof(entities), dir, ENTITY_SAVE_FILE) == 0) {
+        path_remove_file(entities);
     }
     path_remove_dir(dir);
 }
@@ -60,7 +67,7 @@ int test_meta_roundtrip(void)
     memcpy(m.name, "Test World", 11);
     m.seed = 123456LL;
     m.mode = WORLD_MODE_CREATIVE;
-    m.terrain_version = 2;
+    m.terrain_version = 3;
     m.px = 1.5f;
     m.py = 70.25f;
     m.pz = -3.75f;
@@ -77,7 +84,7 @@ int test_meta_roundtrip(void)
     TEST_ASSERT(strcmp(back.name, "Test World") == 0);
     TEST_ASSERT(back.seed == 123456LL);
     TEST_ASSERT(back.mode == WORLD_MODE_CREATIVE);
-    TEST_ASSERT(back.terrain_version == 2);
+    TEST_ASSERT(back.terrain_version == 3);
     TEST_ASSERT_FLOAT_EQ(back.px, 1.5f, 1e-3f);
     TEST_ASSERT_FLOAT_EQ(back.py, 70.25f, 1e-3f);
     TEST_ASSERT_FLOAT_EQ(back.pz, -3.75f, 1e-3f);
@@ -115,7 +122,10 @@ int test_meta_corrupt(void)
     TEST_ASSERT(strcmp(m.name, "Y") == 0);
     TEST_ASSERT(m.seed == -7LL);
     TEST_ASSERT(m.terrain_version == 1); /* Missing key pins old terrain. */
-    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=3\n",
+    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Profile Two\nseed=8\nterrain_version=2\n",
+                                 &m) == 0);
+    TEST_ASSERT(m.terrain_version == 2); /* Existing profile is kept exactly. */
+    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=4\n",
                                  &m) != 0);
     /* Missing directory fails. */
     TEST_ASSERT(world_meta_read("test_tmp_m5_no_such_dir_xyz", &m) != 0);
@@ -412,6 +422,7 @@ int test_session_persist(void)
         return failures + 1;
     }
     a->seed = 123456L;
+    a->terrain_version = 3;
     memcpy(a->name, "Persist_Me", 11);
     a->mode = 0; /* WORLD_MODE_SURVIVAL. */
     world_set_save_dir(a, dir);
@@ -425,7 +436,7 @@ int test_session_persist(void)
     int ez[2] = {5, 9};
     int ey[2] = {0, 0};
     for (int i = 0; i < 2; ++i) {
-        int h = world_gen_height(123456L, ex[i], ez[i]);
+        int h = world_gen_height_version(123456L, ex[i], ez[i], a->terrain_version);
         ey[i] = h; /* Surface block. */
         int ccx = ex[i] >= 0 ? ex[i] / 16 : -((-ex[i] + 15) / 16);
         Chunk *ce = world_get_chunk(a, ccx, 0);
@@ -454,6 +465,7 @@ int test_session_persist(void)
         return failures + 1;
     }
     b->seed = 123456L;
+    b->terrain_version = 3;
     world_set_save_dir(b, dir);
     TEST_ASSERT(world_generate_chunk(b, 0, 0) == 0);
     TEST_ASSERT(world_generate_chunk(b, 1, 0) == 0);
@@ -464,6 +476,7 @@ int test_session_persist(void)
     TEST_ASSERT(world_meta_read(dir, &m) == 0);
     TEST_ASSERT(m.seed == 123456LL);
     TEST_ASSERT(strcmp(m.name, "Persist_Me") == 0);
+    TEST_ASSERT(m.terrain_version == 3);
     TEST_ASSERT_FLOAT_EQ(m.px, 8.5f, 1e-3f);
     TEST_ASSERT_FLOAT_EQ(m.day, 0.42f, 1e-4f);
     world_destroy(b);
@@ -474,12 +487,14 @@ int test_session_persist(void)
     TEST_ASSERT(ref != NULL);
     if (ref != NULL) {
         ref->seed = 123456L;
+        ref->terrain_version = 3;
         TEST_ASSERT(world_generate_chunk(ref, 0, 0) == 0);
         TEST_ASSERT(world_generate_chunk(ref, 1, 0) == 0);
         World *b2 = world_create();
         TEST_ASSERT(b2 != NULL);
         if (b2 != NULL) {
             b2->seed = 123456L;
+            b2->terrain_version = 3;
             world_set_save_dir(b2, dir);
             TEST_ASSERT(world_generate_chunk(b2, 0, 0) == 0);
             TEST_ASSERT(world_generate_chunk(b2, 1, 0) == 0);
@@ -506,6 +521,39 @@ int test_session_persist(void)
         }
         world_destroy(ref);
     }
+
+    /* Exercise the actual session close/reopen path, not only the entity
+     * codec: live mobs should be present with stable fields after normal
+     * world close and re-entry. */
+    AppContext app;
+    memset(&app, 0, sizeof(app));
+    TEST_ASSERT(session_open_world(&app, dir) == 0);
+    EntityId cow_id = mob_spawn(&app.mobs, ENTITY_COW, mmath_vec3(3.25f, 72.0f, -8.5f), 1.2f);
+    TEST_ASSERT(cow_id != ENTITY_ID_NULL);
+    Mob *cow = mob_resolve(&app.mobs, cow_id);
+    TEST_ASSERT(cow != NULL);
+    if (cow != NULL) {
+        cow->health = 4.5f;
+    }
+    session_close_world(&app, true);
+    TEST_ASSERT(session_open_world(&app, dir) == 0);
+    TEST_ASSERT(mob_count_type(&app.mobs, ENTITY_COW) == 1);
+    Mob *restored_cow = NULL;
+    for (int i = 0; i < MOB_MAX; ++i) {
+        if (app.mobs.mobs[i].active && app.mobs.mobs[i].type == ENTITY_COW) {
+            restored_cow = &app.mobs.mobs[i];
+            break;
+        }
+    }
+    TEST_ASSERT(restored_cow != NULL);
+    if (restored_cow != NULL) {
+        TEST_ASSERT_FLOAT_EQ(restored_cow->pos.x, 3.25f, 1e-4f);
+        TEST_ASSERT_FLOAT_EQ(restored_cow->pos.y, 72.0f, 1e-4f);
+        TEST_ASSERT_FLOAT_EQ(restored_cow->pos.z, -8.5f, 1e-4f);
+        TEST_ASSERT_FLOAT_EQ(restored_cow->yaw, 1.2f, 1e-4f);
+        TEST_ASSERT_FLOAT_EQ(restored_cow->health, 4.5f, 1e-4f);
+    }
+    session_close_world(&app, false);
 
     /* session_create_world rejects bad args safely. */
     char junk[512];

@@ -245,6 +245,30 @@ triaged against the user's report.
   A hands-on visual check remains outstanding; automated coverage does not
   prove Minecraft visual or mechanical parity.
 
+### Round 8 — Mob silhouette, persistence, arm pose, and terrain profile 3
+
+- Reposed the first-person arm from the inverted/outward placement, with a
+  pure-transform regression for its rest and swing directions.
+- Rebuilt the cow as a horizontal quadruped with a protruding muzzle, horns,
+  ears, udder, and articulated legs; mob ray bounds follow rendered parts.
+- Fixed mob frustum bounds to include articulated model geometry beyond the
+  collision AABB. A regression confirms the cow culling envelope exceeds its
+  collision footprint, and death-pose bounds include the feet-pivoted fall,
+  avoiding early disappearance at view edges.
+- Added entity-save format v3 for live mob type, position, yaw, and health.
+  Autosave, pause, and normal close write the entity file; opening a world
+  restores mobs. Version 1 and 2 readers remain available. Transient AI and
+  velocity state restart safely, and a forced process termination can still
+  lose changes since the last successful save.
+- New worlds use deterministic terrain profile 3: warped continental
+  landforms, connected ridges, sculpted foothills, and lowland river channels.
+  Existing v1/v2 worlds retain their generation profile. This remains a 2D
+  height field without density-based caves, overhangs, or aquifers.
+- The model-culling review finding was fixed before the final build. Debug and
+  Release builds and CTest pass; the direct runner reports 171 tests,
+  0 failures. Live game visual verification remains outstanding, so arm/cow
+  appearance and terrain quality are not marked visually verified.
+
 ## Research
 
 - [Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) — original

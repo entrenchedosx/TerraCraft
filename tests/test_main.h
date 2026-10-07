@@ -62,6 +62,7 @@ int test_chunk_basic(void);
 int test_arena(void);
 int test_path_dirs(void);
 int test_camera_viewmodel_fov_compensation(void);
+int test_player_viewmodel_arm_pose(void);
 
 /* World tests (defined in test_world.c). */
 int test_chunk_index(void);
@@ -147,6 +148,7 @@ int test_session_persist(void);
 int test_biome_determinism(void);
 int test_biome_coverage(void);
 int test_world_gen_terrain_v2(void);
+int test_world_gen_terrain_v3(void);
 int test_tree_determinism(void);
 int test_vegetation(void);
 int test_caves(void);
@@ -232,6 +234,8 @@ int test_mob_spawn_hostile(void);
 int test_mob_spawn_rules(void);
 int test_save_mob_roundtrip(void);
 int test_save_mob_v1_compat(void);
+int test_save_mob_v2_compat(void);
+int test_save_mob_write_failure_preserves(void);
 int test_save_mob_corrupt(void);
 int test_save_mob_dead_excluded(void);
 int test_mob_models(void);

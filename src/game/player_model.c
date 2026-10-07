@@ -2,6 +2,8 @@
 
 #include "render/texture_atlas.h"
 
+#include <math.h>
+
 /* Player body (feet origin, 1.8 m tall, 0.6 m collision width; arms
  * swing clear outside the body). Tiles are the fallback path when the
  * Steve skin file is missing (e.g. CI without mcassets/).
@@ -61,4 +63,20 @@ const MobSkin *player_body_skin(void)
 const MobSkinPart *player_viewmodel_arm_skin_part(void)
 {
     return &PLAYER_VIEWMODEL_ARM;
+}
+
+Vec3 player_viewmodel_arm_transform_point(Vec3 point, Vec3 shoulder, float roll,
+                                          float swing_x, float swing_y)
+{
+    Vec3 rel = mmath_vec3_sub(point, shoulder);
+    float c = cosf(roll);
+    float s = sinf(roll);
+    rel = mmath_vec3(rel.x * c - rel.y * s, rel.x * s + rel.y * c, rel.z);
+    c = cosf(swing_x);
+    s = sinf(swing_x);
+    rel = mmath_vec3(rel.x, rel.y * c - rel.z * s, rel.y * s + rel.z * c);
+    c = cosf(swing_y);
+    s = sinf(swing_y);
+    rel = mmath_vec3(rel.x * c + rel.z * s, rel.y, -rel.x * s + rel.z * c);
+    return mmath_vec3_add(shoulder, rel);
 }

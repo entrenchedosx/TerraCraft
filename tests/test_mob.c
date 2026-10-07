@@ -888,8 +888,8 @@ static int mob_write_raw(const char *dir, const unsigned char *buf, size_t n)
     return wrote == n ? 0 : -1;
 }
 
-/* Test: mixed item + mob round trip (type/pos/yaw/hp/state survive;
- * velocity/targets/paths reset by design).
+/* Test: mixed item + mob round trip. Durable mob fields survive; all
+ * movement and AI state restarts safely on load.
  *
  * Returns: failure count.
  */
@@ -921,6 +921,16 @@ int test_save_mob_roundtrip(void)
     ItemStack drop = {(ItemId)BLOCK_STONE, 4, 0};
     TEST_ASSERT(entity_spawn(&drops, mmath_vec3(1.0f, 66.0f, 1.0f), &drop) >= 0);
     TEST_ASSERT(entity_save_write(dir, &drops, &pool) == 0);
+    char save_path[PATH_MAX_LEN];
+    TEST_ASSERT(path_join(save_path, sizeof(save_path), dir, ENTITY_SAVE_FILE) == 0);
+    FILE *saved = fopen(save_path, "rb");
+    TEST_ASSERT(saved != NULL);
+    if (saved != NULL) {
+        unsigned char version[6] = {0};
+        TEST_ASSERT(fread(version, 1, sizeof(version), saved) == sizeof(version));
+        TEST_ASSERT(version[4] == 3 && version[5] == 0);
+        fclose(saved);
+    }
 
     EntityPool back_drops;
     MobPool back_mobs;
@@ -943,13 +953,17 @@ int test_save_mob_roundtrip(void)
             TEST_ASSERT_FLOAT_EQ(m->pos.z, 7.25f, 1e-4f);
             TEST_ASSERT_FLOAT_EQ(m->yaw, 1.0f, 1e-4f);
             TEST_ASSERT_FLOAT_EQ(m->health, 5.0f, 1e-4f);
-            TEST_ASSERT(m->state == MOB_STATE_WANDER);
-            TEST_ASSERT_FLOAT_EQ(m->state_t, 1.25f, 1e-4f);
+            TEST_ASSERT(m->state == MOB_STATE_IDLE);
+            TEST_ASSERT_FLOAT_EQ(m->state_t, 0.0f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(m->ai_t, 0.0f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(m->vel.y, 0.0f, 1e-6f);
+            TEST_ASSERT(m->path_len == 0);
             TEST_ASSERT(m->dead == false);
         } else if (m->type == ENTITY_ZOMBIE) {
             found_zomb = 1;
             TEST_ASSERT_FLOAT_EQ(m->health, 17.0f, 1e-4f);
-            TEST_ASSERT(m->state == MOB_STATE_CHASE);
+            TEST_ASSERT(m->state == MOB_STATE_IDLE);
+            TEST_ASSERT_FLOAT_EQ(m->state_t, 0.0f, 1e-4f);
             TEST_ASSERT(m->target == ENTITY_ID_NULL); /* Reset by design. */
             TEST_ASSERT(m->path_len == 0);             /* Rebuilt live. */
             TEST_ASSERT_FLOAT_EQ(m->vel.x, 0.0f, 1e-6f); /* At rest. */
@@ -1081,6 +1095,35 @@ int test_save_mob_corrupt(void)
         TEST_ASSERT(mob_write_raw(dir, big, sizeof(big)) == 0);
         TEST_ASSERT(entity_save_read(dir, &drops, &mobs) != 0);
     }
+    /* v3 stable-record reserved bytes and kind/type agreement are strict. */
+    {
+        unsigned char v3[10 + 1 + 24];
+        memset(v3, 0, sizeof(v3));
+        v3[0] = 'M';
+        v3[1] = 'N';
+        v3[2] = 'C';
+        v3[3] = 'E';
+        mob_raw_u16(v3 + 4, 3);
+        mob_raw_u32(v3 + 6, 1);
+        v3[10] = (unsigned char)ENTITY_COW;
+        v3[11] = (unsigned char)ENTITY_COW;
+        mob_raw_f32(v3 + 15, 1.0f);
+        mob_raw_f32(v3 + 19, 66.0f);
+        mob_raw_f32(v3 + 23, 2.0f);
+        mob_raw_f32(v3 + 27, 0.5f);
+        mob_raw_f32(v3 + 31, 8.0f);
+        EntityPool drops;
+        MobPool mobs;
+        TEST_ASSERT(mob_write_raw(dir, v3, sizeof(v3)) == 0);
+        TEST_ASSERT(entity_save_read(dir, &drops, &mobs) == 0);
+        v3[12] = 1; /* Reserved byte. */
+        TEST_ASSERT(mob_write_raw(dir, v3, sizeof(v3)) == 0);
+        TEST_ASSERT(entity_save_read(dir, &drops, &mobs) != 0);
+        v3[12] = 0;
+        v3[10] = (unsigned char)ENTITY_ZOMBIE; /* Kind/type mismatch. */
+        TEST_ASSERT(mob_write_raw(dir, v3, sizeof(v3)) == 0);
+        TEST_ASSERT(entity_save_read(dir, &drops, &mobs) != 0);
+    }
     mob_save_cleanup(dir);
     return failures;
 }
@@ -1153,6 +1196,10 @@ int test_mob_models(void)
         TEST_ASSERT(body_side.x == 18 && body_side.y == 14 && body_side.w == 10 && body_side.h == 18);
         TEST_ASSERT(body_end.x == 50 && body_end.y == 14 && body_end.w == 12 && body_end.h == 18);
         TEST_ASSERT(head_side.x == 0 && head_side.y == 6 && head_side.w == 6 && head_side.h == 8);
+        MobSkinRect muzzle = cowsk->parts[2].faces[0];
+        TEST_ASSERT(muzzle.x == 52 && muzzle.y == 0 && muzzle.w == 8 && muzzle.h == 8);
+        MobSkinRect udder = cowsk->parts[11].faces[0];
+        TEST_ASSERT(udder.x == 52 && udder.y == 0 && udder.w == 8 && udder.h == 8);
     }
     const MobSkin *sk = mob_skin_for(2);
     TEST_ASSERT(sk != NULL);
@@ -1176,10 +1223,40 @@ int test_mob_models(void)
     MobSkin bad_skin = {"skeleton", 64, 32, bad_rect, 1};
     TEST_ASSERT(mob_skin_validate(&bad_skin, 1) == false);
     if (moss != NULL) {
-        TEST_ASSERT(moss->nparts == 6);
+        TEST_ASSERT(moss->nparts == MOB_MODEL_MAX_PARTS);
         TEST_ASSERT_FLOAT_EQ(moss->parts[0].size.x, 0.75f, 1e-6f);
         TEST_ASSERT_FLOAT_EQ(moss->parts[0].size.y, 1.125f, 1e-6f);
+        TEST_ASSERT(moss->parts[0].anim == MOB_ANIM_COW_BODY_X90);
+        TEST_ASSERT_FLOAT_EQ(moss->parts[0].pivot_y, 0.8125f, 1e-6f);
         TEST_ASSERT(moss->parts[1].size.x < moss->parts[0].size.x);
+        /* A distinct muzzle reaches in front of the head; paired horns and
+         * ears give the silhouette unmistakable bovine features. */
+        TEST_ASSERT(moss->parts[2].offset.z + moss->parts[2].size.z >
+                    moss->parts[1].offset.z + moss->parts[1].size.z);
+        TEST_ASSERT(moss->parts[3].offset.x < 0.0f && moss->parts[4].offset.x > 0.0f);
+        TEST_ASSERT(moss->parts[5].offset.x < 0.0f && moss->parts[6].offset.x > 0.0f);
+        TEST_ASSERT(moss->parts[11].offset.y > moss->parts[12].offset.y);
+        /* Culling must cover the rendered cow silhouette, whose rotated
+         * torso/muzzle extend past the 0.9-wide collision AABB. */
+        float cull_radius = 0.0f;
+        float cull_min_y = 0.0f;
+        float cull_max_y = 0.0f;
+        TEST_ASSERT(mob_model_culling_bounds(moss, false, &cull_radius, &cull_min_y,
+                                             &cull_max_y));
+        TEST_ASSERT(cull_radius > 0.9f * 0.5f);
+        TEST_ASSERT(cull_min_y < 0.1f);
+        TEST_ASSERT(cull_max_y > moss->height);
+        float death_radius = 0.0f;
+        float death_min_y = 0.0f;
+        float death_max_y = 0.0f;
+        TEST_ASSERT(mob_model_culling_bounds(moss, true, &death_radius, &death_min_y,
+                                             &death_max_y));
+        TEST_ASSERT(death_radius >= cull_radius);
+        TEST_ASSERT(death_min_y <= -death_radius);
+        TEST_ASSERT(death_max_y >= death_radius);
+        TEST_ASSERT(mob_model_culling_bounds(NULL, false, &cull_radius, &cull_min_y,
+                                             &cull_max_y) == false);
+        TEST_ASSERT_FLOAT_EQ(cull_radius, 0.0f, 1e-6f);
         /* Legs swing, body does not. */
         int legs = 0;
         for (int i = 0; i < moss->nparts; ++i) {
@@ -1188,6 +1265,7 @@ int test_mob_models(void)
             }
         }
         TEST_ASSERT(legs == 4);
+        TEST_ASSERT(moss->parts[0].anim != MOB_ANIM_LEG);
     }
     /* Malformed: bad parent, oversized part, bad tile, empty. */
     MobModelPart bad_parent[2] = {
@@ -1213,6 +1291,114 @@ int test_mob_models(void)
     };
     MobModel m5 = {tall, 1, 1.0f};
     TEST_ASSERT(mob_model_validate(&m5) == false);
+    return failures;
+}
+
+/* Test: v2 mob records remain readable, but legacy AI state and state time
+ * are discarded because their targets/path/cooldowns were not persisted.
+ *
+ * Returns: failure count.
+ */
+int test_save_mob_v2_compat(void)
+{
+    int failures = 0;
+    const char *dir = "test_tmp_mobsave/v2";
+    unsigned char buf[10 + 1 + 28];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = 'M';
+    buf[1] = 'N';
+    buf[2] = 'C';
+    buf[3] = 'E';
+    mob_raw_u16(buf + 4, 2);
+    mob_raw_u32(buf + 6, 1);
+    buf[10] = (unsigned char)ENTITY_COW;
+    buf[11] = (unsigned char)ENTITY_COW;
+    buf[12] = (unsigned char)MOB_STATE_WANDER;
+    mob_raw_f32(buf + 15, -14.5f);
+    mob_raw_f32(buf + 19, 68.0f);
+    mob_raw_f32(buf + 23, 25.25f);
+    mob_raw_f32(buf + 27, 2.75f);
+    mob_raw_f32(buf + 31, 4.0f);
+    mob_raw_f32(buf + 35, 1.25f);
+    TEST_ASSERT(mob_write_raw(dir, buf, sizeof(buf)) == 0);
+    EntityPool drops;
+    MobPool mobs;
+    TEST_ASSERT(entity_save_read(dir, &drops, &mobs) == 0);
+    TEST_ASSERT(mob_active_count(&mobs) == 1);
+    if (mob_active_count(&mobs) == 1) {
+        const Mob *m = NULL;
+        for (int i = 0; i < MOB_MAX; ++i) {
+            if (mobs.mobs[i].active) {
+                m = &mobs.mobs[i];
+                break;
+            }
+        }
+        TEST_ASSERT(m != NULL);
+        if (m != NULL) {
+            TEST_ASSERT(m->type == ENTITY_COW);
+            TEST_ASSERT_FLOAT_EQ(m->pos.x, -14.5f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(m->pos.y, 68.0f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(m->pos.z, 25.25f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(m->yaw, 2.75f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(m->health, 4.0f, 1e-4f);
+            TEST_ASSERT(m->state == MOB_STATE_IDLE);
+            TEST_ASSERT_FLOAT_EQ(m->state_t, 0.0f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(m->vel.x, 0.0f, 1e-6f);
+            TEST_ASSERT(m->path_len == 0 && m->target == ENTITY_ID_NULL);
+        }
+    }
+    mob_save_cleanup(dir);
+    return failures;
+}
+
+/* Test: if an atomic temp snapshot cannot be created, the previous mob
+ * snapshot stays readable and unchanged. */
+int test_save_mob_write_failure_preserves(void)
+{
+    int failures = 0;
+    const char *dir = "test_tmp_mobsave/write_failure";
+    MobPool mobs;
+    mob_pool_init(&mobs, 5u);
+    EntityPool drops;
+    entity_pool_clear(&drops);
+    EntityId cow = mob_spawn(&mobs, ENTITY_COW, mmath_vec3(12.0f, 70.0f, -4.0f), 0.25f);
+    TEST_ASSERT(cow != ENTITY_ID_NULL);
+    TEST_ASSERT(entity_save_write(dir, &drops, &mobs) == 0);
+
+    char temp_path[PATH_MAX_LEN];
+    char save_path[PATH_MAX_LEN];
+    TEST_ASSERT(path_join(temp_path, sizeof(temp_path), dir, "entities.bin.tmp") == 0);
+    TEST_ASSERT(path_join(save_path, sizeof(save_path), dir, ENTITY_SAVE_FILE) == 0);
+    TEST_ASSERT(path_mkdir_p(temp_path) == 0); /* Blocks opening the temp as a file. */
+    Mob *live = mob_resolve(&mobs, cow);
+    TEST_ASSERT(live != NULL);
+    if (live != NULL) {
+        live->pos.x = 99.0f;
+    }
+    TEST_ASSERT(entity_save_write(dir, &drops, &mobs) != 0);
+
+    EntityPool back_drops;
+    MobPool back_mobs;
+    TEST_ASSERT(entity_save_read(dir, &back_drops, &back_mobs) == 0);
+    TEST_ASSERT(mob_active_count(&back_mobs) == 1);
+    if (mob_active_count(&back_mobs) == 1) {
+        const Mob *back = NULL;
+        for (int i = 0; i < MOB_MAX; ++i) {
+            if (back_mobs.mobs[i].active) {
+                back = &back_mobs.mobs[i];
+                break;
+            }
+        }
+        TEST_ASSERT(back != NULL);
+        if (back != NULL) {
+            TEST_ASSERT_FLOAT_EQ(back->pos.x, 12.0f, 1e-4f);
+            TEST_ASSERT_FLOAT_EQ(back->health, mob_definition(ENTITY_COW)->max_health, 1e-4f);
+        }
+    }
+    TEST_ASSERT(path_remove_dir(temp_path) == 0);
+    TEST_ASSERT(path_remove_file(save_path) == 0);
+    path_remove_dir(dir);
+    path_remove_dir("test_tmp_mobsave");
     return failures;
 }
 

@@ -79,8 +79,9 @@ int session_open_world(AppContext *app, const char *world_dir);
  */
 void session_close_world(AppContext *app, bool save);
 
-/* Persist the open session now (metadata + dirty chunks). No-op without
- * an open world.
+/* Persist the open session now (metadata + dirty chunks + dropped items and
+ * living mobs). Called by the 30-second autosave, pause entry, and normal
+ * world/app close paths. No-op without an open world.
  *
  * Args:
  *   app: application context (must not be NULL).

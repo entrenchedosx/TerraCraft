@@ -16,7 +16,8 @@ playable; optional local assets and user resource packs are described in
 The current milestone is M9 (v0.9.0). This is a playable prototype, and its
 core rules are still being refined for familiar voxel-game movement and
 interaction. The active fidelity pass now includes pixel-art survival
-vitals, versioned terrain profiles, and bounded water flow. See
+vitals, persistent living mobs, versioned terrain profiles, and bounded water
+flow. See
 [Java Fidelity](docs/JAVA_FIDELITY.md) for behavior targets and known
 differences; the project's documented parity and visual checklist remains
 open.
@@ -24,8 +25,9 @@ open.
 ## Features
 
 - Seeded terrain with seven biomes, caves, ores, trees, and vegetation.
-- Versioned terrain profiles for legacy-save continuity and new warped hills,
-  ridged highlands, and river-like valleys.
+- Versioned terrain profiles for legacy-save continuity, with connected
+  mountain belts, sharper peaks, varied foothills, and lowland river channels
+  in newly created worlds.
 - Bounded source/flow/falling water with partial-height rendering and basic
   player buoyancy.
 - Chunk streaming, block editing, lighting, ambient occlusion, fog, and a
@@ -34,13 +36,14 @@ open.
   crafting, item drops, and death recovery.
 - Pixel-art full/half/empty heart and hunger icons in Survival.
 - Cows, zombies, and skeletons with real skins, pathfinding, melee, bows,
-  and arrows.
+  and arrows. Living mobs retain their type, position, facing, and health
+  when a world is saved and reopened.
 - Persistent named worlds with versioned block, player, inventory, and
   entity data.
 - A resource-pack system with procedural fallback art and sound.
 - A 60 ticks/second world simulation; inventory and crafting keep the world
   moving, while pause and death stop it.
-- 167 registered headless test functions in the custom test runner.
+- 171 registered headless test functions in the custom test runner.
 
 ## Controls
 

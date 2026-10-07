@@ -22,6 +22,7 @@ int main(void)
     RUN_TEST(test_arena);
     RUN_TEST(test_path_dirs);
     RUN_TEST(test_camera_viewmodel_fov_compensation);
+    RUN_TEST(test_player_viewmodel_arm_pose);
     RUN_TEST(test_chunk_index);
     RUN_TEST(test_block_ids);
     RUN_TEST(test_world_gen);
@@ -86,6 +87,7 @@ int main(void)
     RUN_TEST(test_biome_determinism);
     RUN_TEST(test_biome_coverage);
     RUN_TEST(test_world_gen_terrain_v2);
+    RUN_TEST(test_world_gen_terrain_v3);
     RUN_TEST(test_tree_determinism);
     RUN_TEST(test_vegetation);
     RUN_TEST(test_caves);
@@ -157,6 +159,8 @@ int main(void)
     RUN_TEST(test_mob_spawn_rules);
     RUN_TEST(test_save_mob_roundtrip);
     RUN_TEST(test_save_mob_v1_compat);
+    RUN_TEST(test_save_mob_v2_compat);
+    RUN_TEST(test_save_mob_write_failure_preserves);
     RUN_TEST(test_save_mob_corrupt);
     RUN_TEST(test_save_mob_dead_excluded);
     RUN_TEST(test_mob_models);

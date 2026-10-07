@@ -36,3 +36,8 @@ const MobSkin *player_body_skin(void);
 /* First-person arm mapping: same skin texels as the body model, with the
  * camera-facing side mapped to Steve's front arm face. */
 const MobSkinPart *player_viewmodel_arm_skin_part(void);
+
+/* Rotate a camera-local arm point around its shoulder pivot. Kept pure so
+ * the renderer and pose regressions share the same viewmodel transform. */
+Vec3 player_viewmodel_arm_transform_point(Vec3 point, Vec3 shoulder, float roll,
+                                          float swing_x, float swing_y);

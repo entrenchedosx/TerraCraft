@@ -119,8 +119,81 @@ static int world_gen_height_v2(long seed, int wx, int wz)
     return hi;
 }
 
+/* Version 3 terrain borrows the large-scale structure of modern voxel
+ * terrain: broad continents, low-erosion mountain belts, sharper ridges,
+ * and river valleys that actually reach the world water table. The block
+ * world is still stored as 16x256x16 chunks, so this profile keeps a surface
+ * height field and uses the existing 3D cave carvers below it. */
+static int world_gen_height_v3(long seed, int wx, int wz)
+{
+    uint32_t s = (uint32_t)seed;
+    float fx = (float)wx;
+    float fz = (float)wz;
+
+    /* Low-frequency domain warp keeps continents and ranges irregular over
+     * many chunks without introducing per-chunk seams. */
+    float warp_x = noise_fbm2(fx * 0.0011f, fz * 0.0011f, 4, 2.0f, 0.5f,
+                              s ^ 0x33574158u) * 156.0f;
+    float warp_z = noise_fbm2(fx * 0.0011f + 617.0f, fz * 0.0011f - 283.0f, 4, 2.0f, 0.5f,
+                              s ^ 0x3357415au) * 156.0f;
+    float x = fx + warp_x;
+    float z = fz + warp_z;
+
+    float continents = noise_fbm2(x * 0.00105f, z * 0.00105f, 5, 2.0f, 0.5f,
+                                  s ^ 0x33434f4eu);
+    float hills = noise_fbm2(x * 0.0048f, z * 0.0048f, 4, 2.0f, 0.5f,
+                             s ^ 0x3348494cu);
+    float erosion = noise_fbm2(x * 0.010f + 281.0f, z * 0.010f - 97.0f, 3, 2.0f, 0.5f,
+                               s ^ 0x3345524fu);
+    float base = 71.0f + continents * 29.0f + hills * 12.0f + erosion * 5.0f;
+
+    /* Broad mountain systems are masked separately from the ridged detail:
+     * this yields connected ranges with quieter foothills between them. */
+    float range_field = noise_fbm2(x * 0.00165f - 433.0f, z * 0.00165f + 191.0f,
+                                   4, 2.0f, 0.5f, s ^ 0x3352414eu);
+    float range_mask = gen_smoothstep(0.22f, 0.76f, range_field);
+    float ridge_noise = noise_fbm2(x * 0.0037f + 61.0f, z * 0.0037f - 347.0f,
+                                   4, 2.0f, 0.5f, s ^ 0x33524944u);
+    float ridge = 1.0f - fabsf(ridge_noise);
+    float sharp = 1.0f - fabsf(noise_fbm2(x * 0.010f - 19.0f, z * 0.010f + 89.0f,
+                                          3, 2.0f, 0.5f, s ^ 0x33504541u));
+    float ruggedness = 1.0f - gen_smoothstep(0.15f, 0.82f, erosion);
+    float mountains = range_mask * ruggedness *
+                      (19.0f + gen_smoothstep(0.42f, 0.90f, ridge) * 57.0f + sharp * 18.0f);
+    float h = base + mountains;
+
+    /* The warped channel network is cut down to the water level near its
+     * centerline. This produces actual connected lowland water when the
+     * normal sea fill runs, instead of valleys that always remain dry. */
+    float river_noise = noise_fbm2(x * 0.00155f + 811.0f, z * 0.00155f + 227.0f,
+                                   4, 2.0f, 0.5f, s ^ 0x33524956u);
+    float river_distance = fabsf(river_noise);
+    float channel = 1.0f - gen_smoothstep(0.012f, 0.095f, river_distance);
+    float inland = gen_smoothstep(59.0f, 75.0f, base);
+    float channel_floor = (float)WORLD_SEA_LEVEL - 1.0f +
+                          fmaxf(0.0f, river_distance - 0.006f) * 240.0f;
+    float river_cut = h - channel_floor;
+    if (river_cut < 0.0f) {
+        river_cut = 0.0f;
+    }
+    h -= channel * inland * river_cut;
+
+    h += noise_value2(x * 0.070f, z * 0.070f, s ^ 0x33444554u) * 1.15f;
+    int hi = (int)floorf(h);
+    if (hi < 4) {
+        hi = 4;
+    }
+    if (hi > 224) {
+        hi = 224;
+    }
+    return hi;
+}
+
 int world_gen_height_version(long seed, int wx, int wz, int terrain_version)
 {
+    if (terrain_version >= 3) {
+        return world_gen_height_v3(seed, wx, wz);
+    }
     return terrain_version >= 2 ? world_gen_height_v2(seed, wx, wz) : world_gen_height_v1(seed, wx, wz);
 }
 
@@ -150,6 +223,9 @@ uint16_t world_gen_surface_version(long seed, int wx, int wz, int h, int terrain
     case BIOME_SNOW:
         return BLOCK_SNOW;
     case BIOME_MOUNTAINS:
+        if (terrain_version >= 3) {
+            return (h >= 164) ? BLOCK_SNOW : BLOCK_STONE;
+        }
         return (h >= 95) ? BLOCK_SNOW : BLOCK_STONE;
     case BIOME_FOREST:
     case BIOME_PLAINS:
@@ -390,7 +466,7 @@ int world_generate_chunk(World *w, int cx, int cz)
         return 0;
     }
     long seed = w->seed;
-    int terrain_version = w->terrain_version >= 2 ? 2 : 1;
+    int terrain_version = w->terrain_version >= 3 ? 3 : (w->terrain_version >= 2 ? 2 : 1);
     int heights[CHUNK_X][CHUNK_Z];
     int biomes[CHUNK_X][CHUNK_Z];
     for (int lx = 0; lx < CHUNK_X; ++lx) {

@@ -1022,7 +1022,9 @@ bool mob_raycast(const MobPool *pool, Vec3 eye, Vec3 dir, float max_dist, float 
             for (int p = 0; p < model->nparts; ++p) {
                 const MobModelPart *part = &model->parts[p];
                 float pitch = 0.0f;
-                if (part->anim == MOB_ANIM_LEG) {
+                if (part->anim == MOB_ANIM_COW_BODY_X90) {
+                    pitch = 1.57079632679f;
+                } else if (part->anim == MOB_ANIM_LEG) {
                     float phase = m->walk_phase + ((p % 2) ? 3.14159265358979323846f : 0.0f);
                     pitch = sinf(phase) * 0.6f;
                 } else if (part->anim == MOB_ANIM_HEAD) {

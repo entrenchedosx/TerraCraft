@@ -4,18 +4,36 @@
 #include <math.h>
 #include <stddef.h>
 
-/* Cow (model 0): compact 12x18x10 body, 8x8x6 head, and four 4x12x4
- * legs in the skin's authored proportions. +Z faces forward. The head
- * joins the chest without burying the muzzle; face details come from the
- * head skin instead of separate boxes sampling unrelated texture regions.
+/* Cow (model 0): classic quadruped proportions. The authored 12x18x10
+ * torso is pitched 90 degrees around X so its long axis runs nose-to-tail,
+ * not vertically. The head has a projecting muzzle, short horns, broad
+ * ears, an udder, and four articulated 4x12x4 legs. +Z faces forward.
  */
 static const MobModelPart COW_PARTS[] = {
-    {{-0.375f, 0.275f, -0.3125f}, {0.75f, 1.125f, 0.625f}, TILE_LEATHER, -1, 0.0f, MOB_ANIM_NONE},
-    {{-0.25f, 0.85f, 0.25f}, {0.50f, 0.50f, 0.375f}, TILE_LEATHER, -1, 1.10f, MOB_ANIM_HEAD},
+    /* Torso: 12x18x10 authored box, centered at y=.8125 before rotation. */
+    {{-0.375f, 0.25f, -0.3125f}, {0.75f, 1.125f, 0.625f}, TILE_LEATHER, -1, 0.8125f,
+     MOB_ANIM_COW_BODY_X90},
+    /* Head */
+    {{-0.25f, 0.84f, 0.28f}, {0.50f, 0.50f, 0.375f}, TILE_LEATHER, -1, 1.10f, MOB_ANIM_HEAD},
+    /* Broad pink muzzle, extending visibly beyond the head. */
+    {{-0.15f, 0.90f, 0.61f}, {0.30f, 0.20f, 0.20f}, TILE_LEATHER, -1, 1.0f, MOB_ANIM_NONE},
+    /* Short blocky horns at the crown, within the existing 1.4 block height. */
+    {{-0.22f, 1.22f, 0.35f}, {0.08f, 0.15f, 0.10f}, TILE_LEATHER, -1, 1.22f, MOB_ANIM_NONE},
+    {{0.14f, 1.22f, 0.35f}, {0.08f, 0.15f, 0.10f}, TILE_LEATHER, -1, 1.22f, MOB_ANIM_NONE},
+    /* Ears project to either side of the head. */
+    {{-0.36f, 1.02f, 0.34f}, {0.15f, 0.08f, 0.23f}, TILE_LEATHER, -1, 1.06f, MOB_ANIM_NONE},
+    {{0.21f, 1.02f, 0.34f}, {0.15f, 0.08f, 0.23f}, TILE_LEATHER, -1, 1.06f, MOB_ANIM_NONE},
+    /* Front pair (+Z), then hind pair (-Z), for alternating stride phases. */
     {{-0.375f, 0.00f, 0.20f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
     {{0.125f, 0.00f, 0.20f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
     {{-0.375f, 0.00f, -0.45f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
     {{0.125f, 0.00f, -0.45f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
+    /* Visible pink udder between the hind legs, with four short teats. */
+    {{-0.15f, 0.34f, -0.30f}, {0.30f, 0.20f, 0.25f}, TILE_LEATHER, -1, 0.44f, MOB_ANIM_NONE},
+    {{-0.11f, 0.25f, -0.25f}, {0.07f, 0.11f, 0.07f}, TILE_LEATHER, -1, 0.36f, MOB_ANIM_NONE},
+    {{0.04f, 0.25f, -0.25f}, {0.07f, 0.11f, 0.07f}, TILE_LEATHER, -1, 0.36f, MOB_ANIM_NONE},
+    {{-0.11f, 0.25f, -0.12f}, {0.07f, 0.11f, 0.07f}, TILE_LEATHER, -1, 0.36f, MOB_ANIM_NONE},
+    {{0.04f, 0.25f, -0.12f}, {0.07f, 0.11f, 0.07f}, TILE_LEATHER, -1, 0.36f, MOB_ANIM_NONE},
 };
 
 /* Zombie (model 1): classic humanoid — box torso, cube head, hanging
@@ -44,7 +62,7 @@ static const MobModelPart SKELETON_PARTS[] = {
 };
 
 static const MobModel MOB_MODELS[] = {
-    {COW_PARTS, 6, 1.40f},
+    {COW_PARTS, (int)(sizeof(COW_PARTS) / sizeof(COW_PARTS[0])), 1.40f},
     {ZOMBIE_PARTS, 6, 1.9f},
     {SKELETON_PARTS, 6, 1.9f},
 };
@@ -101,22 +119,41 @@ static const MobSkinPart SKELETON_SKIN_PARTS[] = {
       {4, 18, 2, 12}}},
 };
 
+/* Reuse a small, existing skin patch for simple added cow details. */
+#define COW_SKIN_PATCH(x, y, w, h) \
+    {{{x, y, w, h}, {x, y, w, h}, {x, y, w, h}, {x, y, w, h}, {x, y, w, h}, {x, y, w, h}}}
+
 /* Cow skin (temperate_cow.png, 64x64, top-left pixel origin). Rectangles
- * follow the skin's box-unfold layout for the 12x18x10 body, 8x8x6 head,
- * and 4x12x4 legs. Face order: -X,+X,-Y,+Y,-Z,+Z. The model faces +Z
- * forward, so the skin's standard -Z/front region maps to the +Z face.
+ * follow the authored 12x18x10 torso, 8x8x6 head, and 4x12x4 leg nets.
+ * The base head art supplies eyes and ears; the pink patch is reused on
+ * the new muzzle and udder parts. Face order: -X,+X,-Y,+Y,-Z,+Z. The
+ * model faces +Z forward, so the skin's standard -Z/front maps to +Z.
  */
 static const MobSkinPart COW_SKIN_PARTS[] = {
     /* Body box UV base (18,4), dimensions 12x18x10. */
     {{{18, 14, 10, 18}, {40, 14, 10, 18}, {40, 4, 12, 10}, {28, 4, 12, 10}, {50, 14, 12, 18}, {28, 14, 12, 18}}},
     /* Head box UV base (0,0), dimensions 8x8x6. */
     {{{0, 6, 6, 8}, {14, 6, 6, 8}, {14, 0, 8, 6}, {6, 0, 8, 6}, {20, 6, 8, 8}, {6, 6, 8, 8}}},
+    /* Pink nose patch. */
+    COW_SKIN_PATCH(52, 0, 8, 8),
+    /* Horns use the pale hide patch; ears use the corresponding head sides. */
+    COW_SKIN_PATCH(50, 14, 4, 4),
+    COW_SKIN_PATCH(50, 14, 4, 4),
+    COW_SKIN_PATCH(0, 6, 6, 8),
+    COW_SKIN_PATCH(14, 6, 6, 8),
     /* The four legs share the authored 4x12x4 UV region at (0,16). */
     {{{0, 20, 4, 12}, {8, 20, 4, 12}, {8, 16, 4, 4}, {4, 16, 4, 4}, {12, 20, 4, 12}, {4, 20, 4, 12}}},
     {{{0, 20, 4, 12}, {8, 20, 4, 12}, {8, 16, 4, 4}, {4, 16, 4, 4}, {12, 20, 4, 12}, {4, 20, 4, 12}}},
     {{{0, 20, 4, 12}, {8, 20, 4, 12}, {8, 16, 4, 4}, {4, 16, 4, 4}, {12, 20, 4, 12}, {4, 20, 4, 12}}},
     {{{0, 20, 4, 12}, {8, 20, 4, 12}, {8, 16, 4, 4}, {4, 16, 4, 4}, {12, 20, 4, 12}, {4, 20, 4, 12}}},
+    /* Udder and teats use the existing pink pixels from the cow skin. */
+    COW_SKIN_PATCH(52, 0, 8, 8),
+    COW_SKIN_PATCH(52, 0, 8, 8),
+    COW_SKIN_PATCH(52, 0, 8, 8),
+    COW_SKIN_PATCH(52, 0, 8, 8),
+    COW_SKIN_PATCH(52, 0, 8, 8),
 };
+#undef COW_SKIN_PATCH
 
 /* Zombie skin (standard 64x64 humanoid layout, top-left pixel origin;
  * every rect verified fully opaque against the source alpha map).
@@ -169,7 +206,8 @@ static const MobSkinPart ZOMBIE_SKIN_PARTS[] = {
 };
 
 static const MobSkin MOB_SKINS[] = {
-    {"cow", 64, 64, COW_SKIN_PARTS, 6},
+    {"cow", 64, 64, COW_SKIN_PARTS,
+     (int)(sizeof(COW_SKIN_PARTS) / sizeof(COW_SKIN_PARTS[0]))},
     {"zombie", 64, 64, ZOMBIE_SKIN_PARTS, 6},
     {"skeleton", 64, 32, SKELETON_SKIN_PARTS, 6},
 };
@@ -209,7 +247,7 @@ bool mob_model_validate(const MobModel *m)
     if (m == NULL || m->parts == NULL) {
         return false;
     }
-    if (m->nparts < 1 || m->nparts > 16) {
+    if (m->nparts < 1 || m->nparts > MOB_MODEL_MAX_PARTS) {
         return false;
     }
     if (!(m->height > 0.0f) || m->height > 4.0f) {
@@ -233,13 +271,87 @@ bool mob_model_validate(const MobModel *m)
         if (p->tile < 0 || p->tile > 255) {
             return false;
         }
-        if (p->anim < MOB_ANIM_NONE || p->anim > MOB_ANIM_STRIKE_ARM) {
+        if (p->anim < MOB_ANIM_NONE || p->anim > MOB_ANIM_COW_BODY_X90) {
             return false;
         }
         if (p->offset.y + p->size.y > m->height + 0.01f) {
             return false; /* Parts must fit the declared height. */
         }
     }
+    return true;
+}
+
+/* Compute a conservative root-relative envelope. Each part is enclosed by a
+ * sphere centered on its renderer pivot. Pitch rotation preserves that sphere,
+ * while the model's root yaw is covered by its horizontal radius. Death tilt
+ * pivots every part at the feet, so that pose additionally uses a sphere around
+ * the mob root. */
+bool mob_model_culling_bounds(const MobModel *m, bool include_death_pose,
+                              float *out_horizontal_radius, float *out_min_y,
+                              float *out_max_y)
+{
+    if (out_horizontal_radius != NULL) {
+        *out_horizontal_radius = 0.0f;
+    }
+    if (out_min_y != NULL) {
+        *out_min_y = 0.0f;
+    }
+    if (out_max_y != NULL) {
+        *out_max_y = 0.0f;
+    }
+    if (m == NULL || !mob_model_validate(m) || out_horizontal_radius == NULL ||
+        out_min_y == NULL || out_max_y == NULL) {
+        return false;
+    }
+
+    float radius = 0.0f;
+    float min_y = INFINITY;
+    float max_y = -INFINITY;
+    float root_radius = 0.0f;
+    for (int i = 0; i < m->nparts; ++i) {
+        const MobModelPart *part = &m->parts[i];
+        float px = part->offset.x + part->size.x * 0.5f;
+        float py = part->pivot_y;
+        float pz = part->offset.z + part->size.z * 0.5f;
+        float part_radius = 0.0f;
+        for (int corner = 0; corner < 8; ++corner) {
+            float x = part->offset.x + ((corner & 1) ? part->size.x : 0.0f) - px;
+            float y = part->offset.y + ((corner & 2) ? part->size.y : 0.0f) - py;
+            float z = part->offset.z + ((corner & 4) ? part->size.z : 0.0f) - pz;
+            float distance = sqrtf(x * x + y * y + z * z);
+            if (distance > part_radius) {
+                part_radius = distance;
+            }
+        }
+        float horizontal = sqrtf(px * px + pz * pz) + part_radius;
+        if (horizontal > radius) {
+            radius = horizontal;
+        }
+        float from_root = sqrtf(px * px + py * py + pz * pz) + part_radius;
+        if (from_root > root_radius) {
+            root_radius = from_root;
+        }
+        if (py - part_radius < min_y) {
+            min_y = py - part_radius;
+        }
+        if (py + part_radius > max_y) {
+            max_y = py + part_radius;
+        }
+    }
+    if (include_death_pose) {
+        if (root_radius > radius) {
+            radius = root_radius;
+        }
+        if (-root_radius < min_y) {
+            min_y = -root_radius;
+        }
+        if (root_radius > max_y) {
+            max_y = root_radius;
+        }
+    }
+    *out_horizontal_radius = radius;
+    *out_min_y = min_y;
+    *out_max_y = max_y;
     return true;
 }
 

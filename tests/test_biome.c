@@ -6,6 +6,8 @@
 #include "world/world.h"
 #include "world/world_gen.h"
 
+#include <stdlib.h>
+
 /* Test: biome selection is deterministic and well-formed.
  *
  * Returns: failure count.
@@ -96,6 +98,47 @@ int test_world_gen_terrain_v2(void)
     TEST_ASSERT(min_h < WORLD_SEA_LEVEL);
     TEST_ASSERT(max_h > 100);
     TEST_ASSERT(low > 0 && high > 0 && changed > 100);
+    return failures;
+}
+
+/* Test: profile 3 adds broad mountain relief and real lowland channels while
+ * remaining deterministic, bounded, and isolated from legacy profiles. */
+int test_world_gen_terrain_v3(void)
+{
+    int failures = 0;
+    int min_h = CHUNK_Y;
+    int max_h = 0;
+    int wet_channel = 0;
+    int steep = 0;
+    const long seed = 190918L;
+    for (int x = -2048; x <= 2048; x += 8) {
+        for (int z = -2048; z <= 2048; z += 8) {
+            int h = world_gen_height_version(seed, x, z, 3);
+            int again = world_gen_height_version(seed, x, z, 3);
+            int legacy = world_gen_height_version(seed, x, z, 2);
+            TEST_ASSERT(h == again);
+            TEST_ASSERT(h >= 4 && h <= 224);
+            TEST_ASSERT(legacy <= 200);
+            if (h < min_h) {
+                min_h = h;
+            }
+            if (h > max_h) {
+                max_h = h;
+            }
+            if (h < WORLD_SEA_LEVEL) {
+                ++wet_channel;
+            }
+            int hx = world_gen_height_version(seed, x + 8, z, 3);
+            int hz = world_gen_height_version(seed, x, z + 8, 3);
+            if (abs(hx - h) + abs(hz - h) >= 12) {
+                ++steep;
+            }
+        }
+    }
+    TEST_ASSERT(min_h < WORLD_SEA_LEVEL - 8);
+    TEST_ASSERT(max_h >= 160);
+    TEST_ASSERT(wet_channel > 10);
+    TEST_ASSERT(steep > 0);
     return failures;
 }
 

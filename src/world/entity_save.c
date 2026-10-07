@@ -10,10 +10,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 /* Record size: 2+2+12+12+2+4+4 = 38 bytes. Header: 4+2+4 = 10 bytes. */
 #define ENTITY_REC_BYTES 38u
-/* Mob payload: 1+1+2+12+4+4+4 = 28 bytes (kind byte separate). */
-#define ENTITY_MOB_REC_BYTES 28u
+/* v2 mob payload: type + state + reserved + position + yaw + hp + state time. */
+#define ENTITY_MOB_V2_REC_BYTES 28u
+/* v3 mob payload: type + reserved + position + yaw + hp. */
+#define ENTITY_MOB_REC_BYTES 24u
 #define ENTITY_HDR_BYTES 10u
 #define ENTITY_POS_BOUND 1000000.0f
 #define ENTITY_VEL_BOUND 100.0f
@@ -104,13 +111,10 @@ int entity_save_write(const char *dir, const EntityPool *pool, const MobPool *mo
     }
 
     FILE *f = fopen(tmp, "wb");
-    bool direct = false;
     if (f == NULL) {
-        f = fopen(path, "wb");
-        direct = true;
-        if (f == NULL) {
-            return -3;
-        }
+        /* Never fall back to truncating entities.bin directly: a short write
+         * could erase the last good snapshot and make every mob disappear. */
+        return -3;
     }
     unsigned char hdr[ENTITY_HDR_BYTES];
     hdr[0] = 'M';
@@ -147,12 +151,13 @@ int entity_save_write(const char *dir, const EntityPool *pool, const MobPool *mo
     }
     for (uint32_t i = 0; i < nmobs; ++i) {
         const Mob *m = livemobs[i];
-        /* Full record: kind byte + 28-byte payload (type repeated: the
-         * kind dispatches, the payload type validates). */
+        /* v3 record: kind byte + 24-byte stable mob payload. The type is
+         * repeated so the payload can validate its dispatch kind. Runtime
+         * AI state is deliberately rebuilt after load. */
         unsigned char rec[1 + ENTITY_MOB_REC_BYTES];
         rec[0] = (unsigned char)m->type;
         rec[1] = (unsigned char)m->type;
-        rec[2] = (unsigned char)m->state;
+        rec[2] = 0;
         rec[3] = 0;
         rec[4] = 0;
         put_f32(rec + 5, m->pos.x);
@@ -160,7 +165,6 @@ int entity_save_write(const char *dir, const EntityPool *pool, const MobPool *mo
         put_f32(rec + 13, m->pos.z);
         put_f32(rec + 17, m->yaw);
         put_f32(rec + 21, m->health);
-        put_f32(rec + 25, m->state_t);
         if (fwrite(rec, 1, sizeof(rec), f) != sizeof(rec)) {
             fclose(f);
             remove(tmp);
@@ -171,14 +175,20 @@ int entity_save_write(const char *dir, const EntityPool *pool, const MobPool *mo
         remove(tmp);
         return -4;
     }
-    if (!direct) {
-        /* Windows rename refuses to overwrite: clear the way first. */
-        remove(path);
-        if (rename(tmp, path) != 0) {
-            remove(tmp);
-            return -5;
-        }
+#ifdef _WIN32
+    /* Replace in one filesystem operation on Windows. Removing the old
+     * file first creates a crash window where a valid previous mob save
+     * can be lost before the new file is installed. */
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        remove(tmp);
+        return -5;
     }
+#else
+    if (rename(tmp, path) != 0) {
+        remove(tmp);
+        return -5;
+    }
+#endif
     return 0;
 }
 
@@ -229,17 +239,10 @@ static bool entity_rec_valid(uint16_t item, uint16_t count, uint16_t durability,
 /* Validate one decoded mob record (finite numbers, known type/state,
  * plausible health). Anything else means corruption: reject the file.
  */
-static bool entity_mob_valid(uint8_t type, uint8_t state, const unsigned char *reserved,
-                             const float f[5])
+static bool entity_mob_valid(uint8_t type, const float f[5])
 {
     if (type != (uint8_t)ENTITY_COW && type != (uint8_t)ENTITY_ZOMBIE &&
         type != (uint8_t)ENTITY_SKELETON) {
-        return false;
-    }
-    if (state > (uint8_t)MOB_STATE_AIM || state == (uint8_t)MOB_STATE_DEAD) {
-        return false; /* Dead mobs never persist. */
-    }
-    if (reserved[0] != 0 || reserved[1] != 0) {
         return false;
     }
     for (int i = 0; i < 5; ++i) {
@@ -257,9 +260,6 @@ static bool entity_mob_valid(uint8_t type, uint8_t state, const unsigned char *r
         return false;
     }
     if (!(f[3] > 0.0f && f[3] <= def->max_health)) {
-        return false;
-    }
-    if (!(f[4] >= 0.0f && f[4] <= 3600.0f)) {
         return false;
     }
     return true;
@@ -299,23 +299,16 @@ static int entity_read_item_v1(EntityPool *pool, const unsigned char *rec, const
     return 0;
 }
 
-/* Read one v2 mob record body (28 bytes). Returns 0 on success. */
-static int entity_read_mob_v2(MobPool *mobs, const unsigned char *rec, const char *path, uint32_t idx)
+/* Read shared stable mob fields and retain mob_spawn's safe transient state. */
+static int entity_read_mob(MobPool *mobs, uint8_t kind, uint8_t type, float x, float y, float z,
+                           float yaw, float health, const char *path, uint32_t idx)
 {
-    uint8_t type = rec[0];
-    uint8_t state = rec[1];
-    float f[5];
-    f[0] = get_f32(rec + 4);
-    f[1] = get_f32(rec + 8);
-    f[2] = get_f32(rec + 12);
-    float yaw = get_f32(rec + 16);
-    f[3] = get_f32(rec + 20);
-    f[4] = get_f32(rec + 24);
-    if (!entity_mob_valid(type, state, rec + 2, f)) {
+    float f[5] = {x, y, z, health, 0.0f};
+    if (type != kind || !entity_mob_valid(type, f) || !isfinite(yaw)) {
         LOG_ERROR("entity_save: mob record %u invalid (%s)", (unsigned)idx, path);
         return -1;
     }
-    EntityId id = mob_spawn(mobs, (EntityType)type, mmath_vec3(f[0], f[1], f[2]), yaw);
+    EntityId id = mob_spawn(mobs, (EntityType)type, mmath_vec3(x, y, z), yaw);
     if (id == ENTITY_ID_NULL) {
         LOG_ERROR("entity_save: mob pool exhausted at record %u (%s)", (unsigned)idx, path);
         return -2;
@@ -324,13 +317,40 @@ static int entity_read_mob_v2(MobPool *mobs, const unsigned char *rec, const cha
     if (m == NULL) {
         return -2;
     }
-    m->health = f[3];
-    m->state = (int)state;
-    m->state_t = f[4];
-    if (m->state != MOB_STATE_IDLE) {
-        m->ai_t = 0.0f; /* Re-think promptly after load. */
-    }
+    m->health = health;
+    /* mob_spawn establishes IDLE, zero velocity/cooldowns and empty path.
+     * Keep those safe transient defaults for both legacy and v3 saves. */
     return 0;
+}
+
+/* Read one v2 mob record body. State/timers were saved by v2 but are
+ * intentionally discarded because their targets, cooldowns, and paths were
+ * never serialized. */
+static int entity_read_mob_v2(MobPool *mobs, uint8_t kind, const unsigned char *rec,
+                              const char *path, uint32_t idx)
+{
+    uint8_t type = rec[0];
+    float state_t = get_f32(rec + 24);
+    if (rec[2] != 0 || rec[3] != 0 || rec[1] > (uint8_t)MOB_STATE_AIM ||
+        rec[1] == (uint8_t)MOB_STATE_DEAD || !isfinite(state_t) || state_t < 0.0f ||
+        state_t > 3600.0f) {
+        LOG_ERROR("entity_save: mob record %u invalid (%s)", (unsigned)idx, path);
+        return -1;
+    }
+    return entity_read_mob(mobs, kind, type, get_f32(rec + 4), get_f32(rec + 8),
+                           get_f32(rec + 12), get_f32(rec + 16), get_f32(rec + 20), path, idx);
+}
+
+/* Read one v3 mob record body (stable fields only). */
+static int entity_read_mob_v3(MobPool *mobs, uint8_t kind, const unsigned char *rec,
+                              const char *path, uint32_t idx)
+{
+    if (rec[1] != 0 || rec[2] != 0 || rec[3] != 0) {
+        LOG_ERROR("entity_save: mob record %u invalid (%s)", (unsigned)idx, path);
+        return -1;
+    }
+    return entity_read_mob(mobs, kind, rec[0], get_f32(rec + 4), get_f32(rec + 8), get_f32(rec + 12),
+                           get_f32(rec + 16), get_f32(rec + 20), path, idx);
 }
 
 /* Read entities (missing file = clean zero-entity success). */
@@ -392,7 +412,8 @@ int entity_save_read(const char *dir, EntityPool *pool, MobPool *mobs)
                     rc = -7;
                 }
             }
-        } else if (ver == (uint16_t)ENTITY_SAVE_VERSION && n <= (uint32_t)ENTITY_SAVE_MAX_RECORDS) {
+        } else if ((ver == 2 || ver == (uint16_t)ENTITY_SAVE_VERSION) &&
+                   n <= (uint32_t)ENTITY_SAVE_MAX_RECORDS) {
             rc = 0;
             size_t off = ENTITY_HDR_BYTES;
             for (uint32_t i = 0; i < n && rc == 0; ++i) {
@@ -421,16 +442,20 @@ int entity_save_read(const char *dir, EntityPool *pool, MobPool *mobs)
                         rc = -7;
                         break;
                     }
-                    if (off + 1 + ENTITY_MOB_REC_BYTES > total) {
+                    size_t mob_bytes = ver == 2 ? ENTITY_MOB_V2_REC_BYTES : ENTITY_MOB_REC_BYTES;
+                    if (off + 1 + mob_bytes > total) {
                         LOG_ERROR("entity_save: truncated mob %u (%s)", (unsigned)i, path);
                         rc = -7;
                         break;
                     }
-                    if (entity_read_mob_v2(mobs, buf + off + 1, path, i) != 0) {
+                    int read_rc = ver == 2
+                                      ? entity_read_mob_v2(mobs, kind, buf + off + 1, path, i)
+                                      : entity_read_mob_v3(mobs, kind, buf + off + 1, path, i);
+                    if (read_rc != 0) {
                         rc = -7;
                         break;
                     }
-                    off += 1 + ENTITY_MOB_REC_BYTES;
+                    off += 1 + mob_bytes;
                 } else {
                     LOG_ERROR("entity_save: unknown kind %u at record %u (%s)", (unsigned)kind,
                               (unsigned)i, path);

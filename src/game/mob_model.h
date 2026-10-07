@@ -18,8 +18,13 @@ typedef enum MobPartAnim {
     MOB_ANIM_LEG,      /* Limb swing: pitch = sin(walk_phase) * 0.6. */
     MOB_ANIM_HEAD,     /* Head bob: slight pitch with walk phase. */
     MOB_ANIM_AIM_ARM,  /* Bow arm: raised forward in AIM/ATTACK, swings else. */
-    MOB_ANIM_STRIKE_ARM /* Melee arm: windup swipe in ATTACK (mob_strike_pitch), swings else. */
+    MOB_ANIM_STRIKE_ARM, /* Melee arm: windup swipe in ATTACK (mob_strike_pitch), swings else. */
+    MOB_ANIM_COW_BODY_X90 /* Cow torso: classic quadruped body rotated across its long axis. */
 } MobPartAnim;
+
+/* The renderer reserves bounded scratch space for the largest supported
+ * articulated model. Keep this in sync with model validation. */
+#define MOB_MODEL_MAX_PARTS 16
 
 /* One cuboid part (units are blocks, origin at the mob feet center). */
 typedef struct MobModelPart {
@@ -119,6 +124,15 @@ bool mob_skin_validate(const MobSkin *s, int nparts);
  * Returns: true when usable.
  */
 bool mob_model_validate(const MobModel *m);
+
+/* Conservative mob-root bounds for frustum culling. The horizontal radius
+ * encloses every part after model yaw and per-part pitch animation. Set
+ * include_death_pose when the renderer rotates parts around the feet. The
+ * vertical limits are relative to the mob's feet. Outputs are zeroed on
+ * failure. */
+bool mob_model_culling_bounds(const MobModel *m, bool include_death_pose,
+                              float *out_horizontal_radius, float *out_min_y,
+                              float *out_max_y);
 
 /* Swipe pitch for STRIKE_ARM parts (radians, <= 0): 0.25 s windup to
  * -1.2, 0.4 s release back to rest. Pure function of time-in-attack so

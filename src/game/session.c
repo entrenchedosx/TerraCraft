@@ -153,7 +153,9 @@ static void session_apply_settings(AppContext *app)
     if (app == NULL) {
         return;
     }
-    window_set_vsync(app->window, app->settings.vsync);
+    if (app->window != NULL) {
+        window_set_vsync(app->window, app->settings.vsync);
+    }
     if (app->camera != NULL) {
         camera_set_fov_y(app->camera, app->settings.fov);
     }
@@ -259,7 +261,7 @@ int session_open_world(AppContext *app, const char *world_dir)
      * (M5/M6 worlds predate it and start empty); any held cursor stack
      * belongs to the previous world (inventory is per-session). */
     if (entity_save_read(world_dir, &app->entities, &app->mobs) != 0) {
-        LOG_ERROR("session: entity save corrupt, starting with no drops (%s)", world_dir);
+        LOG_ERROR("session: entity save corrupt, starting with no drops or mobs (%s)", world_dir);
     }
     /* NOTE: no entity_pool_clear here — the read above already clears,
      * then loads persisted drops. Clearing would wipe them. */
@@ -317,12 +319,14 @@ int session_save_now(AppContext *app)
     if (rc != 0) {
         LOG_ERROR("session_save_now: save reported failures");
     }
-    /* Dropped-item entities persist as one atomic world-level file (best
-     * effort: meta + chunks are the save; a failed entity write only logs). */
-    if (entity_save_write(app->world_dir, &app->entities, &app->mobs) != 0) {
-        LOG_ERROR("session_save_now: entity save failed (drops will not survive reload)");
+    /* Dropped items and live mobs share one atomic world-level save. Report
+     * entity write failures to callers too; otherwise a failed mob save can
+     * look like a successful session save. */
+    int entity_rc = entity_save_write(app->world_dir, &app->entities, &app->mobs);
+    if (entity_rc != 0) {
+        LOG_ERROR("session_save_now: entity save failed (drops and mobs may not survive reload)");
     }
-    return rc;
+    return rc != 0 ? rc : entity_rc;
 }
 
 /* Close the session (save first when asked), freeing world + GPU buffers. */

@@ -117,6 +117,10 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 - [x] Add source/flow/falling water, down-first flow and horizontal decay, two-source refill, stream retraction, loaded-chunk boundary wakeups, bounded updates, partial-height meshes, and simple buoyancy.
 - [x] Add regression coverage for fluid simulation/rendering, chunk v1/v2 compatibility, and water movement.
 - [x] Round 7 verification: Debug and Release builds and CTest pass (167 tests); independent source review found no code-level blocker. Keep `AI_MEMORY` and `mcassets/` excluded from Git.
+- [x] Repose the first-person arm, rebuild the cow as a horizontal quadruped, and target/cull mobs using their rendered model bounds.
+- [x] Persist live mob type, position, yaw, and health in entity-save v3; keep v1/v2 readers and write on autosave, pause, and normal close.
+- [x] Add deterministic terrain profile 3 with warped continents, connected mountain ridges, foothills, and lowland channels while retaining profiles 1 and 2 for existing worlds.
+- [x] Round 8 automated verification: Debug and Release builds and CTest pass; the direct runner reports 171 tests with no failures. Independent review's model-culling finding is fixed and covered by a regression.
 - [ ] Manual game verification remains open for plant replacement/support, cow targeting and appearance, and first-person hand/swing at low and high FOV. The reported item texture issue also needs the item, screen path, and resource pack to reproduce.
 - [ ] Inspect the updated HUD, arm, terrain, and water in a running build; automated checks cannot verify visual quality or Minecraft parity.
 - Gauntlet procedure and round notes: `docs/GAUNTLET.md`.
@@ -128,7 +132,7 @@ Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W
 - [x] Bounded A* (`game/pathfind.h/.c`, radius 16 / y +-6 / 4096 expands, 4-dir + step +-1, corner rules, heap with deterministic tie-break, malloc-per-call freed before return; 0.17 ms worst-case measured).
 - [x] Combat: LMB entity-first targeting (nearest mob inside reach wins unless a block is closer), per-tool damage/cooldown (fist 1/0.4 s, shovel 2, pick 3, axe 4/0.8 s), 0.4 s hurt window (gated strikes silent — no fake feedback), knockback resist + clamp, death drops exactly once through the shared item-entity system.
 - [x] Spawning: 5 s tick, ring 24..48, surface scan (standable + light rule: hostile only at night/day_progress-based or dark caves, passive day), water/stone rejected, caps 10 passive + 10 hostile, sim range 64.
-- [x] Persistence: `entities.bin` v2 (`MNCE` ver 2: kind byte + 38 B item / 28 B mob records); v1 still loads (mobs start empty); corrupt whole-file reject; dead mobs, velocities, targets, and paths never persist (re-seeded deterministic rng).
+- [x] Persistence: `entities.bin` v3 (`MNCE` ver 3: kind byte + 38 B item / 24 B stable mob records); v1 item-only and v2 legacy mob records still load; corrupt whole-file reject; dead mobs, velocities, targets, and paths never persist.
 - [x] Presentation: cuboid part models (`game/mob_model.h/.c`, validated tables) rendered as rotated boxes with walk swing / hurt flash / death tilt, frustum-culled, in world + inventory/creative states; MOB_HURT/MOB_DIE synth events + death particle bursts; F3 shows mob/ai-draw counters; F7 strike-aimed, F9 spawn mossling, F10 spawn gloomstalker (dev keys, same family as F6/F8).
 - [x] Tests: 135 total (23 M8 + 1 audio pack-swap regression: handles/physics/defs/AI/damage+gate/raycast/tools/spawn-rules/save-v2/path/model/fall-events); `terracraft_bench_mobs` (idle 64 / chase 20 / raw path cases); warning-free /W4.
 - [x] No mobs catalogue beyond the two; no armor/enchants/projectiles/multiplayer (M9+).
