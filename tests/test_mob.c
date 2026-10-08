@@ -1297,6 +1297,17 @@ int test_mob_models(void)
         TEST_ASSERT(moss->parts[3].offset.x < 0.0f && moss->parts[4].offset.x > 0.0f);
         TEST_ASSERT(moss->parts[5].offset.x < 0.0f && moss->parts[6].offset.x > 0.0f);
         TEST_ASSERT(moss->parts[11].offset.y > moss->parts[12].offset.y);
+        /* Diagonal trot: even leg indices stand on opposite corners (FL+HR)
+         * and odd indices on the other diagonal (FR+HL), so the walk-phase
+         * parity in the renderer pairs diagonal legs, not pacing sides. */
+        TEST_ASSERT(moss->parts[7].offset.z > 0.0f && moss->parts[7].offset.x < 0.0f);
+        TEST_ASSERT(moss->parts[8].offset.z > 0.0f && moss->parts[8].offset.x > 0.0f);
+        TEST_ASSERT(moss->parts[9].offset.z < 0.0f && moss->parts[9].offset.x > 0.0f);
+        TEST_ASSERT(moss->parts[10].offset.z < 0.0f && moss->parts[10].offset.x < 0.0f);
+        /* Face furniture rides the head-bob pitch (muzzle, horns, ears). */
+        for (int ai = 1; ai <= 6; ++ai) {
+            TEST_ASSERT(moss->parts[ai].anim == MOB_ANIM_HEAD);
+        }
         /* Culling must cover the rendered cow silhouette, whose rotated
          * torso/muzzle extend past the 0.9-wide collision AABB. */
         float cull_radius = 0.0f;

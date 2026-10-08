@@ -6,28 +6,32 @@
 
 /* Cow (model 0): classic quadruped proportions. The authored 12x18x10
  * torso is pitched 90 degrees around X so its long axis runs nose-to-tail,
- * not vertically. The head has a projecting muzzle, short horns, broad
- * ears, an udder, and four articulated 4x12x4 legs. +Z faces forward.
+ * not vertically — the same construction vanilla ModelCow uses
+ * (tall box + body.rotateAngleX = PI/2), so the skin net maps 1:1 onto
+ * the authored faces. +Z faces forward. Legs are ordered so the walk
+ * phase parity (even/odd part index) pairs diagonal legs: FL+HR vs
+ * FR+HL, the vanilla quadruped trot (ModelQuadruped legs 1+4 vs 2+3).
  */
 static const MobModelPart COW_PARTS[] = {
     /* Torso: 12x18x10 authored box, centered at y=.8125 before rotation. */
     {{-0.375f, 0.25f, -0.3125f}, {0.75f, 1.125f, 0.625f}, TILE_LEATHER, -1, 0.8125f,
      MOB_ANIM_COW_BODY_X90},
-    /* Head */
+    /* Head (head-bob pitch carries the muzzle, horns, and ears below: they
+     * share MOB_ANIM_HEAD so the face never detaches while walking). */
     {{-0.25f, 0.84f, 0.28f}, {0.50f, 0.50f, 0.375f}, TILE_LEATHER, -1, 1.10f, MOB_ANIM_HEAD},
     /* Broad pink muzzle, extending visibly beyond the head. */
-    {{-0.15f, 0.90f, 0.61f}, {0.30f, 0.20f, 0.20f}, TILE_LEATHER, -1, 1.0f, MOB_ANIM_NONE},
+    {{-0.15f, 0.90f, 0.61f}, {0.30f, 0.20f, 0.20f}, TILE_LEATHER, -1, 1.0f, MOB_ANIM_HEAD},
     /* Short blocky horns at the crown, within the existing 1.4 block height. */
-    {{-0.22f, 1.22f, 0.35f}, {0.08f, 0.15f, 0.10f}, TILE_LEATHER, -1, 1.22f, MOB_ANIM_NONE},
-    {{0.14f, 1.22f, 0.35f}, {0.08f, 0.15f, 0.10f}, TILE_LEATHER, -1, 1.22f, MOB_ANIM_NONE},
+    {{-0.22f, 1.22f, 0.35f}, {0.08f, 0.15f, 0.10f}, TILE_LEATHER, -1, 1.22f, MOB_ANIM_HEAD},
+    {{0.14f, 1.22f, 0.35f}, {0.08f, 0.15f, 0.10f}, TILE_LEATHER, -1, 1.22f, MOB_ANIM_HEAD},
     /* Ears project to either side of the head. */
-    {{-0.36f, 1.02f, 0.34f}, {0.15f, 0.08f, 0.23f}, TILE_LEATHER, -1, 1.06f, MOB_ANIM_NONE},
-    {{0.21f, 1.02f, 0.34f}, {0.15f, 0.08f, 0.23f}, TILE_LEATHER, -1, 1.06f, MOB_ANIM_NONE},
-    /* Front pair (+Z), then hind pair (-Z), for alternating stride phases. */
+    {{-0.36f, 1.02f, 0.34f}, {0.15f, 0.08f, 0.23f}, TILE_LEATHER, -1, 1.06f, MOB_ANIM_HEAD},
+    {{0.21f, 1.02f, 0.34f}, {0.15f, 0.08f, 0.23f}, TILE_LEATHER, -1, 1.06f, MOB_ANIM_HEAD},
+    /* Diagonal gait pairs: FL+HR (even indices) vs FR+HL (odd indices). */
     {{-0.375f, 0.00f, 0.20f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
     {{0.125f, 0.00f, 0.20f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
-    {{-0.375f, 0.00f, -0.45f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
     {{0.125f, 0.00f, -0.45f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
+    {{-0.375f, 0.00f, -0.45f}, {0.25f, 0.73f, 0.25f}, TILE_LEATHER, -1, 0.73f, MOB_ANIM_LEG},
     /* Visible pink udder between the hind legs, with four short teats. */
     {{-0.15f, 0.34f, -0.30f}, {0.30f, 0.20f, 0.25f}, TILE_LEATHER, -1, 0.44f, MOB_ANIM_NONE},
     {{-0.11f, 0.25f, -0.25f}, {0.07f, 0.11f, 0.07f}, TILE_LEATHER, -1, 0.36f, MOB_ANIM_NONE},
