@@ -44,6 +44,18 @@ typedef enum BlockType {
     BLOCK_WATER_FLOW_6 = 25,
     BLOCK_WATER_FLOW_7 = 26,
     BLOCK_WATER_FALLING = 27,
+    BLOCK_GRAVEL = 28,
+    BLOCK_SANDSTONE = 29,
+    BLOCK_DEEPSLATE = 30,
+    BLOCK_COPPER_ORE = 31,
+    BLOCK_LAPIS_ORE = 32,
+    BLOCK_REDSTONE_ORE = 33,
+    BLOCK_EMERALD_ORE = 34,
+    BLOCK_TUFF = 35,
+    BLOCK_GRANITE = 36,
+    BLOCK_RAW_IRON = 37,
+    BLOCK_RAW_COPPER = 38,
+    BLOCK_LAVA = 39,
     BLOCK_COUNT /* Sentinel: number of block types. */
 } BlockType;
 

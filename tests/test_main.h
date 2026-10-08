@@ -9,6 +9,12 @@
 /* Global counters (defined in test_main.c). */
 extern int g_tests_run;
 extern int g_tests_failed;
+int test_worldgen_v4_determinism(void);
+int test_worldgen_v4_fields(void);
+int test_worldgen_v4_spawn(void);
+int test_worldgen_v4_materials(void);
+int test_worldgen_v4_rescue_save(void);
+int test_worldgen_v4_ore_depth(void);
 
 /* Assertion: on failure, prints location and increments failure count.
  * Must be used inside a function returning int `failures`.

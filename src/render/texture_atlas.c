@@ -93,6 +93,18 @@ int block_tile_for_face(uint16_t block, int face)
         return TILE_WATER;
     }
     switch (block) {
+    case BLOCK_GRAVEL: return TILE_GRAVEL;
+    case BLOCK_SANDSTONE: return TILE_SANDSTONE;
+    case BLOCK_DEEPSLATE: return TILE_DEEPSLATE;
+    case BLOCK_COPPER_ORE: return TILE_COPPER_ORE;
+    case BLOCK_LAPIS_ORE: return TILE_LAPIS_ORE;
+    case BLOCK_REDSTONE_ORE: return TILE_REDSTONE_ORE;
+    case BLOCK_EMERALD_ORE: return TILE_EMERALD_ORE;
+    case BLOCK_TUFF: return TILE_TUFF;
+    case BLOCK_GRANITE: return TILE_GRANITE;
+    case BLOCK_RAW_IRON: return TILE_RAW_IRON;
+    case BLOCK_RAW_COPPER: return TILE_RAW_COPPER;
+    case BLOCK_LAVA: return TILE_LAVA;
     case BLOCK_GRASS:
         if (face == ATLAS_FACE_POS_Y) {
             return TILE_GRASS_TOP;
@@ -165,6 +177,7 @@ static const char *TILE_FILES[] = {
 "bone", "beef", "leather", "player_skin", "player_sleeve", "flesh", "wood_sword", "stone_sword",
     "iron_ingot", "diamond", "iron_pickaxe", "iron_axe", "iron_shovel", "diamond_pickaxe", "diamond_axe",
     "diamond_shovel", "iron_sword", "diamond_sword",
+"gravel", "sandstone", "deepslate", "copper_ore", "lapis_ore", "redstone_ore", "emerald_ore", "tuff", "granite", "raw_iron", "raw_copper", "lava",
 };
 /* Derived from the array so adding a tile can never desync the bound. */
 #define TILE_FILE_COUNT (sizeof(TILE_FILES) / sizeof(TILE_FILES[0]))
@@ -376,16 +389,21 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         static const struct {
             int tile;
             unsigned char r, g, b;
-        } ores[4] = {
+        } ores[8] = {
             {TILE_COAL_ORE, 25, 25, 25},
             {TILE_IRON_ORE, 210, 150, 100},
             {TILE_GOLD_ORE, 252, 238, 75},
             {TILE_DIAMOND_ORE, 93, 236, 241},
+            {TILE_COPPER_ORE, 190, 115, 70},
+            {TILE_LAPIS_ORE, 45, 75, 200},
+            {TILE_REDSTONE_ORE, 205, 35, 35},
+            {TILE_EMERALD_ORE, 35, 200, 80},
         };
-        for (size_t oi = 0; oi < 4; ++oi) {
+        for (size_t oi = 0; oi < 8; ++oi) {
             int tile = ores[oi].tile;
             int col = tile % ATLAS_TILES;
             int row = tile / ATLAS_TILES;
+            tile_fill(out_px, tile, 128, 128, 128, 255);
             tile_speckle(out_px, tile, 21u + (uint32_t)oi, 0.15f, 0.08f);
             for (int y = 0; y < ATLAS_TILE_PX; ++y) {
                 for (int x = 0; x < ATLAS_TILE_PX; ++x) {
@@ -398,6 +416,22 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         }
     }
 
+    tile_fill(out_px, TILE_GRAVEL, 140, 138, 133, 255);
+    tile_speckle(out_px, TILE_GRAVEL, 100u, .22f, .12f);
+    tile_fill(out_px, TILE_SANDSTONE, 207, 184, 122, 255);
+    tile_speckle(out_px, TILE_SANDSTONE, 101u, .22f, .12f);
+    tile_fill(out_px, TILE_DEEPSLATE, 71, 71, 77, 255);
+    tile_speckle(out_px, TILE_DEEPSLATE, 102u, .22f, .12f);
+    tile_fill(out_px, TILE_TUFF, 102, 107, 94, 255);
+    tile_speckle(out_px, TILE_TUFF, 107u, .22f, .12f);
+    tile_fill(out_px, TILE_GRANITE, 158, 110, 92, 255);
+    tile_speckle(out_px, TILE_GRANITE, 108u, .22f, .12f);
+    tile_fill(out_px, TILE_RAW_IRON, 166, 133, 102, 255);
+    tile_speckle(out_px, TILE_RAW_IRON, 109u, .22f, .12f);
+    tile_fill(out_px, TILE_RAW_COPPER, 166, 107, 71, 255);
+    tile_speckle(out_px, TILE_RAW_COPPER, 110u, .22f, .12f);
+    tile_fill(out_px, TILE_LAVA, 255, 89, 8, 255);
+    tile_speckle(out_px, TILE_LAVA, 111u, .22f, .12f);
     /* Snow: subtle cool speckle. */
     tile_speckle(out_px, TILE_SNOW, 40u, 0.04f, 0.03f);
 

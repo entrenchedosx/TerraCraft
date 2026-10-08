@@ -123,7 +123,7 @@ bool player_find_spawn(const World *w, int sx, int sz, Vec3 *out)
         uint16_t head1 = world_get_block(w, sx, y + 1, sz);
         uint16_t head2 = world_get_block(w, sx, y + 2, sz);
         if (block_is_solid(foot) && !block_is_solid(head1) && !block_is_solid(head2) &&
-            !block_is_water(head1) && !block_is_water(head2)) {
+            !block_is_water(head1) && !block_is_water(head2) && head1 != BLOCK_LAVA && head2 != BLOCK_LAVA) {
             *out = mmath_vec3((float)sx + 0.5f, (float)(y + 1), (float)sz + 0.5f);
             return true;
         }

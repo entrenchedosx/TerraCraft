@@ -6,6 +6,7 @@
 #include "world/chunk.h"
 #include "world/world.h"
 #include "world/world_save.h"
+#include "world/worldgen_v4.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -40,9 +41,9 @@ static float gen_smoothstep(float edge0, float edge1, float x)
 }
 
 /* Version 1 column height (M5): continental base + mountain lift + hills + detail.
- * Base 70 keeps most land above the sea (64) with real ocean basins where
- * the continent field dips; mountains spike via the squared mask.
- * Typical range roughly [25..160]; clamped to [4..200] (test-pinned).
+ * Base 70 keeps most land above the
+ * sea (64) with real ocean basins where the continent field dips; mountains spike via the squared mask. Typical range
+ * roughly [25..160]; clamped to [4..200] (test-pinned).
  *
  * Args:
  *   seed: world seed.
@@ -71,39 +72,34 @@ static int world_gen_height_v1(long seed, int wx, int wz)
 }
 
 /* Version 2 terrain: warp the continent field before sampling it, build
- * broad connected highlands around sharper ridges, then carve meandering
+ * broad connected highlands around sharper
+ * ridges, then carve meandering
  * lowlands. This remains a deterministic 2D surface model; it does not
- * claim to reproduce Minecraft's full 3D density router. */
+ * claim to
+ * reproduce Minecraft's full 3D density router. */
 static int world_gen_height_v2(long seed, int wx, int wz)
 {
     uint32_t s = (uint32_t)seed;
     float fx = (float)wx;
     float fz = (float)wz;
-    float warp_x = noise_fbm2(fx * 0.0014f, fz * 0.0014f, 3, 2.0f, 0.5f,
-                              s ^ 0x57415250u) * 104.0f;
-    float warp_z = noise_fbm2(fx * 0.0014f + 731.0f, fz * 0.0014f - 419.0f, 3, 2.0f, 0.5f,
-                              s ^ 0x57415251u) * 104.0f;
+    float warp_x = noise_fbm2(fx * 0.0014f, fz * 0.0014f, 3, 2.0f, 0.5f, s ^ 0x57415250u) * 104.0f;
+    float warp_z = noise_fbm2(fx * 0.0014f + 731.0f, fz * 0.0014f - 419.0f, 3, 2.0f, 0.5f, s ^ 0x57415251u) * 104.0f;
     float x = fx + warp_x;
     float z = fz + warp_z;
     float continent = noise_fbm2(x * 0.0017f, z * 0.0017f, 5, 2.0f, 0.5f, s ^ 0x434F4E54u);
-    float broad_hills = noise_fbm2(x * 0.0065f, z * 0.0065f, 4, 2.0f, 0.5f,
-                                   s ^ 0x48494C4Cu) * 8.0f;
-    float rolling = noise_fbm2(x * 0.018f + 93.0f, z * 0.018f - 157.0f, 3, 2.0f, 0.5f,
-                               s ^ 0x524F4C4Cu) * 4.0f;
-    float ridge_noise = noise_fbm2(x * 0.0044f - 127.0f, z * 0.0044f + 311.0f, 4, 2.0f,
-                                  0.5f, s ^ 0x52494447u);
+    float broad_hills = noise_fbm2(x * 0.0065f, z * 0.0065f, 4, 2.0f, 0.5f, s ^ 0x48494C4Cu) * 8.0f;
+    float rolling = noise_fbm2(x * 0.018f + 93.0f, z * 0.018f - 157.0f, 3, 2.0f, 0.5f, s ^ 0x524F4C4Cu) * 4.0f;
+    float ridge_noise = noise_fbm2(x * 0.0044f - 127.0f, z * 0.0044f + 311.0f, 4, 2.0f, 0.5f, s ^ 0x52494447u);
     float ridge = 1.0f - fabsf(ridge_noise);
     float mountain_mask = gen_smoothstep(0.58f, 0.82f, ridge);
-    float peak_noise = noise_fbm2(x * 0.012f + 17.0f, z * 0.012f - 83.0f, 3, 2.0f,
-                                  0.5f, s ^ 0x5045414Bu);
+    float peak_noise = noise_fbm2(x * 0.012f + 17.0f, z * 0.012f - 83.0f, 3, 2.0f, 0.5f, s ^ 0x5045414Bu);
     float sharp_peaks = 1.0f - fabsf(peak_noise);
-    float base = 66.0f + continent * 31.0f + broad_hills + rolling +
-                 mountain_mask * (16.0f + sharp_peaks * 43.0f);
+    float base = 66.0f + continent * 31.0f + broad_hills + rolling + mountain_mask * (16.0f + sharp_peaks * 43.0f);
 
     /* A warped zero-contour becomes a broad river network. Carve more
-     * strongly through raised ground and taper out in deep ocean basins. */
-    float river_field = noise_fbm2(x * 0.00145f + 811.0f, z * 0.00145f + 227.0f,
-                                   3, 2.0f, 0.5f, s ^ 0x52495652u);
+     * strongly through raised ground and taper
+     * out in deep ocean basins. */
+    float river_field = noise_fbm2(x * 0.00145f + 811.0f, z * 0.00145f + 227.0f, 3, 2.0f, 0.5f, s ^ 0x52495652u);
     float river = 1.0f - gen_smoothstep(0.018f, 0.105f, fabsf(river_field));
     float inland = gen_smoothstep(58.0f, 74.0f, base);
     float river_depth = 7.0f + gen_clamp01((base - 66.0f) / 55.0f) * 11.0f;
@@ -120,10 +116,13 @@ static int world_gen_height_v2(long seed, int wx, int wz)
 }
 
 /* Version 3 terrain borrows the large-scale structure of modern voxel
- * terrain: broad continents, low-erosion mountain belts, sharper ridges,
+ * terrain: broad continents, low-erosion
+ * mountain belts, sharper ridges,
  * and river valleys that actually reach the world water table. The block
- * world is still stored as 16x256x16 chunks, so this profile keeps a surface
- * height field and uses the existing 3D cave carvers below it. */
+ * world is
+ * still stored as 16x256x16 chunks, so this profile keeps a surface
+ * height field and uses the existing 3D cave
+ * carvers below it. */
 static int world_gen_height_v3(long seed, int wx, int wz)
 {
     uint32_t s = (uint32_t)seed;
@@ -131,47 +130,39 @@ static int world_gen_height_v3(long seed, int wx, int wz)
     float fz = (float)wz;
 
     /* Low-frequency domain warp keeps continents and ranges irregular over
-     * many chunks without introducing per-chunk seams. */
-    float warp_x = noise_fbm2(fx * 0.0011f, fz * 0.0011f, 4, 2.0f, 0.5f,
-                              s ^ 0x33574158u) * 156.0f;
-    float warp_z = noise_fbm2(fx * 0.0011f + 617.0f, fz * 0.0011f - 283.0f, 4, 2.0f, 0.5f,
-                              s ^ 0x3357415au) * 156.0f;
+     * many chunks without introducing
+     * per-chunk seams. */
+    float warp_x = noise_fbm2(fx * 0.0011f, fz * 0.0011f, 4, 2.0f, 0.5f, s ^ 0x33574158u) * 156.0f;
+    float warp_z = noise_fbm2(fx * 0.0011f + 617.0f, fz * 0.0011f - 283.0f, 4, 2.0f, 0.5f, s ^ 0x3357415au) * 156.0f;
     float x = fx + warp_x;
     float z = fz + warp_z;
 
-    float continents = noise_fbm2(x * 0.00105f, z * 0.00105f, 5, 2.0f, 0.5f,
-                                  s ^ 0x33434f4eu);
-    float hills = noise_fbm2(x * 0.0048f, z * 0.0048f, 4, 2.0f, 0.5f,
-                             s ^ 0x3348494cu);
-    float erosion = noise_fbm2(x * 0.010f + 281.0f, z * 0.010f - 97.0f, 3, 2.0f, 0.5f,
-                               s ^ 0x3345524fu);
+    float continents = noise_fbm2(x * 0.00105f, z * 0.00105f, 5, 2.0f, 0.5f, s ^ 0x33434f4eu);
+    float hills = noise_fbm2(x * 0.0048f, z * 0.0048f, 4, 2.0f, 0.5f, s ^ 0x3348494cu);
+    float erosion = noise_fbm2(x * 0.010f + 281.0f, z * 0.010f - 97.0f, 3, 2.0f, 0.5f, s ^ 0x3345524fu);
     float base = 71.0f + continents * 29.0f + hills * 12.0f + erosion * 5.0f;
 
     /* Broad mountain systems are masked separately from the ridged detail:
-     * this yields connected ranges with quieter foothills between them. */
-    float range_field = noise_fbm2(x * 0.00165f - 433.0f, z * 0.00165f + 191.0f,
-                                   4, 2.0f, 0.5f, s ^ 0x3352414eu);
+     * this yields connected ranges with
+     * quieter foothills between them. */
+    float range_field = noise_fbm2(x * 0.00165f - 433.0f, z * 0.00165f + 191.0f, 4, 2.0f, 0.5f, s ^ 0x3352414eu);
     float range_mask = gen_smoothstep(0.22f, 0.76f, range_field);
-    float ridge_noise = noise_fbm2(x * 0.0037f + 61.0f, z * 0.0037f - 347.0f,
-                                   4, 2.0f, 0.5f, s ^ 0x33524944u);
+    float ridge_noise = noise_fbm2(x * 0.0037f + 61.0f, z * 0.0037f - 347.0f, 4, 2.0f, 0.5f, s ^ 0x33524944u);
     float ridge = 1.0f - fabsf(ridge_noise);
-    float sharp = 1.0f - fabsf(noise_fbm2(x * 0.010f - 19.0f, z * 0.010f + 89.0f,
-                                          3, 2.0f, 0.5f, s ^ 0x33504541u));
+    float sharp = 1.0f - fabsf(noise_fbm2(x * 0.010f - 19.0f, z * 0.010f + 89.0f, 3, 2.0f, 0.5f, s ^ 0x33504541u));
     float ruggedness = 1.0f - gen_smoothstep(0.15f, 0.82f, erosion);
-    float mountains = range_mask * ruggedness *
-                      (19.0f + gen_smoothstep(0.42f, 0.90f, ridge) * 57.0f + sharp * 18.0f);
+    float mountains = range_mask * ruggedness * (19.0f + gen_smoothstep(0.42f, 0.90f, ridge) * 57.0f + sharp * 18.0f);
     float h = base + mountains;
 
     /* The warped channel network is cut down to the water level near its
-     * centerline. This produces actual connected lowland water when the
+     * centerline. This produces actual
+     * connected lowland water when the
      * normal sea fill runs, instead of valleys that always remain dry. */
-    float river_noise = noise_fbm2(x * 0.00155f + 811.0f, z * 0.00155f + 227.0f,
-                                   4, 2.0f, 0.5f, s ^ 0x33524956u);
+    float river_noise = noise_fbm2(x * 0.00155f + 811.0f, z * 0.00155f + 227.0f, 4, 2.0f, 0.5f, s ^ 0x33524956u);
     float river_distance = fabsf(river_noise);
     float channel = 1.0f - gen_smoothstep(0.012f, 0.095f, river_distance);
     float inland = gen_smoothstep(59.0f, 75.0f, base);
-    float channel_floor = (float)WORLD_SEA_LEVEL - 1.0f +
-                          fmaxf(0.0f, river_distance - 0.006f) * 240.0f;
+    float channel_floor = (float)WORLD_SEA_LEVEL - 1.0f + fmaxf(0.0f, river_distance - 0.006f) * 240.0f;
     float river_cut = h - channel_floor;
     if (river_cut < 0.0f) {
         river_cut = 0.0f;
@@ -191,6 +182,8 @@ static int world_gen_height_v3(long seed, int wx, int wz)
 
 int world_gen_height_version(long seed, int wx, int wz, int terrain_version)
 {
+    if (terrain_version >= 4)
+        return worldgen_height(seed, wx, wz);
     if (terrain_version >= 3) {
         return world_gen_height_v3(seed, wx, wz);
     }
@@ -213,6 +206,8 @@ int world_gen_height(long seed, int wx, int wz)
  */
 uint16_t world_gen_surface_version(long seed, int wx, int wz, int h, int terrain_version)
 {
+    if (terrain_version >= 4)
+        return worldgen_surface(seed, wx, wz, h);
     int b = biome_at(seed, wx, wz, h);
     switch (b) {
     case BIOME_OCEAN:
@@ -253,13 +248,13 @@ uint16_t world_gen_surface(long seed, int wx, int wz, int h)
 static bool gen_carved(long seed, int wx, int y, int wz)
 {
     uint32_t s = (uint32_t)seed;
-    float chambers = noise_fbm3((float)wx * 0.030f, (float)y * 0.045f, (float)wz * 0.030f, 2, 2.0f, 0.5f,
-                                s ^ 0xCA4E0001u);
+    float chambers =
+        noise_fbm3((float)wx * 0.030f, (float)y * 0.045f, (float)wz * 0.030f, 2, 2.0f, 0.5f, s ^ 0xCA4E0001u);
     if (chambers > 0.72f) {
         return true;
     }
-    float worm = noise_fbm3((float)wx * 0.011f + 7.3f, (float)y * 0.025f + 1.7f, (float)wz * 0.011f - 3.1f, 2,
-                            2.0f, 0.5f, s ^ 0xCA4E0002u);
+    float worm = noise_fbm3((float)wx * 0.011f + 7.3f, (float)y * 0.025f + 1.7f, (float)wz * 0.011f - 3.1f, 2, 2.0f,
+                            0.5f, s ^ 0xCA4E0002u);
     if (worm > -0.03f && worm < 0.03f) {
         return true;
     }
@@ -300,11 +295,20 @@ static uint16_t gen_ore(long seed, int wx, int y, int wz)
  */
 bool world_gen_tree_version(long seed, int tx, int tz, int terrain_version, int *out_trunk)
 {
+    /* Reject most profile-4 columns before an expensive density column
+     * query. This is the same lottery used
+     * below, and .022 is the maximum
+     * existing biome tree density, so the output remains identical. */
+    if (terrain_version >= 4 && noise_hash_to_unit(noise_hash2(tx, tz, (uint32_t)seed ^ 0x7EE50001u)) >= .022f)
+        return false;
     int h = world_gen_height_version(seed, tx, tz, terrain_version);
     if (h <= WORLD_SEA_LEVEL + 1 || h >= 120) {
         return false;
     }
-    int b = biome_at(seed, tx, tz, h);
+    int b = terrain_version >= 4 ? worldgen_climate(seed, tx, tz).biome : biome_at(seed, tx, tz, h);
+    if (terrain_version >= 4 && worldgen_surface(seed, tx, tz, h) != BLOCK_GRASS &&
+        worldgen_surface(seed, tx, tz, h) != BLOCK_SNOW)
+        return false;
     float density = biome_tree_density(b);
     if (density <= 0.0f) {
         return false;
@@ -331,11 +335,10 @@ bool world_gen_tree(long seed, int tx, int tz, int *out_trunk)
 /* Vegetation for a surface column: plant/flower or AIR (pure function). */
 uint16_t world_gen_vegetation_version(long seed, int wx, int wz, int h, int terrain_version)
 {
-    (void)terrain_version; /* Biome thresholds are shared by both terrain profiles. */
     if (h <= WORLD_SEA_LEVEL + 1) {
         return BLOCK_AIR;
     }
-    int b = biome_at(seed, wx, wz, h);
+    int b = terrain_version >= 4 ? worldgen_climate(seed, wx, wz).biome : biome_at(seed, wx, wz, h);
     if (!biome_has_vegetation(b)) {
         return BLOCK_AIR;
     }
@@ -466,6 +469,33 @@ int world_generate_chunk(World *w, int cx, int cz)
         return 0;
     }
     long seed = w->seed;
+    if (w->terrain_version >= 4) {
+        worldgen_fill(c, seed);
+        int tops[16][16];
+        for (int z = 0; z < 16; ++z)
+            for (int x = 0; x < 16; ++x) {
+                int h = CHUNK_Y - 1;
+                while (h > 0 && !block_is_solid(chunk_get_block(c, x, h, z)))
+                    --h;
+                tops[z][x] = h;
+            }
+        stamp_trees(c, seed, 4);
+        for (int z = 0; z < 16; ++z)
+            for (int x = 0; x < 16; ++x) {
+                int wx = cx * 16 + x, wz = cz * 16 + z;
+                int h = tops[z][x];
+                if (h + 1 < CHUNK_Y && chunk_get_block(c, x, h, z) == BLOCK_GRASS &&
+                    chunk_get_block(c, x, h + 1, z) == BLOCK_AIR)
+                    chunk_set_block(c, x, h + 1, z, world_gen_vegetation_version(seed, wx, wz, h, 4));
+            }
+        c->dirty = true;
+        c->save_dirty = false;
+        if (world_add_chunk(w, c) != 0) {
+            chunk_destroy(c);
+            return -4;
+        }
+        return 0;
+    }
     int terrain_version = w->terrain_version >= 3 ? 3 : (w->terrain_version >= 2 ? 2 : 1);
     int heights[CHUNK_X][CHUNK_Z];
     int biomes[CHUNK_X][CHUNK_Z];
@@ -478,8 +508,7 @@ int world_generate_chunk(World *w, int cx, int cz)
             heights[lx][lz] = h;
             biomes[lx][lz] = b;
             uint16_t surface = world_gen_surface_version(seed, wx, wz, h, terrain_version);
-            uint16_t subsurface =
-                (b == BIOME_OCEAN || b == BIOME_BEACH || b == BIOME_DESERT) ? BLOCK_SAND : BLOCK_DIRT;
+            uint16_t subsurface = (b == BIOME_OCEAN || b == BIOME_BEACH || b == BIOME_DESERT) ? BLOCK_SAND : BLOCK_DIRT;
             if (b == BIOME_MOUNTAINS) {
                 subsurface = BLOCK_DIRT;
             }
@@ -511,10 +540,8 @@ int world_generate_chunk(World *w, int cx, int cz)
     for (int lx = 0; lx < CHUNK_X; ++lx) {
         for (int lz = 0; lz < CHUNK_Z; ++lz) {
             int h = heights[lx][lz];
-            uint16_t veg = world_gen_vegetation_version(seed, cx * CHUNK_X + lx,
-                                                        cz * CHUNK_Z + lz, h, terrain_version);
-            if (veg != BLOCK_AIR && h + 1 < CHUNK_Y &&
-                chunk_get_block(c, lx, h + 1, lz) == BLOCK_AIR) {
+            uint16_t veg = world_gen_vegetation_version(seed, cx * CHUNK_X + lx, cz * CHUNK_Z + lz, h, terrain_version);
+            if (veg != BLOCK_AIR && h + 1 < CHUNK_Y && chunk_get_block(c, lx, h + 1, lz) == BLOCK_AIR) {
                 chunk_set_block(c, lx, h + 1, lz, veg);
             }
         }

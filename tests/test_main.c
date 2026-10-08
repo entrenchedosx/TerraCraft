@@ -10,6 +10,12 @@ int g_tests_failed = 0;
  */
 int main(void)
 {
+    RUN_TEST(test_worldgen_v4_determinism);
+    RUN_TEST(test_worldgen_v4_fields);
+    RUN_TEST(test_worldgen_v4_spawn);
+    RUN_TEST(test_worldgen_v4_materials);
+    RUN_TEST(test_worldgen_v4_rescue_save);
+    RUN_TEST(test_worldgen_v4_ore_depth);
     printf("TerraCraft unit tests\n");
     printf("==============================\n");
 

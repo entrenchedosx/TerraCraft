@@ -27,6 +27,10 @@ open.
 ## Features
 
 - Seeded terrain with seven biomes, caves, ores, trees, and vegetation.
+- New-world density generation with coherent continents, climate regions,
+  three cave scales, local aquifers, eight ore types, mineral veins and
+  tested safe spawn selection. See [World Generation](docs/WORLD_GENERATION.md)
+  for the Java 26.3 reference, adaptations, maps and verification results.
 - Versioned terrain profiles for legacy-save continuity, with connected
   mountain belts, sharper peaks, varied foothills, and lowland river channels
   in newly created worlds.

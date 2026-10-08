@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Stable item IDs. Block items mirror BlockType values 1..19 (except
+/* Stable item IDs. Block items mirror BlockType values 1..19 and 28..38 (except
  * WATER, which is not a valid item). Standalone IDs are explicit.
  */
 typedef uint16_t ItemId;

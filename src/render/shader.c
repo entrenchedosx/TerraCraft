@@ -345,6 +345,8 @@ const char *shader_voxel_frag_src(void)
            "    float sunFactor = smoothstep(-0.10, 0.12, sunDir.y);\n"
            "    vec3 lit = texColor.rgb * (ambient + sunTint * diff * uLightIntensity * sunFactor\n"
            "                                 * (1.0 - cloudShadow * 0.24)) * FragAO;\n"
+           "    ivec2 atlasTile = ivec2(floor(FragUV * 16.0));\n"
+           "    if (atlasTile == ivec2(8, 4)) lit = texColor.rgb * 1.1;\n"
            "    float dist = distance(FragWorldPos, uCamPos);\n"
            "    float f = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);\n"
            "    vec3 col = mix(lit, uFogColor, clamp(f, 0.0, 1.0));\n"

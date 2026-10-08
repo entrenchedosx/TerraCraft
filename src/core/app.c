@@ -637,7 +637,7 @@ enum {
     APP_LAN_MSG_PLAYER_LEFT = 6,
     APP_LAN_MSG_GRAVITY_START = 7,
     APP_LAN_MSG_GRAVITY_LAND = 8,
-    APP_LAN_PROTOCOL_VERSION = 2,
+    APP_LAN_PROTOCOL_VERSION = 3, /* Profile 4 and appended geological block registry. */
     APP_LAN_PORT = 25566,
     APP_CHAT_MAX_BYTES = 160
 };
@@ -2733,6 +2733,15 @@ bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
 
     /* Hunger/regen/starve (survival only; timers freeze while paused/dead). */
     if (!survival_is_creative(&app->player)) {
+        int lx = (int)floorf(app->player.pos.x);
+        int lz = (int)floorf(app->player.pos.z);
+        int ly = (int)floorf(app->player.pos.y);
+        if (app->player.hurt_t <= 0.0f &&
+            (world_get_block(app->world, lx, ly, lz) == BLOCK_LAVA ||
+             world_get_block(app->world, lx, ly+1, lz) == BLOCK_LAVA)) {
+            survival_damage_player(&app->player, 4.0f);
+            app->player.hurt_t = .5f;
+        }
         survival_hunger_update(&app->player, dt);
     }
 

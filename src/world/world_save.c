@@ -265,7 +265,7 @@ int world_save_all(const char *dir, World *w, const Player *p, Vec3 spawn, bool 
     m.name[nl] = '\0';
     m.seed = (int64_t)w->seed;
     m.mode = w->mode;
-    m.terrain_version = w->terrain_version >= 3 ? 3 : (w->terrain_version >= 2 ? 2 : 1);
+    m.terrain_version = w->terrain_version;
     m.px = p->pos.x;
     m.py = p->pos.y;
     m.pz = p->pos.z;

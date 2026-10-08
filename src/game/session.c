@@ -17,6 +17,7 @@
 #include "world/streamer.h"
 #include "world/world.h"
 #include "world/world_gen.h"
+#include "world/worldgen_v4.h"
 #include "world/world_meta.h"
 #include "world/world_save.h"
 
@@ -239,6 +240,22 @@ int session_open_world(AppContext *app, const char *world_dir)
         app->player.yaw = m.yaw;
         app->player.pitch = m.pitch;
     }
+    if (!m.has_player && w->terrain_version >= 4) {
+        Vec3 spawn;
+        if (worldgen_find_spawn(w, &spawn) < 0) {
+            streamer_reset(&app->streamer);
+            app->streamer_ready = false;
+            world_destroy(w);
+            app->world = NULL;
+            return -7;
+        }
+        app->player.pos = spawn;
+        app->player.render_pos = spawn;
+        m.has_spawn = true;
+        m.spawn_x = spawn.x;
+        m.spawn_y = spawn.y;
+        m.spawn_z = spawn.z;
+    }
     /* Remember whether the position came from the save: the post-load
      * spawn search must not teleport a restored player back to spawn. */
     app->player_from_save = m.has_player;
@@ -362,10 +379,27 @@ int session_find_spawn(AppContext *app)
     if (app == NULL || !app->world_open || app->world == NULL) {
         return -1;
     }
-    if (app->has_spawn_point && app->player_from_save) {
+    if (app->has_spawn_point && (app->player_from_save || app->world->terrain_version >= 4)) {
+        if (!app->player_from_save) {
+            app->player.pos = app->spawn_point;
+            app->player.render_pos = app->spawn_point;
+        }
         return 0; /* M6 save: position + spawn both restored already. */
     }
     World *w = app->world;
+    if (w->terrain_version >= 4) {
+        if (!app->has_spawn_point) {
+            Vec3 spawn;
+            if (worldgen_find_spawn(w, &spawn) < 0) return -1;
+            app->spawn_point = spawn;
+            app->has_spawn_point = true;
+        }
+        if (!app->player_from_save) {
+            app->player.pos = app->spawn_point;
+            app->player.render_pos = app->spawn_point;
+        }
+        return 0;
+    }
     Vec3 fallback = mmath_vec3(8.5f, 120.0f, 8.5f);
     bool have_fallback = false;
     for (int ring = 0; ring <= 6; ++ring) {

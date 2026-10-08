@@ -1,0 +1,14 @@
+Maps 0.869s
+1024 chunks 5.347s (5.222ms/chunk), peak one chunk
+Region resident memory peak 6.47 MiB
+Spawn seeds 50/500 failures 0
+Spawn seeds 100/500 failures 0
+Spawn seeds 150/500 failures 0
+Spawn seeds 200/500 failures 0
+Spawn seeds 250/500 failures 0
+Spawn seeds 300/500 failures 0
+Spawn seeds 350/500 failures 0
+Spawn seeds 400/500 failures 0
+Spawn seeds 450/500 failures 0
+Spawn seeds 500/500 failures 0
+Spawn 500 seeds: 0 failures, 0 fallback, 29.213s

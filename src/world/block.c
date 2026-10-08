@@ -48,6 +48,18 @@ static const BlockInfo BLOCK_TABLE[BLOCK_COUNT] = {
     [BLOCK_WATER_FLOW_6] = WATER_VARIANT_INFO("water_flow_6"),
     [BLOCK_WATER_FLOW_7] = WATER_VARIANT_INFO("water_flow_7"),
     [BLOCK_WATER_FALLING] = WATER_VARIANT_INFO("water_falling"),
+    [BLOCK_GRAVEL] = {.name = "gravel", .solid = true, .transparent = false, .color_r = 0.55f, .color_g = 0.54f, .color_b = 0.52f, .hardness = 0.6f, .tool = 3, .min_tier = 1, .drop = BLOCK_GRAVEL, .drop_count = 1, .unbreakable = false, .gravity_affected = true},
+    [BLOCK_SANDSTONE] = {.name = "sandstone", .solid = true, .transparent = false, .color_r = 0.81f, .color_g = 0.72f, .color_b = 0.48f, .hardness = 3.0f, .tool = 1, .min_tier = 1, .drop = BLOCK_SANDSTONE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_DEEPSLATE] = {.name = "deepslate", .solid = true, .transparent = false, .color_r = 0.28f, .color_g = 0.28f, .color_b = 0.3f, .hardness = 3.0f, .tool = 1, .min_tier = 1, .drop = BLOCK_DEEPSLATE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_COPPER_ORE] = {.name = "copper_ore", .solid = true, .transparent = false, .color_r = 0.65f, .color_g = 0.43f, .color_b = 0.28f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = BLOCK_COPPER_ORE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_LAPIS_ORE] = {.name = "lapis_ore", .solid = true, .transparent = false, .color_r = 0.25f, .color_g = 0.35f, .color_b = 0.75f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = BLOCK_LAPIS_ORE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_REDSTONE_ORE] = {.name = "redstone_ore", .solid = true, .transparent = false, .color_r = 0.7f, .color_g = 0.16f, .color_b = 0.16f, .hardness = 3.0f, .tool = 1, .min_tier = 3, .drop = BLOCK_REDSTONE_ORE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_EMERALD_ORE] = {.name = "emerald_ore", .solid = true, .transparent = false, .color_r = 0.15f, .color_g = 0.7f, .color_b = 0.35f, .hardness = 3.0f, .tool = 1, .min_tier = 3, .drop = BLOCK_EMERALD_ORE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_TUFF] = {.name = "tuff", .solid = true, .transparent = false, .color_r = 0.4f, .color_g = 0.42f, .color_b = 0.37f, .hardness = 3.0f, .tool = 1, .min_tier = 1, .drop = BLOCK_TUFF, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_GRANITE] = {.name = "granite", .solid = true, .transparent = false, .color_r = 0.62f, .color_g = 0.43f, .color_b = 0.36f, .hardness = 3.0f, .tool = 1, .min_tier = 1, .drop = BLOCK_GRANITE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_RAW_IRON] = {.name = "raw_iron", .solid = true, .transparent = false, .color_r = 0.65f, .color_g = 0.52f, .color_b = 0.4f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = BLOCK_RAW_IRON, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_RAW_COPPER] = {.name = "raw_copper", .solid = true, .transparent = false, .color_r = 0.65f, .color_g = 0.42f, .color_b = 0.28f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = BLOCK_RAW_COPPER, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_LAVA] = {.name = "lava", .solid = false, .transparent = true, .color_r = 1.0f, .color_g = 0.35f, .color_b = 0.03f, .hardness = 3.0f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = true, .gravity_affected = false},
 };
 
 #undef WATER_VARIANT_INFO

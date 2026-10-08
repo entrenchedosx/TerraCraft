@@ -125,7 +125,7 @@ int test_meta_corrupt(void)
     TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Profile Two\nseed=8\nterrain_version=2\n",
                                  &m) == 0);
     TEST_ASSERT(m.terrain_version == 2); /* Existing profile is kept exactly. */
-    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=4\n",
+    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=5\n",
                                  &m) != 0);
     /* Missing directory fails. */
     TEST_ASSERT(world_meta_read("test_tmp_m5_no_such_dir_xyz", &m) != 0);

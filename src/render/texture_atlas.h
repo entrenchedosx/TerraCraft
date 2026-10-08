@@ -79,7 +79,19 @@ TILE_WOOD_SWORD = 49,
     TILE_DIAMOND_AXE = 57,
     TILE_DIAMOND_SHOVEL = 58,
     TILE_IRON_SWORD = 59,
-    TILE_DIAMOND_SWORD = 60
+    TILE_DIAMOND_SWORD = 60,
+    TILE_GRAVEL = 61,
+    TILE_SANDSTONE = 62,
+    TILE_DEEPSLATE = 63,
+    TILE_COPPER_ORE = 64,
+    TILE_LAPIS_ORE = 65,
+    TILE_REDSTONE_ORE = 66,
+    TILE_EMERALD_ORE = 67,
+    TILE_TUFF = 68,
+    TILE_GRANITE = 69,
+    TILE_RAW_IRON = 70,
+    TILE_RAW_COPPER = 71,
+    TILE_LAVA = 72
 } AtlasTile;
 
 /* Resource-pack tile file names, indexed by tile (NULL entry = no override).

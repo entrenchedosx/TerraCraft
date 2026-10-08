@@ -85,7 +85,8 @@ set(TERRACRAFT_SOURCES
   src/world/world.c
   src/world/water.c
   src/world/gravity.c
-  src/world/world_gen.c
+    src/world/world_gen.c
+    src/world/worldgen_v4.c
   src/world/streamer.c
   src/world/biome.c
   src/world/world_meta.c
@@ -190,6 +191,7 @@ add_executable(terracraft_tests
   tests/test_item.c
   tests/test_save.c
   tests/test_biome.c
+  tests/test_worldgen_v4.c
   tests/test_settings.c
   tests/test_profile.c
   tests/test_ui.c
@@ -245,3 +247,9 @@ endif()
 
 # --- Install (optional) ------------------------------------------------------
 install(TARGETS terracraft RUNTIME DESTINATION bin)
+add_executable(worldgen_probe tools/worldgen_probe.c)
+target_link_libraries(worldgen_probe PRIVATE terracraft_core)
+if(WIN32 AND MINEC_SDL2_DLL)
+  add_custom_command(TARGET worldgen_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINEC_SDL2_DLL}" $<TARGET_FILE_DIR:worldgen_probe>)
+endif()

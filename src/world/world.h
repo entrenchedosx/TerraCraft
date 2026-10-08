@@ -46,7 +46,7 @@ typedef struct World {
     Chunk *chunks[WORLD_MAX_CHUNKS]; /* Owned pointers in [0,count); remainder is NULL. */
     size_t count;                    /* Number of live chunks. */
     long seed;                       /* Generation seed. */
-    int terrain_version;             /* 1 = legacy, 2 = warped landforms, 3 = modern-style landforms. */
+    int terrain_version;             /* 1..3 = frozen legacy profiles; 4 = climate/density pipeline. */
     WorldWaterUpdate *water_updates;  /* Bounded coordinate queue; no chunk pointers. */
     size_t water_head;
     size_t water_count;

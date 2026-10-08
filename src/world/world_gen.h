@@ -1,6 +1,8 @@
 #pragma once
 
-/* Noise-based terrain generation (M5): layered continental/hill/detail
+/* Versioned terrain generation: profile 4 uses the density pipeline in
+ * worldgen_v4.h. Profiles 1..3 remain frozen for save compatibility.
+ * Legacy noise-based terrain generation (M5): layered continental/hill/detail
  * heightmap over seven climate biomes, with 3D-noise caves, clustered
  * ores, order-independent trees, and surface vegetation. Deterministic
  * per seed (no RNG anywhere). Pure CPU, headless-testable.
@@ -30,7 +32,8 @@ int world_gen_height(long seed, int wx, int wz);
 
 /* Versioned surface field used by saved sessions. Version 1 preserves the
  * original terrain, version 2 adds warped landforms, and version 3 adds
- * connected mountain ranges and sea-level river channels. */
+ * connected mountain ranges and sea-level river channels. Version 4 adds
+ * coherent climate, volumetric terrain/caves, aquifers and ore features. */
 int world_gen_height_version(long seed, int wx, int wz, int terrain_version);
 
 /* Surface block for a column of height h at (wx,wz): biome-driven
