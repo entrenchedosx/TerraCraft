@@ -109,6 +109,9 @@ void app_enter_state(AppContext *app, GameState to)
     GameState from = app->state;
     app->state = to;
     app->menu.menu_anim_at = app->last_frame_time;
+    if (to == GAME_STATE_MAIN_MENU) {
+        app->menu.main_focus = -1;
+    }
     if (to == GAME_STATE_LAN_MENU) {
         /* Fresh scan every visit: stale entries never greet the player. */
         app->menu.lan_server_idx = -1;
@@ -248,6 +251,7 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->state = GAME_STATE_PROFILE;
     app->sensitivity = MINEC_MOUSE_SENSITIVITY;
     memset(&app->menu, 0, sizeof(app->menu));
+    app->menu.main_focus = -1;
     app->menu.lan_server_idx = -1;
     if (profile_load(PROFILE_PATH, app->username, sizeof(app->username)) == PROFILE_OK) {
         app->state = GAME_STATE_MAIN_MENU;

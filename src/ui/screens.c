@@ -407,48 +407,57 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
 }
 
 static bool smenu_button(AppContext *app, const UiFrame *ui, float *rects, size_t *rn,
-                         float x, float y, float w, float h, float text_scale, const char *label)
+                         float x, float y, float w, float h, float text_scale, const char *label,
+                         bool focused)
 {
     bool hovered = false;
     bool clicked = ui_button(ui, x, y, w, h, &hovered);
-    /* Hover glow breathes gently so the button feels alive. */
-    float glow = 0.0f;
-    if (hovered) {
-        float wall = (float)(app->last_frame_time - app->start_time);
-        glow = 0.035f + 0.025f * sinf(wall * 6.0f);
-    }
-    /* Java-style frame: 2px black border, vertical gray gradient face,
-     * bright top edge; hover tints the face faintly blue-white. */
-    float top = 0.55f + glow;
-    float mid = 0.42f + glow;
-    float bot = 0.30f + glow * 0.5f;
-    float tint_b = hovered ? 0.06f : 0.0f;
+    bool active = hovered || focused;
+    bool pressed = hovered && ui != NULL && ui->mouse_down;
+    float offset = pressed ? 1.0f : 0.0f;
+    float top = active ? 0.52f : 0.58f;
+    float mid = active ? 0.39f : 0.46f;
+    float bot = active ? 0.27f : 0.31f;
+    float blue = active ? 0.10f : 0.0f;
+
+    /* Java Edition's title buttons are deliberately square and flat: a
+     * hard black frame, gray face, one-pixel highlight, and dark lower edge. */
     srect(rects, rn, SCR_MAX_RECT_VERTS, x - 2.0f, y - 2.0f, w + 4.0f, h + 4.0f,
           0.02f, 0.02f, 0.02f, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, h * 0.5f, top, top, top + 0.015f + tint_b, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + h * 0.5f, w, h - h * 0.5f, mid, mid,
-          mid + 0.015f + tint_b, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + h - 4.0f, w, 4.0f, bot, bot, bot, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, 2.0f, 0.80f + glow, 0.80f + glow, 0.82f + glow,
-          1.0f);
+    if (active) {
+        srect(rects, rn, SCR_MAX_RECT_VERTS, x - 1.0f, y - 1.0f, w + 2.0f, h + 2.0f,
+              0.87f, 0.87f, 0.91f, 1.0f);
+    }
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + offset, w, h - offset, top, top, top + blue, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + h * 0.42f + offset, w - 2.0f,
+          h * 0.58f - offset, mid, mid, mid + blue, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + offset, w, 1.0f, 0.78f, 0.78f, 0.80f + blue, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + offset, 1.0f, h - offset,
+          0.70f, 0.70f, 0.72f + blue, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + h - 2.0f, w, 2.0f, bot, bot, bot + blue * 0.3f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x + w - 2.0f, y + offset, 2.0f, h - offset,
+          bot, bot, bot + blue * 0.3f, 1.0f);
     sflush(app, rects, rn);
 
     float tw = 0.0f;
     float th = 0.0f;
     renderer_measure_text(app->renderer, label, text_scale, &tw, &th);
     float tx = x + (w - tw) * 0.5f;
-    float ty = y + (h - th) * 0.5f;
+    float ty = y + offset + (h - th) * 0.5f;
     renderer_draw_text(app->renderer, tx + 1.0f, ty + 1.0f, text_scale,
                        0.08f, 0.08f, 0.08f, 0.9f, label);
-    renderer_draw_text(app->renderer, tx, ty, text_scale, 1.0f, 1.0f, 1.0f, 1.0f, label);
+    renderer_draw_text(app->renderer, tx, ty, text_scale,
+                       active ? 1.0f : 0.93f, active ? 1.0f : 0.93f,
+                       active ? 0.64f : 0.93f, 1.0f, label);
     if (clicked) {
         audio_play(&app->audio, AUDIO_UI_CLICK);
     }
     return clicked;
 }
 
-/* Minecraft-style title screen: panoramic block landscape, wordmark, and
- * only live destinations. Layout is derived from the window size. */
+/* Java Edition-style title screen. Every visible button has a live action;
+ * the player's profile fills the third primary row used by online services
+ * in the reference layout. */
 static void screen_main_menu(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
@@ -456,144 +465,151 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     float cx = (float)app->width * 0.5f;
     float width = (float)app->width;
     float height = (float)app->height;
-    float panel_w = fminf(420.0f, fmaxf(220.0f, width - 24.0f));
-    /* Panel slides in from the left on state enter. */
-    float enter_px = (float)(app->last_frame_time - app->menu.menu_anim_at);
-    if (!(enter_px >= 0.0f)) {
-        enter_px = 0.0f;
+    float gui = fminf(width / 1280.0f, height / 720.0f);
+    gui = fmaxf(0.63f, fminf(gui, 1.50f));
+    float button_w = fminf(400.0f * gui, width - 36.0f * gui);
+    float button_h = 40.0f * gui;
+    float gap = 8.0f * gui;
+    float button_x = cx - button_w * 0.5f;
+    float menu_y = height * 0.438f;
+    float bottom_gap = 28.0f * gui;
+    float label_scale = 2.0f * gui;
+    float title_scale = 9.0f * gui;
+    float title_y = fmaxf(18.0f * gui, height * 0.078f);
+
+    sbackground_frame(app, rects, &rn, 0.0f);
+
+    const char *logo = "TERRACRAFT";
+    float title_w = 0.0f, title_h = 0.0f;
+    renderer_measure_text(app->renderer, logo, title_scale, &title_w, &title_h);
+    float max_logo_w = width * 0.68f;
+    if (title_w > max_logo_w) {
+        title_scale *= max_logo_w / title_w;
+        renderer_measure_text(app->renderer, logo, title_scale, &title_w, &title_h);
     }
-    float panel_slide = -26.0f * (1.0f - expf(-6.0f * enter_px));
-    float button_x = cx - panel_w * 0.5f + 16.0f + panel_slide;
-    float button_w = panel_w - 32.0f;
-    bool short_window = height < 300.0f;
-    float button_h = short_window ? 30.0f : (height < 430.0f ? 36.0f : 44.0f);
-    float gap = short_window ? 5.0f : (height < 430.0f ? 7.0f : 9.0f);
-    float title_scale = fminf(short_window ? 2.5f : 4.0f,
-                              fmaxf(2.5f, (width - 36.0f) / 80.0f));
-    float label_scale = fminf(button_w < 285.0f ? 1.5f : 2.0f, (button_w - 12.0f) / 128.0f);
-    float title_y = fmaxf(18.0f, height * 0.105f);
-    float panel_h = button_h * 3.0f + gap * 2.0f + 35.0f;
-    float title_bottom = title_y + title_scale * 8.0f + (short_window ? 0.0f : 15.0f);
-    float panel_y = fmaxf(title_bottom + 12.0f, (height - panel_h) * 0.54f);
-    panel_y = fminf(panel_y, fmaxf(8.0f, height - panel_h - 30.0f));
-
-    sbackground_frame(app, rects, &rn, 0.10f);
-
-    float plate_x = cx - panel_w * 0.5f + panel_slide;
-
-    /* Framed translucent menu plate. */
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, plate_x - 2.0f, panel_y - 2.0f,
-          panel_w + 4.0f, panel_h + 4.0f, 0.04f, 0.045f, 0.05f, 0.88f);
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, plate_x, panel_y,
-          panel_w, panel_h, 0.10f, 0.105f, 0.11f, 0.74f);
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, plate_x, panel_y,
-          panel_w, 2.0f, 0.58f, 0.56f, 0.49f, 0.9f);
-    sflush(app, rects, &rn);
-
-    float title_w = 0.0f;
-    float title_h = 0.0f;
-    renderer_measure_text(app->renderer, "TerraCraft", title_scale, &title_w, &title_h);
-    /* Title float uses wall time. */
     float wall = (float)(app->last_frame_time - app->start_time);
     float title_x = cx - title_w * 0.5f;
-    float title_ybob = title_y + sinf(wall * 1.4f) * 3.0f;
-    renderer_draw_text(app->renderer, title_x + 3.0f, title_ybob + 4.0f, title_scale,
-                       0.035f, 0.045f, 0.045f, 0.9f, "TerraCraft");
-    renderer_draw_text(app->renderer, title_x, title_ybob, title_scale,
-                       1.0f, 0.94f, 0.78f, 1.0f, "TerraCraft");
-    if (!short_window) {
-        stext_c(app, "BUILD. EXPLORE. SURVIVE.", cx, title_y + title_h + 7.0f,
-                SCR_SMALL_SCALE, 0.95f, 0.91f, 0.79f);
-        /* Splash: bouncy yellow tagline, one per boot. */
-        static const char *const splashes[] = {
-            "100% Blocks!",       "Now With LAN!",      "Punch Trees!",      "Also Try F5!",
-            "Runs At 60 TPS!",    "Hand-Baked Pixels!", "As Seen On Wi-Fi!", "No Placeholders!",
-            "Dial Up Your Dirt!", "Creeper-Free Zone!", "Steve Approved!",
-        };
-        size_t splash_n = sizeof(splashes) / sizeof(splashes[0]);
-        size_t splash_idx = (size_t)(app->start_time * 1000.0) % splash_n;
-        const char *splash = splashes[splash_idx];
-        float pulse = 1.5f + 0.18f * sinf(wall * 3.2f);
-        float sw = 0.0f, sh = 0.0f;
-        renderer_measure_text(app->renderer, splash, pulse, &sw, &sh);
-        /* Tilted like the real splash: stepped -20 degrees, rising right. */
-        float tilt = -0.364f;
-        float sx = title_x + title_w - sw * 0.30f;
-        float sy = title_ybob + title_h * 0.72f;
-        float char_x = 0.0f;
-        for (size_t ci = 0; splash[ci] != '\0'; ++ci) {
-            char glyph[2] = {(char)splash[ci], '\0'};
-            float charw = 0.0f;
-            renderer_measure_text(app->renderer, glyph, pulse, &charw, NULL);
-            float gx = sx + char_x;
-            float gy = sy + char_x * tilt;
-            renderer_draw_text(app->renderer, gx + 2.0f, gy + 2.0f, pulse, 0.10f, 0.10f, 0.05f,
-                               0.9f, glyph);
-            renderer_draw_text(app->renderer, gx, gy, pulse, 1.0f, 1.0f, 0.20f, 1.0f, glyph);
-            char_x += charw;
-        }
+    float edge = fmaxf(2.0f, 3.0f * gui);
+    /* Chunky shadow and bright top pass approximate the beveled Java wordmark
+     * while retaining TerraCraft's original name and assets. */
+    renderer_draw_text(app->renderer, title_x + edge, title_y + edge * 2.0f, title_scale,
+                       0.04f, 0.04f, 0.04f, 1.0f, logo);
+    renderer_draw_text(app->renderer, title_x - edge, title_y + edge, title_scale,
+                       0.18f, 0.18f, 0.18f, 1.0f, logo);
+    renderer_draw_text(app->renderer, title_x + edge, title_y + edge, title_scale,
+                       0.22f, 0.22f, 0.22f, 1.0f, logo);
+    renderer_draw_text(app->renderer, title_x, title_y, title_scale,
+                       0.78f, 0.78f, 0.78f, 1.0f, logo);
+    renderer_draw_text(app->renderer, title_x, title_y - gui, title_scale,
+                       0.96f, 0.96f, 0.96f, 0.72f, logo);
+    stext_c(app, "C EDITION", cx + gui, title_y + title_h - 3.0f * gui,
+            2.0f * gui, 0.16f, 0.16f, 0.16f);
+    stext_c(app, "C EDITION", cx, title_y + title_h - 5.0f * gui,
+            2.0f * gui, 0.92f, 0.92f, 0.92f);
+
+    static const char *const splashes[] = {
+        "100% Blocks!",       "Now With LAN!",      "Punch Trees!",      "Also Try F5!",
+        "Runs At 60 TPS!",    "Hand-Baked Pixels!", "As Seen On Wi-Fi!", "No Placeholders!",
+        "Dial Up Your Dirt!", "Creeper-Free Zone!", "Steve Approved!",
+    };
+    size_t splash_n = sizeof(splashes) / sizeof(splashes[0]);
+    const char *splash = splashes[(size_t)(app->start_time * 1000.0) % splash_n];
+    float pulse = (1.85f + 0.12f * sinf(wall * 3.2f)) * gui;
+    float splash_w = 0.0f;
+    renderer_measure_text(app->renderer, splash, pulse, &splash_w, NULL);
+    float splash_x = title_x + title_w * 0.70f;
+    float splash_y = title_y + title_h * 0.86f;
+    float char_x = 0.0f;
+    for (size_t ci = 0; splash[ci] != '\0'; ++ci) {
+        char glyph[2] = {(char)splash[ci], '\0'};
+        float char_w = 0.0f;
+        renderer_measure_text(app->renderer, glyph, pulse, &char_w, NULL);
+        float gx = splash_x + char_x - splash_w * 0.10f;
+        float gy = splash_y - char_x * 0.27f;
+        renderer_draw_text(app->renderer, gx + gui, gy + gui, pulse, 0.12f, 0.12f, 0.02f, 1.0f, glyph);
+        renderer_draw_text(app->renderer, gx, gy, pulse, 1.0f, 1.0f, 0.16f, 1.0f, glyph);
+        char_x += char_w;
     }
 
-    float y = panel_y + 12.0f;
-    if (smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
-                     "Singleplayer")) {
+    if (ui->key_down) {
+        app->menu.main_focus = app->menu.main_focus < 0 ? 0 : (app->menu.main_focus + 1) % 5;
+    }
+    if (ui->key_up) {
+        app->menu.main_focus = app->menu.main_focus < 0 ? 4 : (app->menu.main_focus + 4) % 5;
+    }
+    if (app->menu.main_focus >= 0) {
+        app->menu.main_focus = ui_clampi(app->menu.main_focus, 0, 4);
+    }
+
+    char profile_label[64];
+    snprintf(profile_label, sizeof(profile_label), "Player: %.24s", app->username);
+    float y = menu_y;
+    bool single = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
+                               "Singleplayer", app->menu.main_focus == 0);
+    y += button_h + gap;
+    bool multiplayer = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
+                                    "Multiplayer (LAN)", app->menu.main_focus == 1);
+    y += button_h + gap;
+    bool profile = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
+                                profile_label, app->menu.main_focus == 2);
+    y += button_h + bottom_gap;
+    float small_gap = 8.0f * gui;
+    float small_w = (button_w - small_gap) * 0.5f;
+    bool options = smenu_button(app, ui, rects, &rn, button_x, y, small_w, button_h, label_scale,
+                                "Options...", app->menu.main_focus == 3);
+    bool quit = smenu_button(app, ui, rects, &rn, button_x + small_w + small_gap, y,
+                             small_w, button_h, label_scale, "Quit Game", app->menu.main_focus == 4);
+
+    bool confirm = ui->key_return;
+    if (single || (confirm && app->menu.main_focus == 0)) {
         app_enter_state(app, GAME_STATE_WORLD_SELECT);
         return;
     }
-    y += button_h + gap;
-    if (smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
-                     "Multiplayer (LAN)")) {
+    if (multiplayer || (confirm && app->menu.main_focus == 1)) {
         app->menu.lan_address_buf[0] = '\0';
         app->menu.error[0] = '\0';
         app_enter_state(app, GAME_STATE_LAN_MENU);
         return;
     }
-
-    y += button_h + gap + 3.0f;
-    float small_gap = 8.0f;
-    float small_w = (button_w - small_gap) * 0.5f;
-    float small_label_scale = fminf(label_scale, fmaxf(1.0f, (small_w - 12.0f) / 72.0f));
-    if (smenu_button(app, ui, rects, &rn, button_x, y, small_w, button_h,
-                     small_label_scale, "Options")) {
+    if (profile || (confirm && app->menu.main_focus == 2)) {
+        snprintf(app->menu.profile_buf, sizeof(app->menu.profile_buf), "%s", app->username);
+        app->menu.name_focused = true;
+        app->menu.error[0] = '\0';
+        app_enter_state(app, GAME_STATE_PROFILE);
+        return;
+    }
+    if (options || (confirm && app->menu.main_focus == 3)) {
         app->menu.settings_return = GAME_STATE_MAIN_MENU;
         settings_to_sliders(app);
         screens_refresh_packs(app);
         app_enter_state(app, GAME_STATE_SETTINGS);
         return;
     }
-    if (smenu_button(app, ui, rects, &rn, button_x + small_w + small_gap, y,
-                     small_w, button_h, small_label_scale, "Quit Game")) {
+    if (quit || (confirm && app->menu.main_focus == 4)) {
         app_enter_state(app, GAME_STATE_QUIT);
         return;
-    }
-
-    if (app->username[0] != '\0') {
-        char profile[48];
-        snprintf(profile, sizeof(profile), "PLAYER: %.24s", app->username);
-        float profile_unit_w = 0.0f;
-        renderer_measure_text(app->renderer, profile, 1.0f, &profile_unit_w, NULL);
-        float profile_scale = fminf(SCR_SMALL_SCALE, (width - 32.0f) / fmaxf(1.0f, profile_unit_w));
-        float profile_w = 0.0f;
-        float profile_h = 0.0f;
-        renderer_measure_text(app->renderer, profile, profile_scale, &profile_w, &profile_h);
-        float footer_y = fmaxf(4.0f, height - profile_h - 11.0f);
-        float footer_w = fminf(width - 20.0f, profile_w + 18.0f);
-        srect(rects, &rn, SCR_MAX_RECT_VERTS, 10.0f, footer_y - 4.0f, footer_w, profile_h + 8.0f,
-              0.04f, 0.045f, 0.05f, 0.78f);
-        sflush(app, rects, &rn);
-        renderer_draw_text(app->renderer, 19.0f, footer_y, profile_scale,
-                           0.88f, 0.88f, 0.84f, 1.0f, profile);
     }
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_QUIT);
     }
-    /* Bottom-right honesty line (Minecraft shows branding here). */
+
+    float footer_scale = fmaxf(0.85f, 1.5f * gui);
+    float footer_h = 0.0f;
+    renderer_measure_text(app->renderer, "TerraCraft M9 (v0.9.0)", footer_scale, NULL, &footer_h);
+    renderer_draw_text(app->renderer, 4.0f * gui, height - footer_h - 2.0f * gui,
+                       footer_scale, 0.10f, 0.10f, 0.10f, 1.0f, "TerraCraft M9 (v0.9.0)");
+    renderer_draw_text(app->renderer, 3.0f * gui, height - footer_h - 3.0f * gui,
+                       footer_scale, 1.0f, 1.0f, 1.0f, 1.0f, "TerraCraft M9 (v0.9.0)");
     {
-        const char *note = "Original engine - not affiliated with Mojang";
-        float nw = 0.0f, nh = 0.0f;
-        renderer_measure_text(app->renderer, note, SCR_SMALL_SCALE, &nw, &nh);
-        renderer_draw_text(app->renderer, width - nw - 10.0f, height - nh - 8.0f, SCR_SMALL_SCALE,
-                           0.55f, 0.55f, 0.52f, 1.0f, note);
+        const char *note = "Copyright TerraCraft contributors. Not affiliated with Mojang.";
+        float note_w = 0.0f, note_h = 0.0f;
+        renderer_measure_text(app->renderer, note, footer_scale, &note_w, &note_h);
+        renderer_draw_text(app->renderer, width - note_w - 2.0f * gui,
+                           height - note_h - 2.0f * gui, footer_scale,
+                           0.10f, 0.10f, 0.10f, 1.0f, note);
+        renderer_draw_text(app->renderer, width - note_w - 3.0f * gui,
+                           height - note_h - 3.0f * gui, footer_scale,
+                           1.0f, 1.0f, 1.0f, 1.0f, note);
     }
 }
 
@@ -803,6 +819,10 @@ static void screen_profile(AppContext *app, const UiFrame *ui)
     } else if (app->menu.profile_buf[0] == '\0') {
         stext_c(app, "Leave blank and TerraCraft will generate a name for you.", cx,
                 y + SCR_BTN_H + 14.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+    }
+    if (ui->key_escape && app->username[0] != '\0') {
+        app->menu.error[0] = '\0';
+        app_enter_state(app, GAME_STATE_MAIN_MENU);
     }
 }
 

@@ -80,6 +80,7 @@ typedef struct MenuData {
     bool lan_show_direct; /* Direct-IP fallback field visible. */
     double lan_poll_at;   /* Last discovery poll timestamp. */
     double menu_anim_at;  /* State-enter time (menu transitions). */
+    int main_focus;       /* Keyboard focus on the title-screen buttons. */
     char name_buf[64];      /* Create-world name field. */
     char seed_buf[32];      /* Create-world seed field. */
     int create_mode;        /* 0 survival, 1 creative. */

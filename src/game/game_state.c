@@ -42,7 +42,7 @@ bool game_state_can_transition(GameState from, GameState to)
     case GAME_STATE_PROFILE:
         return to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
     case GAME_STATE_MAIN_MENU:
-        return to == GAME_STATE_WORLD_SELECT || to == GAME_STATE_LAN_MENU ||
+        return to == GAME_STATE_PROFILE || to == GAME_STATE_WORLD_SELECT || to == GAME_STATE_LAN_MENU ||
                to == GAME_STATE_SETTINGS || to == GAME_STATE_QUIT;
     case GAME_STATE_LAN_MENU:
         return to == GAME_STATE_LOADING || to == GAME_STATE_MAIN_MENU || to == GAME_STATE_QUIT;
