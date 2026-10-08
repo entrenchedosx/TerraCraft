@@ -120,6 +120,7 @@ int main(void)
     RUN_TEST(test_ui_icons);
     RUN_TEST(test_hud_vitals_icons);
     RUN_TEST(test_survival_mine_time);
+    RUN_TEST(test_tool_tier_progression);
     RUN_TEST(test_survival_drops);
     RUN_TEST(test_survival_mining);
     RUN_TEST(test_survival_damage_heal);
@@ -147,6 +148,7 @@ int main(void)
     RUN_TEST(test_recipe_shaped);
     RUN_TEST(test_recipe_bench);
     RUN_TEST(test_recipe_consume);
+    RUN_TEST(test_recipe_refined_tiers);
     RUN_TEST(test_durability_use);
     RUN_TEST(test_durability_merge);
     RUN_TEST(test_durability_save);

@@ -1586,7 +1586,7 @@ static void screen_creative(AppContext *app, const UiFrame *ui)
 {
     /* Catalogue: all valid items in registry order (blocks 1..19 sans
      * water, then materials, then tools). Bounded and allocation-free. */
-    ItemId cata[48];
+ItemId cata[64];
     int ncata = 0;
     for (uint16_t id = 1; id <= 19 && ncata < (int)(sizeof(cata) / sizeof(cata[0])); ++id) {
         if (item_is_valid(id)) {
@@ -1595,9 +1595,14 @@ static void screen_creative(AppContext *app, const UiFrame *ui)
     }
     const uint16_t extra[] = {ITEM_COAL, ITEM_APPLE, ITEM_STICK, ITEM_BOW, ITEM_ARROW,
                               ITEM_BONE, ITEM_RAW_BEEF, ITEM_LEATHER, ITEM_ROTTEN_FLESH,
-                              ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_WOOD_AXE,
-                              ITEM_STONE_AXE, ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL,
-                              ITEM_WOOD_SWORD, ITEM_STONE_SWORD};
+                              ITEM_IRON_INGOT, ITEM_DIAMOND,
+                              ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_IRON_PICKAXE,
+                              ITEM_DIAMOND_PICKAXE,
+                              ITEM_WOOD_AXE, ITEM_STONE_AXE, ITEM_IRON_AXE, ITEM_DIAMOND_AXE,
+                              ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL, ITEM_IRON_SHOVEL,
+                              ITEM_DIAMOND_SHOVEL,
+                              ITEM_WOOD_SWORD, ITEM_STONE_SWORD, ITEM_IRON_SWORD,
+                              ITEM_DIAMOND_SWORD};
     for (size_t i = 0; i < sizeof(extra) / sizeof(extra[0]) && ncata < (int)(sizeof(cata) / sizeof(cata[0])); ++i) {
         if (item_is_valid(extra[i])) {
             cata[ncata++] = extra[i];

@@ -459,6 +459,137 @@ int test_exhaustion(void)
  *
  * Returns: failure count.
  */
+/* Test: iron and diamond gear craft from refined materials, only on the
+ * bench footprint, and consume exactly their ingredients.
+ *
+ * Returns: failure count.
+ */
+int test_recipe_refined_tiers(void)
+{
+    int failures = 0;
+    ItemStack grid[9];
+    RecipeMatch m;
+    const ItemId iron = ITEM_IRON_INGOT;
+    const ItemId gem = ITEM_DIAMOND;
+    const ItemId stick = ITEM_STICK;
+
+    /* Pickaxe: material row across the top, stick down the middle. */
+    craft_clear(grid, 9);
+    craft_set(grid, 3, 0, 0, iron, 1);
+    craft_set(grid, 3, 1, 0, iron, 1);
+    craft_set(grid, 3, 2, 0, iron, 1);
+    craft_set(grid, 3, 1, 1, stick, 1);
+    craft_set(grid, 3, 1, 2, stick, 1);
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == true);
+    TEST_ASSERT(m.recipe->out_item == ITEM_IRON_PICKAXE && m.recipe->out_count == 1);
+    recipe_consume(grid, 3, 3, &m);
+    TEST_ASSERT(stack_is_empty(&grid[0]) && stack_is_empty(&grid[1]) && stack_is_empty(&grid[2]));
+    TEST_ASSERT(stack_is_empty(&grid[4]) && stack_is_empty(&grid[7]));
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == false);
+
+    /* Diamond pickaxe mirrors the iron shape with gems. */
+    craft_clear(grid, 9);
+    craft_set(grid, 3, 0, 0, gem, 1);
+    craft_set(grid, 3, 1, 0, gem, 1);
+    craft_set(grid, 3, 2, 0, gem, 1);
+    craft_set(grid, 3, 1, 1, stick, 1);
+    craft_set(grid, 3, 1, 2, stick, 1);
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == true);
+    TEST_ASSERT(m.recipe->out_item == ITEM_DIAMOND_PICKAXE);
+
+    /* Axe: L-shaped head over the handle column - three ingots, two sticks. */
+    craft_clear(grid, 9);
+    craft_set(grid, 3, 0, 0, iron, 1);
+    craft_set(grid, 3, 1, 0, iron, 1);
+    craft_set(grid, 3, 0, 1, iron, 1);
+    craft_set(grid, 3, 1, 1, stick, 1);
+    craft_set(grid, 3, 1, 2, stick, 1);
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == true);
+    TEST_ASSERT(m.recipe->out_item == ITEM_IRON_AXE);
+
+    /* Shovel: one material centred above two sticks. */
+    craft_clear(grid, 9);
+    craft_set(grid, 3, 1, 0, iron, 1);
+    craft_set(grid, 3, 1, 1, stick, 1);
+    craft_set(grid, 3, 1, 2, stick, 1);
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == true);
+    TEST_ASSERT(m.recipe->out_item == ITEM_IRON_SHOVEL);
+
+    /* Sword: two materials stacked over a stick. */
+    craft_clear(grid, 9);
+    craft_set(grid, 3, 1, 0, gem, 1);
+    craft_set(grid, 3, 1, 1, gem, 1);
+    craft_set(grid, 3, 1, 2, stick, 1);
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == true);
+    TEST_ASSERT(m.recipe->out_item == ITEM_DIAMOND_SWORD);
+
+    /* Materials do not cross tiers: gems never make iron gear. */
+    craft_clear(grid, 9);
+    craft_set(grid, 3, 0, 0, gem, 1);
+    craft_set(grid, 3, 1, 0, gem, 1);
+    craft_set(grid, 3, 2, 0, gem, 1);
+    craft_set(grid, 3, 1, 1, stick, 1);
+    craft_set(grid, 3, 1, 2, stick, 1);
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == true);
+    TEST_ASSERT(m.recipe->out_item == ITEM_DIAMOND_PICKAXE);
+    craft_clear(grid, 9);
+    craft_set(grid, 3, 0, 0, iron, 1);
+    craft_set(grid, 3, 1, 0, iron, 1);
+    craft_set(grid, 3, 2, 0, iron, 1);
+    craft_set(grid, 3, 1, 1, stick, 1);
+    craft_set(grid, 3, 1, 2, stick, 1);
+    TEST_ASSERT(recipe_match(grid, 3, 3, &m) == true);
+    TEST_ASSERT(m.recipe->out_item == ITEM_IRON_PICKAXE);
+    TEST_ASSERT(m.recipe->out_item != ITEM_DIAMOND_PICKAXE);
+
+    /* The 2x2 player grid cannot build any of them (3-wide/3-tall shapes). */
+    ItemStack small[4];
+    craft_clear(small, 4);
+    craft_set(small, 2, 0, 0, iron, 2);
+    craft_set(small, 2, 1, 1, stick, 2);
+    TEST_ASSERT(recipe_match(small, 2, 2, &m) == false);
+
+    /* Registry audit: every refined-tier output is a registered, damageable,
+     * unstackable tool with the tier its recipe implies. */
+    static const struct {
+        const char *id;
+        ItemId out;
+        int tool;
+        int tier;
+    } refined[] = {
+        {"iron_pick", ITEM_IRON_PICKAXE, TOOL_PICKAXE, TOOL_TIER_IRON},
+        {"iron_axe", ITEM_IRON_AXE, TOOL_AXE, TOOL_TIER_IRON},
+        {"iron_shovel", ITEM_IRON_SHOVEL, TOOL_SHOVEL, TOOL_TIER_IRON},
+        {"iron_sword", ITEM_IRON_SWORD, TOOL_SWORD, TOOL_TIER_IRON},
+        {"diamond_pick", ITEM_DIAMOND_PICKAXE, TOOL_PICKAXE, TOOL_TIER_DIAMOND},
+        {"diamond_axe", ITEM_DIAMOND_AXE, TOOL_AXE, TOOL_TIER_DIAMOND},
+        {"diamond_shovel", ITEM_DIAMOND_SHOVEL, TOOL_SHOVEL, TOOL_TIER_DIAMOND},
+        {"diamond_sword", ITEM_DIAMOND_SWORD, TOOL_SWORD, TOOL_TIER_DIAMOND},
+    };
+    for (size_t i = 0; i < sizeof(refined) / sizeof(refined[0]); ++i) {
+        const Recipe *found = NULL;
+        for (int r = 0; r < recipe_count(); ++r) {
+            if (strcmp(recipe_at(r)->id, refined[i].id) == 0) {
+                found = recipe_at(r);
+                break;
+            }
+        }
+        TEST_ASSERT(found != NULL);
+        if (found == NULL) {
+            continue;
+        }
+        TEST_ASSERT(found->out_item == refined[i].out);
+        TEST_ASSERT(found->out_count == 1);
+        const ItemInfo *info = item_get_info(refined[i].out);
+        TEST_ASSERT(item_is_valid(refined[i].out));
+        TEST_ASSERT(info->tool == refined[i].tool);
+        TEST_ASSERT(info->tier == refined[i].tier);
+        TEST_ASSERT(info->max_stack == 1);
+        TEST_ASSERT(info->max_durability > 0);
+    }
+    return failures;
+}
+
 int test_leaf_bonus(void)
 {
     int failures = 0;

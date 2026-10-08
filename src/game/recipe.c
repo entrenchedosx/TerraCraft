@@ -16,6 +16,8 @@
 #define S ((ItemId)ITEM_STICK)
 #define C ((ItemId)ITEM_COAL)
 #define T ((ItemId)BLOCK_STONE)
+#define I ((ItemId)ITEM_IRON_INGOT)
+#define D ((ItemId)ITEM_DIAMOND)
 #define N ((ItemId)ITEM_NONE)
 
 /* Registry (first match wins: list specific patterns before general ones;
@@ -42,6 +44,17 @@ static const Recipe RECIPES[] = {
      * (shaped 3-tall so the 2x2 player grid never collides). */
     {"bow", true, 3, 3, {P, S, N, P, N, S, P, S, N}, 0, ITEM_BOW, 1},
     {"arrow", true, 1, 3, {C, S, S, N, N, N, N, N, N}, 0, ITEM_ARROW, 4},
+    /* Iron and diamond gear: same silhouettes as the stone/wood patterns,
+     * swapped to refined materials. Diamond ore needs an iron pickaxe, so
+     * these recipes sit behind the iron tier in the progression. */
+    {"iron_pick", true, 3, 3, {I, I, I, N, S, N, N, S, N}, 0, ITEM_IRON_PICKAXE, 1},
+    {"iron_axe", true, 3, 3, {I, I, N, I, S, N, N, S, N}, 0, ITEM_IRON_AXE, 1},
+    {"iron_shovel", true, 3, 3, {N, I, N, N, S, N, N, S, N}, 0, ITEM_IRON_SHOVEL, 1},
+    {"iron_sword", true, 1, 3, {I, I, S, N, N, N, N, N, N}, 0, ITEM_IRON_SWORD, 1},
+    {"diamond_pick", true, 3, 3, {D, D, D, N, S, N, N, S, N}, 0, ITEM_DIAMOND_PICKAXE, 1},
+    {"diamond_axe", true, 3, 3, {D, D, N, D, S, N, N, S, N}, 0, ITEM_DIAMOND_AXE, 1},
+    {"diamond_shovel", true, 3, 3, {N, D, N, N, S, N, N, S, N}, 0, ITEM_DIAMOND_SHOVEL, 1},
+    {"diamond_sword", true, 1, 3, {D, D, S, N, N, N, N, N, N}, 0, ITEM_DIAMOND_SWORD, 1},
 };
 #define RECIPE_COUNT (sizeof(RECIPES) / sizeof(RECIPES[0]))
 

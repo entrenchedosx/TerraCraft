@@ -14,7 +14,9 @@ static const ItemInfo ITEM_INVALID = {
  * lookup is by explicit ID match, never by position.
  *
  * Durability values are original TerraCraft tuning (uses per tool): wood 64,
- * stone 160. Food values are hunger points restored on a completed eat.
+ * stone 160, iron 250, diamond 1561; swords use the familiar vanilla tiers
+ * (wood 59, stone 131, iron 250, diamond 1561). Food values are hunger points
+ * restored on a completed eat.
  */
 static const ItemInfo ITEM_TABLE[] = {
     {3, "Grass Block", 64, 3, TOOL_NONE, TOOL_TIER_NONE, TILE_GRASS_SIDE, 0.20f, 0.80f, 0.20f, 0, 0, 1, 0.4f},
@@ -51,6 +53,10 @@ static const ItemInfo ITEM_TABLE[] = {
      * fake free meal would lie — documented gap). */
     {ITEM_ROTTEN_FLESH, "Rotten Flesh", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_FLESH, 0.45f, 0.35f,
      0.22f, 0, 0, 1, 0.4f},
+    {ITEM_IRON_INGOT, "Iron Ingot", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_IRON_INGOT, 0.82f, 0.82f, 0.85f,
+     0, 0, 1, 0.4f},
+    {ITEM_DIAMOND, "Diamond", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_DIAMOND, 0.36f, 0.85f, 0.82f,
+     0, 0, 1, 0.4f},
     {ITEM_WOOD_PICKAXE, "Wood Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_WOOD, TILE_WOOD_PICKAXE, 0.55f, 0.42f,
      0.25f, 64, 0, 3, 0.5f},
     {ITEM_STONE_PICKAXE, "Stone Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_STONE, TILE_STONE_PICKAXE, 0.55f, 0.55f,
@@ -69,8 +75,27 @@ static const ItemInfo ITEM_TABLE[] = {
      * Higher tiers await ingot/gem acquisition systems. */
     {ITEM_WOOD_SWORD, "Wooden Sword", 1, 0, TOOL_SWORD, TOOL_TIER_WOOD, TILE_WOOD_SWORD, 0.55f, 0.42f,
      0.25f, 59, 0, 4, 0.625f},
-    {ITEM_STONE_SWORD, "Stone Sword", 1, 0, TOOL_SWORD, TOOL_TIER_STONE, TILE_STONE_SWORD, 0.55f, 0.55f,
+{ITEM_STONE_SWORD, "Stone Sword", 1, 0, TOOL_SWORD, TOOL_TIER_STONE, TILE_STONE_SWORD, 0.55f, 0.55f,
      0.58f, 131, 0, 5, 0.625f},
+    /* Iron and diamond complete the vanilla progression ladder: durability
+     * 250/1561 uses, melee damage +1 per tier over stone. Mining speed comes
+     * from the tier (6x / 8x) in survival_mine_time. */
+    {ITEM_IRON_PICKAXE, "Iron Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_IRON, TILE_IRON_PICKAXE, 0.82f, 0.82f,
+     0.85f, 250, 0, 4, 0.5f},
+    {ITEM_IRON_AXE, "Iron Axe", 1, 0, TOOL_AXE, TOOL_TIER_IRON, TILE_IRON_AXE, 0.82f, 0.82f, 0.85f, 250, 0, 5,
+     0.8f},
+    {ITEM_IRON_SHOVEL, "Iron Shovel", 1, 0, TOOL_SHOVEL, TOOL_TIER_IRON, TILE_IRON_SHOVEL, 0.82f, 0.82f,
+     0.85f, 250, 0, 3, 0.5f},
+    {ITEM_DIAMOND_PICKAXE, "Diamond Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_DIAMOND, TILE_DIAMOND_PICKAXE, 0.36f,
+     0.85f, 0.82f, 1561, 0, 5, 0.5f},
+    {ITEM_DIAMOND_AXE, "Diamond Axe", 1, 0, TOOL_AXE, TOOL_TIER_DIAMOND, TILE_DIAMOND_AXE, 0.36f, 0.85f, 0.82f,
+     1561, 0, 6, 0.8f},
+    {ITEM_DIAMOND_SHOVEL, "Diamond Shovel", 1, 0, TOOL_SHOVEL, TOOL_TIER_DIAMOND, TILE_DIAMOND_SHOVEL, 0.36f,
+     0.85f, 0.82f, 1561, 0, 3, 0.5f},
+    {ITEM_IRON_SWORD, "Iron Sword", 1, 0, TOOL_SWORD, TOOL_TIER_IRON, TILE_IRON_SWORD, 0.82f, 0.82f, 0.85f, 250,
+     0, 6, 0.625f},
+    {ITEM_DIAMOND_SWORD, "Diamond Sword", 1, 0, TOOL_SWORD, TOOL_TIER_DIAMOND, TILE_DIAMOND_SWORD, 0.36f, 0.85f,
+     0.82f, 1561, 0, 7, 0.625f},
 };
 #define ITEM_TABLE_COUNT (sizeof(ITEM_TABLE) / sizeof(ITEM_TABLE[0]))
 

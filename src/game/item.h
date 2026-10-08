@@ -26,6 +26,8 @@ typedef uint16_t ItemId;
 #define ITEM_RAW_BEEF 105u
 #define ITEM_LEATHER 106u
 #define ITEM_ROTTEN_FLESH 107u
+#define ITEM_IRON_INGOT 108u
+#define ITEM_DIAMOND 109u
 #define ITEM_WOOD_PICKAXE 200u
 #define ITEM_STONE_PICKAXE 201u
 #define ITEM_WOOD_AXE 202u
@@ -35,6 +37,14 @@ typedef uint16_t ItemId;
 #define ITEM_BOW 206u
 #define ITEM_WOOD_SWORD 207u
 #define ITEM_STONE_SWORD 208u
+#define ITEM_IRON_PICKAXE 209u
+#define ITEM_IRON_AXE 210u
+#define ITEM_IRON_SHOVEL 211u
+#define ITEM_DIAMOND_PICKAXE 212u
+#define ITEM_DIAMOND_AXE 213u
+#define ITEM_DIAMOND_SHOVEL 214u
+#define ITEM_IRON_SWORD 215u
+#define ITEM_DIAMOND_SWORD 216u
 
 /* Tool categories a block may prefer (bows and swords never match a block tool,
  * so they always mine at hand speed — no struct change needed).
@@ -48,10 +58,15 @@ typedef enum ToolType {
     TOOL_SWORD
 } ToolType;
 
-/* Tool tiers (0 = not a tool / bare hands). Higher breaks faster. */
+/* Tool tiers (0 = not a tool / bare hands). Higher breaks faster. Mining
+ * speed uses the vanilla ladder (wood 2x, stone 4x, iron 6x, diamond 8x);
+ * see survival_mine_time.
+ */
 #define TOOL_TIER_NONE 0
 #define TOOL_TIER_WOOD 1
 #define TOOL_TIER_STONE 2
+#define TOOL_TIER_IRON 3
+#define TOOL_TIER_DIAMOND 4
 
 /* Per-item static definition. */
 typedef struct ItemInfo {
@@ -85,7 +100,7 @@ const ItemInfo *item_get_info(ItemId id);
  *   id: item ID.
  *
  * Returns: true for registered items (blocks 1..19 except water,
- * 100..107, 200..208).
+ * 100..109, 200..216).
  */
 bool item_is_valid(ItemId id);
 

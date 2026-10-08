@@ -40,7 +40,17 @@ float survival_mine_time(uint16_t block, ItemId held)
         const ItemInfo *tool = item_get_info(held);
         if (tool->tool == info->tool && tool->tier >= info->min_tier) {
             correct = true;
-            speed = tool->tier >= TOOL_TIER_STONE ? 4.0f : 2.0f;
+            /* Vanilla ladder: hand 1x, wood 2x, stone 4x, iron 6x, diamond 8x. */
+            speed = 2.0f;
+            if (tool->tier >= TOOL_TIER_STONE) {
+                speed = 4.0f;
+            }
+            if (tool->tier >= TOOL_TIER_IRON) {
+                speed = 6.0f;
+            }
+            if (tool->tier >= TOOL_TIER_DIAMOND) {
+                speed = 8.0f;
+            }
         }
     }
     if (info->tool == (int)TOOL_PICKAXE && !correct) {

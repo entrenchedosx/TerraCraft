@@ -189,6 +189,7 @@ int test_hud_vitals_icons(void);
 
 /* Survival/entity/persistence tests (defined in test_gameplay.c). */
 int test_survival_mine_time(void);
+int test_tool_tier_progression(void);
 int test_survival_drops(void);
 int test_survival_mining(void);
 int test_survival_damage_heal(void);
@@ -220,6 +221,7 @@ int test_recipe_shapeless(void);
 int test_recipe_shaped(void);
 int test_recipe_bench(void);
 int test_recipe_consume(void);
+int test_recipe_refined_tiers(void);
 int test_durability_use(void);
 int test_durability_merge(void);
 int test_durability_save(void);

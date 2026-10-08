@@ -162,9 +162,12 @@ static const char *TILE_FILES[] = {
     "tool_pickaxe", "tool_axe", "tool_shovel", "coal", "crack0", "crack1", "crack2", "crack3", "crack4",
     "workbench", "planks", "apple", "stick", "wood_top", "workbench_top", "workbench_side", "wood_pickaxe",
     "stone_pickaxe", "wood_axe", "stone_axe", "wood_shovel", "stone_shovel", "bow", "arrow",
-    "bone", "beef", "leather", "player_skin", "player_sleeve", "flesh", "wood_sword", "stone_sword",
+"bone", "beef", "leather", "player_skin", "player_sleeve", "flesh", "wood_sword", "stone_sword",
+    "iron_ingot", "diamond", "iron_pickaxe", "iron_axe", "iron_shovel", "diamond_pickaxe", "diamond_axe",
+    "diamond_shovel", "iron_sword", "diamond_sword",
 };
-#define TILE_FILE_COUNT 51
+/* Derived from the array so adding a tile can never desync the bound. */
+#define TILE_FILE_COUNT (sizeof(TILE_FILES) / sizeof(TILE_FILES[0]))
 
 /* Tile file name for overrides (NULL when out of range).
  *
@@ -522,6 +525,58 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         }
     }
 
+    /* Smelted materials: flat ingot bar (iron) and faceted gem (diamond).
+     * Both are transparency-backed item sprites, drawn from the same noise
+     * field so their speckle reads like the coal lump above. */
+    {
+        static const struct {
+            int tile;
+            unsigned char r, g, b; /* Body colour. */
+            unsigned char hr, hg, hb; /* Highlight. */
+            uint32_t salt;
+        } materials[2] = {
+            {TILE_IRON_INGOT, 196, 196, 202, 236, 236, 244, 61u},
+            {TILE_DIAMOND, 74, 216, 196, 168, 246, 236, 62u},
+        };
+        for (size_t mi = 0; mi < 2; ++mi) {
+            int col = materials[mi].tile % ATLAS_TILES;
+            int row = materials[mi].tile / ATLAS_TILES;
+            tile_fill(out_px, materials[mi].tile, 0, 0, 0, 0);
+            /* Ingot trapezoid: narrower on top, flat base. */
+            if (mi == 0) {
+                for (int y = 5; y <= 10; ++y) {
+                    int inset = (y == 5 || y == 10) ? 1 : 0;
+                    for (int x = 3 + inset; x <= 12 - inset; ++x) {
+                        float r = px_rand(col, row, x, y, materials[mi].salt);
+                        put_px(out_px, col, row, x, y,
+                               (unsigned char)((float)materials[mi].r - r * 26.0f),
+                               (unsigned char)((float)materials[mi].g - r * 26.0f),
+                               (unsigned char)((float)materials[mi].b - r * 22.0f), 255);
+                    }
+                }
+                put_px(out_px, col, row, 4, 6, materials[mi].hr, materials[mi].hg, materials[mi].hb, 255);
+                put_px(out_px, col, row, 5, 6, materials[mi].hr, materials[mi].hg, materials[mi].hb, 255);
+                put_px(out_px, col, row, 6, 6, materials[mi].hr, materials[mi].hg, materials[mi].hb, 255);
+            } else {
+                /* Gem: octagonal outline with a bright corner facet. */
+                for (int y = 3; y <= 12; ++y) {
+                    int dy = y - 7;
+                    int half = (dy == 0 || dy == 1) ? 2 : (dy < 0 ? 4 : 3);
+                    for (int x = 8 - half; x <= 7 + half; ++x) {
+                        float r = px_rand(col, row, x, y, materials[mi].salt);
+                        put_px(out_px, col, row, x, y,
+                               (unsigned char)((float)materials[mi].r + r * 24.0f),
+                               (unsigned char)((float)materials[mi].g - r * 18.0f),
+                               (unsigned char)((float)materials[mi].b - r * 14.0f), 255);
+                    }
+                }
+                put_px(out_px, col, row, 6, 6, materials[mi].hr, materials[mi].hg, materials[mi].hb, 255);
+                put_px(out_px, col, row, 6, 7, materials[mi].hr, materials[mi].hg, materials[mi].hb, 255);
+                put_px(out_px, col, row, 7, 6, materials[mi].hr, materials[mi].hg, materials[mi].hb, 255);
+            }
+        }
+    }
+
     /* Workbench: plank boards with a dark frame + center grid hint. */
     {
         int col = TILE_WORKBENCH % ATLAS_TILES;
@@ -776,12 +831,15 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         static const struct {
             int tile;
             unsigned char hr, hg, hb;
-        } mtools[6] = {
-            {TILE_WOOD_PICKAXE, 150, 110, 70}, {TILE_STONE_PICKAXE, 150, 150, 155},
-            {TILE_WOOD_AXE, 150, 110, 70},     {TILE_STONE_AXE, 150, 150, 155},
-            {TILE_WOOD_SHOVEL, 150, 110, 70},  {TILE_STONE_SHOVEL, 150, 150, 155},
+        } mtools[12] = {
+            {TILE_WOOD_PICKAXE, 150, 110, 70},   {TILE_STONE_PICKAXE, 150, 150, 155},
+            {TILE_WOOD_AXE, 150, 110, 70},       {TILE_STONE_AXE, 150, 150, 155},
+            {TILE_WOOD_SHOVEL, 150, 110, 70},    {TILE_STONE_SHOVEL, 150, 150, 155},
+            {TILE_IRON_PICKAXE, 214, 214, 219},  {TILE_IRON_AXE, 214, 214, 219},
+            {TILE_IRON_SHOVEL, 214, 214, 219},   {TILE_DIAMOND_PICKAXE, 108, 232, 214},
+            {TILE_DIAMOND_AXE, 108, 232, 214},   {TILE_DIAMOND_SHOVEL, 108, 232, 214},
         };
-        for (size_t ti = 0; ti < 6; ++ti) {
+        for (size_t ti = 0; ti < 12; ++ti) {
             int col = mtools[ti].tile % ATLAS_TILES;
             int row = mtools[ti].tile / ATLAS_TILES;
             for (int y = 2; y < 12; ++y) {
@@ -801,11 +859,13 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
             int tile;
             unsigned char blade[3];
             unsigned char edge[3];
-        } swords[2] = {
+} swords[4] = {
             {TILE_WOOD_SWORD, {156, 112, 62}, {208, 164, 100}},
             {TILE_STONE_SWORD, {132, 139, 145}, {205, 210, 214}},
+            {TILE_IRON_SWORD, {214, 214, 219}, {246, 246, 250}},
+            {TILE_DIAMOND_SWORD, {108, 232, 214}, {198, 250, 242}},
         };
-        for (size_t si = 0; si < 2; ++si) {
+        for (size_t si = 0; si < 4; ++si) {
             int col = swords[si].tile % ATLAS_TILES;
             int row = swords[si].tile / ATLAS_TILES;
             for (int i = 0; i < 8; ++i) {

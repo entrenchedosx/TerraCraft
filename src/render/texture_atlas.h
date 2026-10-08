@@ -68,8 +68,18 @@ typedef enum AtlasTile {
     TILE_PLAYER_SKIN = 46,
     TILE_PLAYER_SLEEVE = 47,
     TILE_FLESH = 48,
-    TILE_WOOD_SWORD = 49,
-    TILE_STONE_SWORD = 50
+TILE_WOOD_SWORD = 49,
+    TILE_STONE_SWORD = 50,
+    TILE_IRON_INGOT = 51,
+    TILE_DIAMOND = 52,
+    TILE_IRON_PICKAXE = 53,
+    TILE_IRON_AXE = 54,
+    TILE_IRON_SHOVEL = 55,
+    TILE_DIAMOND_PICKAXE = 56,
+    TILE_DIAMOND_AXE = 57,
+    TILE_DIAMOND_SHOVEL = 58,
+    TILE_IRON_SWORD = 59,
+    TILE_DIAMOND_SWORD = 60
 } AtlasTile;
 
 /* Resource-pack tile file names, indexed by tile (NULL entry = no override).

@@ -52,9 +52,19 @@ int test_item_texture_mapping(void)
         {ITEM_STONE_AXE, TILE_STONE_AXE, "stone_axe"},
         {ITEM_WOOD_SHOVEL, TILE_WOOD_SHOVEL, "wood_shovel"},
         {ITEM_STONE_SHOVEL, TILE_STONE_SHOVEL, "stone_shovel"},
-        {ITEM_BOW, TILE_BOW, "bow"},
+{ITEM_BOW, TILE_BOW, "bow"},
         {ITEM_WOOD_SWORD, TILE_WOOD_SWORD, "wood_sword"},
         {ITEM_STONE_SWORD, TILE_STONE_SWORD, "stone_sword"},
+        {ITEM_IRON_INGOT, TILE_IRON_INGOT, "iron_ingot"},
+        {ITEM_DIAMOND, TILE_DIAMOND, "diamond"},
+        {ITEM_IRON_PICKAXE, TILE_IRON_PICKAXE, "iron_pickaxe"},
+        {ITEM_IRON_AXE, TILE_IRON_AXE, "iron_axe"},
+        {ITEM_IRON_SHOVEL, TILE_IRON_SHOVEL, "iron_shovel"},
+        {ITEM_DIAMOND_PICKAXE, TILE_DIAMOND_PICKAXE, "diamond_pickaxe"},
+        {ITEM_DIAMOND_AXE, TILE_DIAMOND_AXE, "diamond_axe"},
+        {ITEM_DIAMOND_SHOVEL, TILE_DIAMOND_SHOVEL, "diamond_shovel"},
+        {ITEM_IRON_SWORD, TILE_IRON_SWORD, "iron_sword"},
+        {ITEM_DIAMOND_SWORD, TILE_DIAMOND_SWORD, "diamond_sword"},
     };
     int failures = 0;
     const size_t atlas_bytes = (size_t)ATLAS_SIZE * ATLAS_SIZE * ATLAS_BYTES;
@@ -106,9 +116,13 @@ int test_item_registry(void)
     TEST_ASSERT(item_is_valid(19) == true); /* Planks (M7 block). */
     TEST_ASSERT(item_is_valid(20) == false);
     TEST_ASSERT(item_is_valid(199) == false);
-    TEST_ASSERT(item_is_valid(ITEM_WOOD_SWORD));
+TEST_ASSERT(item_is_valid(ITEM_WOOD_SWORD));
     TEST_ASSERT(item_is_valid(ITEM_STONE_SWORD));
-    TEST_ASSERT(item_is_valid(209) == false);
+    TEST_ASSERT(item_is_valid(ITEM_IRON_PICKAXE));
+    TEST_ASSERT(item_is_valid(ITEM_DIAMOND_SWORD));
+    TEST_ASSERT(item_is_valid(208));
+    TEST_ASSERT(item_is_valid(199) == false);
+    TEST_ASSERT(item_is_valid(217) == false);
     TEST_ASSERT(item_is_valid(999) == false);
     TEST_ASSERT(item_is_valid(ITEM_RAW_BEEF) == true);
     TEST_ASSERT(item_is_valid(ITEM_LEATHER) == true);
@@ -148,10 +162,11 @@ int test_item_registry(void)
  */
 int test_item_stackability_contract(void)
 {
-    static const ItemId unstackable[] = {
-        ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_WOOD_AXE,
-        ITEM_STONE_AXE, ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL, ITEM_BOW,
-        ITEM_WOOD_SWORD, ITEM_STONE_SWORD,
+static const ItemId unstackable[] = {
+        ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_IRON_PICKAXE, ITEM_DIAMOND_PICKAXE,
+        ITEM_WOOD_AXE, ITEM_STONE_AXE, ITEM_IRON_AXE, ITEM_DIAMOND_AXE,
+        ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL, ITEM_IRON_SHOVEL, ITEM_DIAMOND_SHOVEL,
+        ITEM_BOW, ITEM_WOOD_SWORD, ITEM_STONE_SWORD, ITEM_IRON_SWORD, ITEM_DIAMOND_SWORD,
     };
     int failures = 0;
     int registered = 0;
@@ -167,17 +182,17 @@ int test_item_stackability_contract(void)
             TEST_ASSERT(item_get_info(id)->max_stack == 64);
         }
     }
-    for (ItemId id = 100; id <= 107; ++id) {
+for (ItemId id = 100; id <= 109; ++id) {
         TEST_ASSERT(item_is_valid(id));
         ++registered;
         TEST_ASSERT(item_get_info(id)->max_stack == 64);
     }
-    for (ItemId id = 200; id <= 208; ++id) {
+    for (ItemId id = 200; id <= 216; ++id) {
         TEST_ASSERT(item_is_valid(id));
         ++registered;
         TEST_ASSERT(item_get_info(id)->max_stack == 1);
     }
-    TEST_ASSERT(registered == 35);
+    TEST_ASSERT(registered == 45);
     for (size_t i = 0; i < sizeof(unstackable) / sizeof(unstackable[0]); ++i) {
         TEST_ASSERT(item_get_info(unstackable[i])->max_stack == 1);
     }

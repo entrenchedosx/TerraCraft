@@ -55,6 +55,78 @@ int test_survival_mine_time(void)
     return failures;
 }
 
+/* Test: the four mining tiers form a strictly faster ladder, every tier
+ * keeps its own tool category, and the iron/diamond gate works both ways.
+ *
+ * Returns: failure count.
+ */
+int test_tool_tier_progression(void)
+{
+    int failures = 0;
+
+    /* Stone (hardness 1.5) with each pickaxe tier: wood 2x, stone 4x,
+     * iron 6x, diamond 8x -> hardness * 1.5 / speed. */
+    const float pick_time[4] = {
+        survival_mine_time(BLOCK_STONE, ITEM_WOOD_PICKAXE),
+        survival_mine_time(BLOCK_STONE, ITEM_STONE_PICKAXE),
+        survival_mine_time(BLOCK_STONE, ITEM_IRON_PICKAXE),
+        survival_mine_time(BLOCK_STONE, ITEM_DIAMOND_PICKAXE),
+    };
+    TEST_ASSERT_FLOAT_EQ(pick_time[0], 1.125f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(pick_time[1], 0.5625f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(pick_time[2], 0.375f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(pick_time[3], 0.28125f, 1e-4f);
+    for (int i = 1; i < 4; ++i) {
+        TEST_ASSERT(pick_time[i] < pick_time[i - 1]);
+    }
+
+    /* Axe and shovel ladders move in lockstep with their own categories. */
+    TEST_ASSERT(survival_mine_time(BLOCK_WOOD, ITEM_IRON_AXE) <
+                survival_mine_time(BLOCK_WOOD, ITEM_WOOD_AXE));
+    TEST_ASSERT(survival_mine_time(BLOCK_DIRT, ITEM_DIAMOND_SHOVEL) <
+                survival_mine_time(BLOCK_DIRT, ITEM_WOOD_SHOVEL));
+
+    /* A higher-tier tool of the wrong category is not a shortcut: stone with
+     * an iron axe stays unharvestable. */
+    TEST_ASSERT_FLOAT_EQ(survival_mine_time(BLOCK_STONE, ITEM_IRON_AXE), 7.5f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(survival_mine_time(BLOCK_STONE, ITEM_DIAMOND_SHOVEL), 7.5f, 1e-4f);
+
+    /* Iron ore needs stone tier; diamond and gold need iron tier. Hardness 3.0
+     * gives 4.5/speed when harvestable and 15.0 s when not. */
+    TEST_ASSERT_FLOAT_EQ(survival_mine_time(BLOCK_IRON_ORE, ITEM_WOOD_PICKAXE), 15.0f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(survival_mine_time(BLOCK_IRON_ORE, ITEM_STONE_PICKAXE), 1.125f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(survival_mine_time(BLOCK_DIAMOND_ORE, ITEM_STONE_PICKAXE), 15.0f, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(survival_mine_time(BLOCK_DIAMOND_ORE, ITEM_IRON_PICKAXE), 0.75f, 1e-4f);
+
+    /* Tier metadata: strictly ascending, damageable, unstackable. */
+    static const ItemId picks[4] = {ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_IRON_PICKAXE,
+                                    ITEM_DIAMOND_PICKAXE};
+    uint16_t last_durability = 0;
+    for (int i = 0; i < 4; ++i) {
+        const ItemInfo *info = item_get_info(picks[i]);
+        TEST_ASSERT(info->tool == TOOL_PICKAXE);
+        TEST_ASSERT(info->tier == i + 1);
+        TEST_ASSERT(info->max_stack == 1);
+        TEST_ASSERT(info->max_durability > 0);
+        if (i > 0) {
+            TEST_ASSERT(info->max_durability > last_durability);
+        }
+        last_durability = info->max_durability;
+    }
+    TEST_ASSERT(item_get_info(ITEM_IRON_PICKAXE)->max_durability == 250);
+    TEST_ASSERT(item_get_info(ITEM_DIAMOND_PICKAXE)->max_durability == 1561);
+    TEST_ASSERT(item_get_info(ITEM_IRON_SWORD)->attack_damage == 6);
+    TEST_ASSERT(item_get_info(ITEM_DIAMOND_SWORD)->attack_damage == 7);
+
+    /* Refined materials are plain stackables, not placeables. */
+    TEST_ASSERT(item_is_valid(ITEM_IRON_INGOT) && item_is_block(ITEM_IRON_INGOT) == false);
+    TEST_ASSERT(item_is_valid(ITEM_DIAMOND) && item_is_block(ITEM_DIAMOND) == false);
+    TEST_ASSERT(item_get_info(ITEM_IRON_INGOT)->max_stack == 64);
+    TEST_ASSERT(item_get_info(ITEM_DIAMOND)->max_stack == 64);
+    TEST_ASSERT(item_get_info(ITEM_IRON_INGOT)->tool == TOOL_NONE);
+    return failures;
+}
+
 /* Test: block drops follow the MC harvest rule (pickaxe-class blocks need
  * a sufficient pickaxe; glass/leaves/bedrock drop nothing).
  *
@@ -71,11 +143,21 @@ int test_survival_drops(void)
     TEST_ASSERT(stack_is_empty(&coal_hand));
     ItemStack coal_pick = survival_block_drop(BLOCK_COAL_ORE, ITEM_WOOD_PICKAXE);
     TEST_ASSERT(coal_pick.item == ITEM_COAL && coal_pick.count == 1);
-    /* Iron needs stone tier: wood pick yields nothing. */
+    /* Iron needs stone tier: wood pick yields nothing, stone pick yields the
+     * smelted ingot (no furnace exists, so ores drop their product). */
     ItemStack iron_wood = survival_block_drop(BLOCK_IRON_ORE, ITEM_WOOD_PICKAXE);
     TEST_ASSERT(stack_is_empty(&iron_wood));
     ItemStack iron_stone = survival_block_drop(BLOCK_IRON_ORE, ITEM_STONE_PICKAXE);
-    TEST_ASSERT(iron_stone.item == (ItemId)BLOCK_IRON_ORE && iron_stone.count == 1);
+    TEST_ASSERT(iron_stone.item == ITEM_IRON_INGOT && iron_stone.count == 1);
+    /* Diamond and gold need an iron pickaxe (tier 3). */
+    ItemStack dia_stone = survival_block_drop(BLOCK_DIAMOND_ORE, ITEM_STONE_PICKAXE);
+    TEST_ASSERT(stack_is_empty(&dia_stone));
+    ItemStack dia_iron = survival_block_drop(BLOCK_DIAMOND_ORE, ITEM_IRON_PICKAXE);
+    TEST_ASSERT(dia_iron.item == ITEM_DIAMOND && dia_iron.count == 1);
+    ItemStack gold_stone = survival_block_drop(BLOCK_GOLD_ORE, ITEM_STONE_PICKAXE);
+    TEST_ASSERT(stack_is_empty(&gold_stone));
+    ItemStack gold_iron = survival_block_drop(BLOCK_GOLD_ORE, ITEM_IRON_PICKAXE);
+    TEST_ASSERT(gold_iron.item == (ItemId)BLOCK_GOLD_ORE && gold_iron.count == 1);
     /* Non-pickaxe blocks drop regardless of tool. */
     ItemStack dirt_hand = survival_block_drop(BLOCK_DIRT, ITEM_NONE);
     TEST_ASSERT(dirt_hand.item == (ItemId)BLOCK_DIRT && dirt_hand.count == 1);

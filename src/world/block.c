@@ -25,10 +25,15 @@ static const BlockInfo BLOCK_TABLE[BLOCK_COUNT] = {
     [BLOCK_LEAVES] = {.name = "leaves", .solid = true, .transparent = true, .color_r = 0.2f, .color_g = 0.55f, .color_b = 0.2f, .hardness = 0.2f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = false},
     [BLOCK_SAND] = {.name = "sand", .solid = true, .transparent = false, .color_r = 0.85f, .color_g = 0.75f, .color_b = 0.5f, .hardness = 0.5f, .tool = 3, .min_tier = 1, .drop = 8, .drop_count = 1, .unbreakable = false, .gravity_affected = true},
     [BLOCK_GLASS] = {.name = "glass", .solid = true, .transparent = true, .color_r = 0.75f, .color_g = 0.88f, .color_b = 0.95f, .hardness = 0.3f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = false},
+    /* Ore drops: coal ore yields its product (item 100 = ITEM_COAL) because
+     * no smelter exists yet; iron and diamond follow the same rule (108/109 =
+     * ITEM_IRON_INGOT/ITEM_DIAMOND). Gold keeps dropping itself - it has no
+     * consumer until gold tools or armour exist. Harvest tier gates diamond
+     * and gold behind an iron pickaxe, as vanilla does. */
     [BLOCK_COAL_ORE] = {.name = "coal_ore", .solid = true, .transparent = false, .color_r = 0.35f, .color_g = 0.35f, .color_b = 0.35f, .hardness = 3.0f, .tool = 1, .min_tier = 1, .drop = 100, .drop_count = 1, .unbreakable = false},
-    [BLOCK_IRON_ORE] = {.name = "iron_ore", .solid = true, .transparent = false, .color_r = 0.62f, .color_g = 0.5f, .color_b = 0.42f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = 11, .drop_count = 1, .unbreakable = false},
-    [BLOCK_GOLD_ORE] = {.name = "gold_ore", .solid = true, .transparent = false, .color_r = 0.7f, .color_g = 0.62f, .color_b = 0.4f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = 12, .drop_count = 1, .unbreakable = false},
-    [BLOCK_DIAMOND_ORE] = {.name = "diamond_ore", .solid = true, .transparent = false, .color_r = 0.5f, .color_g = 0.68f, .color_b = 0.68f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = 13, .drop_count = 1, .unbreakable = false},
+    [BLOCK_IRON_ORE] = {.name = "iron_ore", .solid = true, .transparent = false, .color_r = 0.62f, .color_g = 0.5f, .color_b = 0.42f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = 108, .drop_count = 1, .unbreakable = false},
+    [BLOCK_GOLD_ORE] = {.name = "gold_ore", .solid = true, .transparent = false, .color_r = 0.7f, .color_g = 0.62f, .color_b = 0.4f, .hardness = 3.0f, .tool = 1, .min_tier = 3, .drop = 12, .drop_count = 1, .unbreakable = false},
+    [BLOCK_DIAMOND_ORE] = {.name = "diamond_ore", .solid = true, .transparent = false, .color_r = 0.5f, .color_g = 0.68f, .color_b = 0.68f, .hardness = 3.0f, .tool = 1, .min_tier = 3, .drop = 109, .drop_count = 1, .unbreakable = false},
     [BLOCK_SNOW] = {.name = "snow", .solid = true, .transparent = false, .color_r = 0.94f, .color_g = 0.96f, .color_b = 0.98f, .hardness = 0.1f, .tool = 3, .min_tier = 1, .drop = 14, .drop_count = 1, .unbreakable = false},
     [BLOCK_GRASS_PLANT] = {.name = "grass_plant", .solid = false, .transparent = true, .color_r = 0.35f, .color_g = 0.7f, .color_b = 0.25f, .hardness = 0.0f, .tool = 0, .min_tier = 0, .drop = 15, .drop_count = 1, .unbreakable = false},
     [BLOCK_FLOWER] = {.name = "flower", .solid = false, .transparent = true, .color_r = 0.9f, .color_g = 0.25f, .color_b = 0.3f, .hardness = 0.0f, .tool = 0, .min_tier = 0, .drop = 16, .drop_count = 1, .unbreakable = false},

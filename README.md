@@ -55,7 +55,7 @@ open.
 - Direct LAN play: one player opens a world to LAN, and up to eight other
   players can join by the host computer's local IPv4 address. Player movement,
   chat, and block changes made during the session are shared.
-- 191 registered headless test functions in the custom test runner.
+- 194 registered headless test functions in the custom test runner.
 
 ## Controls
 
