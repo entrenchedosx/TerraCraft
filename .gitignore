@@ -41,6 +41,7 @@ Thumbs.db
 
 # vcpkg (if vendored locally)
 vcpkg_installed/
+eaglercraft/
 
 # M5 runtime data (user-local, never commit)
 saves/
