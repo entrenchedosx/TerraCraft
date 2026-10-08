@@ -1020,7 +1020,16 @@ bool living_entity_damage_src(MobPool *pool, EntityPool *drops, EntityId id, flo
             ItemStack drop = {d->item, n, 0};
             Vec3 at = mmath_vec3(m->pos.x, m->pos.y + 0.5f, m->pos.z);
             if (drops != NULL) {
-                entity_spawn(drops, at, &drop);
+                if (entity_spawn(drops, at, &drop) < 0) {
+                    /* Pool full: fold into a nearby same-item drop rather
+                     * than deleting the kill reward. Anything left over is
+                     * logged loudly (pool is 128; this should not happen). */
+                    uint16_t merged = entity_try_merge(drops, &drop, at, 4.0f);
+                    if (!stack_is_empty(&drop)) {
+                        LOG_WARN("mob: drop pool full; lost %u x item %u after merging %u",
+                                 (unsigned)drop.count, (unsigned)drop.item, (unsigned)merged);
+                    }
+                }
             }
         }
         return true;

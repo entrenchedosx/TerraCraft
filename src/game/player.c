@@ -122,7 +122,8 @@ bool player_find_spawn(const World *w, int sx, int sz, Vec3 *out)
         uint16_t foot = world_get_block(w, sx, y, sz);
         uint16_t head1 = world_get_block(w, sx, y + 1, sz);
         uint16_t head2 = world_get_block(w, sx, y + 2, sz);
-        if (block_is_solid(foot) && !block_is_solid(head1) && !block_is_solid(head2)) {
+        if (block_is_solid(foot) && !block_is_solid(head1) && !block_is_solid(head2) &&
+            !block_is_water(head1) && !block_is_water(head2)) {
             *out = mmath_vec3((float)sx + 0.5f, (float)(y + 1), (float)sz + 0.5f);
             return true;
         }
@@ -130,8 +131,27 @@ bool player_find_spawn(const World *w, int sx, int sz, Vec3 *out)
     return false;
 }
 
-/* Eye position.
- *
+/* Apply a capped knockback impulse (mirrors the mob caps). */
+void player_apply_knockback(Player *p, float kx, float ky, float kz)
+{
+    if (p == NULL) {
+        return;
+    }
+    p->vel.x += kx;
+    p->vel.y += ky;
+    p->vel.z += kz;
+    float hs = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
+    if (hs > 12.0f) {
+        float s = 12.0f / hs;
+        p->vel.x *= s;
+        p->vel.z *= s;
+    }
+    if (p->vel.y > 6.0f) {
+        p->vel.y = 6.0f;
+    }
+}
+
+/* Eye position. *
  * Args:
  *   p: player.
  *
@@ -261,6 +281,33 @@ bool player_eye_in_water(const World *w, const Player *p)
     return block_is_water(id);
 }
 
+/* Dry step-up: walking into a single-block ledge while grounded climbs it
+ * instead of grinding. The candidate position is up one PLUS the blocked
+ * horizontal motion applied: only a real 1-high obstacle ahead accepts the
+ * step (a tall wall stays solid at the raised level, so the player cannot
+ * elevator up it). The full raised box must be free (headroom included).
+ * Sneaking never steps (ledge safety); ascending jumps never step either.
+ */
+static bool player_try_step_up(Player *p, World *w, float dx, float dz)
+{
+    if (p->vel.y > 0.0f) {
+        return false;
+    }
+    Vec3 saved = p->pos;
+    p->pos.x = saved.x + dx;
+    p->pos.z = saved.z + dz;
+    p->pos.y = saved.y + 1.0f;
+    Vec3 mn, mx;
+    player_box(p, &mn, &mx);
+    if (player_aabb_solid(w, mn, mx)) {
+        p->pos = saved;
+        return false;
+    }
+    p->vel.y = 0.0f;
+    p->grounded = true;
+    return true;
+}
+
 /* Clamber onto a shore while pushing against it from the water (only
  * when partially immersed: full submersion never steps). Requires
  * headroom at the raised level, like the mob step-up.
@@ -301,6 +348,13 @@ static void player_resolve_axis(Player *p, World *w, int axis, float delta, bool
             p->pos.x = floorf(mx.x) - hw - PLAYER_EPS;
         } else if (delta < 0.0f) {
             p->pos.x = floorf(mn.x) + 1.0f + hw + PLAYER_EPS;
+        } else {
+            /* Embedded with no motion (spawn/teleport/fly-toggle inside a
+             * block): eject along the smallest penetration instead of
+             * sitting stuck with zeroed velocity forever. */
+            float out_neg = floorf(mn.x) + 1.0f + hw + PLAYER_EPS - p->pos.x;
+            float out_pos = floorf(mx.x) - hw - PLAYER_EPS - p->pos.x;
+            p->pos.x += (fabsf(out_neg) < fabsf(out_pos)) ? out_neg : out_pos;
         }
         p->vel.x = 0.0f;
     } else if (axis == 2) {
@@ -308,6 +362,10 @@ static void player_resolve_axis(Player *p, World *w, int axis, float delta, bool
             p->pos.z = floorf(mx.z) - hw - PLAYER_EPS;
         } else if (delta < 0.0f) {
             p->pos.z = floorf(mn.z) + 1.0f + hw + PLAYER_EPS;
+        } else {
+            float out_neg = floorf(mn.z) + 1.0f + hw + PLAYER_EPS - p->pos.z;
+            float out_pos = floorf(mx.z) - hw - PLAYER_EPS - p->pos.z;
+            p->pos.z += (fabsf(out_neg) < fabsf(out_pos)) ? out_neg : out_pos;
         }
         p->vel.z = 0.0f;
     } else {
@@ -420,10 +478,21 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     float dx = p->vel.x * dt;
     float dz = p->vel.z * dt;
     float dy = p->vel.y * dt;
+    float pre_x = p->pos.x;
+    float pre_z = p->pos.z;
     p->pos.x += dx;
     player_resolve_axis(p, w, 0, dx, false);
     p->pos.z += dz;
     player_resolve_axis(p, w, 2, dz, false);
+    /* Dry step-up: grounded, pushing a ledge, barely moving -> climb one
+     * block instead of grinding. Sneak never steps up (ledge safety). */
+    if (water_contact <= 0.0f && !sneak && mmath_vec3_length_sq(wish) > 1e-8f) {
+        float moved = fabsf(p->pos.x - pre_x) + fabsf(p->pos.z - pre_z);
+        float wanted = fabsf(dx) + fabsf(dz);
+        if (wanted > 1e-6f && moved < wanted * 0.25f) {
+            player_try_step_up(p, w, dx, dz);
+        }
+    }
     /* Shore clamber: swimming into a bank while partially immersed steps
      * up one block instead of grinding against it. Gated on stalled
      * horizontal motion with live input so open-water swimming never

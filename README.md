@@ -55,7 +55,7 @@ open.
 - Direct LAN play: one player opens a world to LAN, and up to eight other
   players can join by the host computer's local IPv4 address. Player movement,
   chat, and block changes made during the session are shared.
-- 194 registered headless test functions in the custom test runner.
+- 196 registered headless test functions in the custom test runner.
 
 ## Controls
 
@@ -76,8 +76,8 @@ open.
 | `F5` | Toggle first/third-person camera |
 | `T` | Open chat and scrollable recent history while playing |
 
-Developer-only keys are kept in source comments and are not needed for
-ordinary play.
+Developer-only keys (F6 give, F7/F8 hurt, F9–F11 mob spawn, F12 clear
+arrows) exist in debug builds only and are stripped from Release builds.
 
 ## Build and run
 

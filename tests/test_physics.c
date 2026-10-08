@@ -274,6 +274,68 @@ int test_physics_spawn(void)
     return failures;
 }
 
+/* Test: dry step-up climbs a 1-block ledge, embed ejects, knockback caps,
+ * and spawn rejects water-filled headroom.
+ *
+ * Returns: failure count.
+ */
+int test_physics_step_up_and_eject(void)
+{
+    int failures = 0;
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    /* A 4-block ledge at x=10..13 (feet 65, headroom 66..67 clear). */
+    TEST_ASSERT(world_set_block(w, 10, 65, 8, BLOCK_STONE));
+    TEST_ASSERT(world_get_block(w, 10, 65, 8) == BLOCK_STONE);
+    TEST_ASSERT(world_set_block(w, 11, 65, 8, BLOCK_STONE));
+    TEST_ASSERT(world_set_block(w, 12, 65, 8, BLOCK_STONE));
+    TEST_ASSERT(world_set_block(w, 13, 65, 8, BLOCK_STONE));
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    p.yaw = -1.5707963f; /* Face +X (wish dir convention: yaw -pi/2). */
+    PlayerInput in = no_input();
+    in.fwd = 1.0f;
+    for (int i = 0; i < 60; ++i) {
+        player_update(&p, &in, w, PLAYER_STEP_DT);
+    }
+    /* Climbed onto the ledge (y=66) and kept walking across it. */
+    TEST_ASSERT(p.pos.y > 65.5f);
+    TEST_ASSERT(p.pos.x > 10.0f);
+
+    /* Embedded with zero velocity: one update ejects to free space. */
+    Player stuck;
+    player_init(&stuck);
+    stuck.pos = mmath_vec3(10.5f, 65.0f, 8.5f);
+    stuck.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
+    PlayerInput still = no_input();
+    player_update(&stuck, &still, w, PLAYER_STEP_DT);
+    float half = stuck.width * 0.5f;
+    Vec3 mn = mmath_vec3(stuck.pos.x - half, stuck.pos.y, stuck.pos.z - half);
+    Vec3 mx = mmath_vec3(stuck.pos.x + half, stuck.pos.y + stuck.height, stuck.pos.z + half);
+    TEST_ASSERT(player_aabb_solid(w, mn, mx) == false);
+
+    /* Knockback obeys the mob caps (hs <= 12, up <= 6). */
+    Player hit;
+    player_init(&hit);
+    player_apply_knockback(&hit, 100.0f, 100.0f, 0.0f);
+    float hs = sqrtf(hit.vel.x * hit.vel.x + hit.vel.z * hit.vel.z);
+    TEST_ASSERT(hs <= 12.0f + 1e-4f);
+    TEST_ASSERT(hit.vel.y <= 6.0f + 1e-4f);
+    player_apply_knockback(NULL, 1.0f, 1.0f, 1.0f);
+
+    /* Flood the headroom: the floor column is no longer a valid spawn. */
+    TEST_ASSERT(world_set_block(w, 8, 65, 8, BLOCK_WATER));
+    TEST_ASSERT(world_set_block(w, 8, 66, 8, BLOCK_WATER));
+    Vec3 out = mmath_vec3(0.0f, 0.0f, 0.0f);
+    TEST_ASSERT(player_find_spawn(w, 8, 8, &out) == false);
+    world_destroy(w);
+    return failures;
+}
+
 /* Test: break/place rules incl. bedrock, occupied cells, self-overlap.
  *
  * Returns: failure count.

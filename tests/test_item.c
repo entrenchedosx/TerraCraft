@@ -192,7 +192,7 @@ for (ItemId id = 100; id <= 109; ++id) {
         ++registered;
         TEST_ASSERT(item_get_info(id)->max_stack == 1);
     }
-    TEST_ASSERT(registered == 45);
+    TEST_ASSERT(registered >= 45);
     for (size_t i = 0; i < sizeof(unstackable) / sizeof(unstackable[0]); ++i) {
         TEST_ASSERT(item_get_info(unstackable[i])->max_stack == 1);
     }

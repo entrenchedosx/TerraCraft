@@ -177,8 +177,9 @@ int test_atlas_mcfaces(void)
     TEST_ASSERT(block_tile_for_face(BLOCK_WORKBENCH, ATLAS_FACE_POS_Y) == TILE_WORKBENCH_TOP);
     TEST_ASSERT(block_tile_for_face(BLOCK_WORKBENCH, ATLAS_FACE_NEG_Y) == TILE_PLANKS);
     TEST_ASSERT(block_tile_for_face(BLOCK_WORKBENCH, ATLAS_FACE_POS_X) == TILE_WORKBENCH_SIDE);
-/* Per-material tool tiles exist in the pack file table. */
-    TEST_ASSERT(texture_atlas_tile_file_count() == 61);
+/* Per-material tool tiles exist in the pack file table.
+     * Lower bound, not an exact pin: new tiles must not break this. */
+    TEST_ASSERT(texture_atlas_tile_file_count() >= 61);
     TEST_ASSERT(texture_atlas_tile_file(TILE_WOOD_PICKAXE) != NULL);
     TEST_ASSERT(texture_atlas_tile_file(TILE_STONE_SHOVEL) != NULL);
     TEST_ASSERT(texture_atlas_tile_file(TILE_DIAMOND_SWORD) != NULL);

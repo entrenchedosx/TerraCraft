@@ -17,7 +17,7 @@
 #define ATLAS_TILE_PX 16
 #define ATLAS_BYTES 4
 
-/* Tile indices (row-major: tile = row*16+col; named tiles currently end at 50). */
+/* Tile indices (row-major: tile = row*16+col; named tiles currently end at 60). */
 typedef enum AtlasTile {
     TILE_GRASS_TOP = 0,
     TILE_GRASS_SIDE = 1,

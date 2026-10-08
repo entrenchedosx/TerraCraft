@@ -64,6 +64,21 @@ void entity_pool_clear(EntityPool *pool);
  */
 int entity_spawn(EntityPool *pool, Vec3 pos, const ItemStack *stack);
 
+/* Merge a stack into a nearby active entity holding the same item and wear
+ * (within radius of pos). Partial merges leave the remainder in *stack;
+ * a full merge empties it. Used as the no-loss fallback when the pool is
+ * full: mob loot merges into a sibling drop instead of vanishing.
+ *
+ * Args:
+ *   pool: pool (must not be NULL).
+ *   stack: stack to merge; consumed in place (must not be NULL).
+ *   pos: merge origin.
+ *   radius: merge range in blocks (> 0).
+ *
+ * Returns: items actually merged (0 when nothing merged).
+ */
+uint16_t entity_try_merge(EntityPool *pool, ItemStack *stack, Vec3 pos, float radius);
+
 /* Transfer part or all of a stack into a dropped-item entity. The source is
  * changed only after an entity slot is secured; on failure both are intact.
  * Item wear is preserved for damageable single-item stacks.

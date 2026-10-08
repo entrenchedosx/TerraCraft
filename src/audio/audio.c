@@ -411,7 +411,26 @@ static int audio_set_dup(AudioSet *set, const int16_t *pcm, size_t frames)
 /* Synthesize the full default bank (original sounds, deterministic).
  * Material sets each get their own copy of the generic event synth
  * (freed independently, so layers can replace per-material freely).
+ * Footsteps resolve per material from the matching STEP_* synth (stone,
+ * dirt, wood, sand) so grass no longer crunches like gravel-pit rock;
+ * glass and snow fall back to stone/sand, the closest families.
  */
+static AudioEvent audio_step_synth_for_material(int m)
+{
+    switch (m) {
+    case AUDIO_MAT_GRASS:
+    case AUDIO_MAT_GRAVEL:
+        return AUDIO_STEP_DIRT;
+    case AUDIO_MAT_WOOD:
+        return AUDIO_STEP_WOOD;
+    case AUDIO_MAT_SAND:
+    case AUDIO_MAT_SNOW:
+        return AUDIO_STEP_SAND;
+    default:
+        return AUDIO_STEP_STONE;
+    }
+}
+
 static int audio_synth_bank(AudioSystem *sys)
 {
     audio_free_bank(sys);
@@ -430,12 +449,19 @@ static int audio_synth_bank(AudioSystem *sys)
     }
     const AudioEvent mev[3] = {AUDIO_BLOCK_BREAK, AUDIO_BLOCK_PLACE, AUDIO_STEP_STONE};
     for (int e = 0; e < 3; ++e) {
-        AudioSet *src = &sys->sets[mev[e]];
-        if (src->count == 0) {
-            audio_free_bank(sys);
-            return -1;
-        }
         for (int m = 0; m < AUDIO_MAT_COUNT; ++m) {
+            /* Footsteps use the material's own family; break/place share
+             * the generic event synth (per-material mining thuds are a
+             * future bank expansion, not a silent stub). */
+            AudioEvent src_ev = mev[e];
+            if (e == 2) {
+                src_ev = audio_step_synth_for_material(m);
+            }
+            AudioSet *src = &sys->sets[src_ev];
+            if (src->count == 0) {
+                audio_free_bank(sys);
+                return -1;
+            }
             if (audio_set_dup(&sys->msets[e][m], src->pcm[0], src->frames[0]) != 0) {
                 audio_free_bank(sys);
                 return -1;
@@ -968,7 +994,31 @@ int audio_load_pack(AudioSystem *sys, const char *pack)
             if (i == AUDIO_BLOCK_BREAK || i == AUDIO_BLOCK_PLACE || i == AUDIO_STEP_STONE ||
                 i == AUDIO_STEP_DIRT || i == AUDIO_STEP_WOOD || i == AUDIO_STEP_SAND) {
                 int row = audio_mat_row((AudioEvent)i);
-                for (int m = 0; m < AUDIO_MAT_COUNT; ++m) {
+                /* Step stems replace only their own material family (a dirt
+                 * pack must not silence stone); break/place are generic and
+                 * replace every material. */
+                static const int step_mats[4][2] = {
+                    {AUDIO_MAT_STONE, AUDIO_MAT_GLASS},  /* step_stone */
+                    {AUDIO_MAT_GRASS, AUDIO_MAT_GRAVEL}, /* step_dirt */
+                    {AUDIO_MAT_WOOD, AUDIO_MAT_WOOD},    /* step_wood */
+                    {AUDIO_MAT_SAND, AUDIO_MAT_SNOW},    /* step_sand */
+                };
+                int targets[8];
+                int ntargets = 0;
+                if (i == AUDIO_BLOCK_BREAK || i == AUDIO_BLOCK_PLACE) {
+                    for (int m = 0; m < AUDIO_MAT_COUNT; ++m) {
+                        targets[ntargets++] = m;
+                    }
+                } else {
+                    int si = (i == AUDIO_STEP_STONE) ? 0 : (i == AUDIO_STEP_DIRT) ? 1 :
+                             (i == AUDIO_STEP_WOOD) ? 2 : 3;
+                    targets[ntargets++] = step_mats[si][0];
+                    if (step_mats[si][1] != step_mats[si][0]) {
+                        targets[ntargets++] = step_mats[si][1];
+                    }
+                }
+                for (int t = 0; t < ntargets; ++t) {
+                    int m = targets[t];
                     int16_t *copy = NULL;
                     size_t cframes = 0;
                     if (audio_load_wav_file(rel, &copy, &cframes) != 0) {

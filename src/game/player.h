@@ -164,6 +164,16 @@ float player_water_contact(const World *w, const Player *p);
  */
 bool player_eye_in_water(const World *w, const Player *p);
 
+/* Apply a knockback impulse with the same caps mobs use (horizontal
+ * speed <= 12, upward <= 6) so chained hits cannot launch the player.
+ * No-op on NULL.
+ *
+ * Args:
+ *   p: player.
+ *   kx, ky, kz: impulse to add.
+ */
+void player_apply_knockback(Player *p, float kx, float ky, float kz);
+
 /* Advance the player by dt seconds using fixed 1/60 s substeps.
  * Flying: velocity set directly from input (incl. vertical), no gravity,
  * no collision (creative no-clip). Walking: horizontal velocity set from

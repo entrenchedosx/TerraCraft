@@ -10,6 +10,12 @@ int main(void)
 {
     AppContext app;
 
+#ifdef NDEBUG
+    /* Release ships quiet: per-chunk mesher chatter and other hot-path
+     * DEBUG lines stay a debug-build tool, not a shipped log firehose. */
+    log_set_level(LOG_LEVEL_INFO);
+#endif
+
     if (app_init(&app, 1280, 720, "TerraCraft") != 0) {
         LOG_ERROR("Failed to initialise TerraCraft. See logs above.");
         return 1;

@@ -472,10 +472,13 @@ static void app_poll_discrete_input(AppContext *app)
         }
     }
 
-    /* Dev helpers (documented): F6 gives 64 of the selected stack (or
-     * stone when the slot is empty); F8 deals 5 damage (survival only);
-     * F7 hurts the aimed mob; F9/F10/F11 spawn cow/zombie/
-     * skeleton; F12 clears all arrows (shift+F6 gives bow + arrows). */
+    /* Dev helpers (debug builds only: NDEBUG strips them from Release so
+     * shipped games cannot spawn mobs, deal self-damage, or conjure
+     * stacks). F6 gives 64 of the selected stack (or stone when the slot
+     * is empty); F8 deals 5 damage (survival only); F7 hurts the aimed
+     * mob; F9/F10/F11 spawn cow/zombie/skeleton; F12 clears all arrows
+     * (shift+F6 gives bow + arrows). */
+#ifndef NDEBUG
     bool f6_down = window_is_key_down(SDL_SCANCODE_F6);
     bool f6_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F6);
     if (f6_pressed) {
@@ -550,16 +553,18 @@ static void app_poll_discrete_input(AppContext *app)
         LOG_INFO("Dev projectiles cleared: %d arrow(s)", n);
     }
     app->prev_f12_key = f12_down;
+#endif /* NDEBUG: dev helpers are debug-only. */
 
     /* Hotbar digits 1..9 (SDL scancodes are consecutive). Slot switches
      * reset survival mining (spec: changing slots updates mining) and
      * cancel bow draws (never fires, never consumes). */
     for (int i = 0; i < 9; ++i) {
         bool down = window_is_key_down(SDL_SCANCODE_1 + i);
-        if (window_take_key_pressed(app->window, SDL_SCANCODE_1 + i)) {
+if (window_take_key_pressed(app->window, SDL_SCANCODE_1 + i)) {
             app->player.hotbar_sel = i;
             survival_mine_reset(&app->player);
             survival_bow_reset(&app->player);
+            audio_play(&app->audio, AUDIO_UI_CLICK);
             const ItemInfo *info = item_get_info(app->player.inv.slots[i].item);
             LOG_INFO("Hotbar: slot %d (%s)", i + 1, info ? info->name : "?");
         }
@@ -577,6 +582,7 @@ static void app_poll_discrete_input(AppContext *app)
         app->player.hotbar_sel = sel;
         survival_mine_reset(&app->player);
         survival_bow_reset(&app->player);
+        audio_play(&app->audio, AUDIO_UI_CLICK);
         const ItemInfo *info = item_get_info(app->player.inv.slots[sel].item);
         LOG_INFO("Hotbar: slot %d (%s)", sel + 1, info ? info->name : "?");
     }
@@ -1871,11 +1877,12 @@ static bool app_drop_stack_from_player(AppContext *app, ItemStack *stack, bool a
     Vec3 pos = mmath_vec3_add(eye, mmath_vec3_scale(forward, 0.65f));
     pos.y -= 0.45f;
     Vec3 velocity = mmath_vec3_add(mmath_vec3_scale(forward, 3.0f), mmath_vec3(0.0f, 1.5f, 0.0f));
-    uint16_t count = all ? stack->count : 1;
+uint16_t count = all ? stack->count : 1;
     int id = entity_drop_stack(&app->entities, stack, count, pos, velocity);
     if (id < 0) {
         return false;
     }
+    audio_play(&app->audio, AUDIO_ITEM_PICKUP);
     return true;
 }
 
@@ -2026,12 +2033,17 @@ static void app_spawn_drop(AppContext *app, Vec3 at, ItemStack *drop)
     if (entity_spawn(&app->entities, at, drop) >= 0) {
         return;
     }
-    /* Pool full (should not happen at 128): bank into inventory so
-     * nothing is ever lost, else the drop vanishes with a loud log. */
+    /* Pool full (should not happen at 128): fold into a nearby same-item
+     * drop first, then bank into the inventory, so a mined block is only
+     * ever lost when both the world and the inventory are completely full. */
     ItemStack rest = *drop;
+    if (entity_try_merge(&app->entities, &rest, at, 4.0f) > 0 && stack_is_empty(&rest)) {
+        LOG_DEBUG("mining: pool full, merged drop into nearby entity");
+        return;
+    }
     if (inv_insert(&app->player.inv, &rest) != 0) {
-        LOG_WARN("mining: entity pool full and inventory full; lost %u x item %u", (unsigned)drop->count,
-                 (unsigned)drop->item);
+        LOG_WARN("mining: entity pool full and inventory full; lost %u x item %u", (unsigned)rest.count,
+                 (unsigned)rest.item);
     } else {
         LOG_DEBUG("mining: pool full, banked drop into inventory");
     }
@@ -2575,7 +2587,7 @@ static void app_tick_playing(AppContext *app, float dt)
         float dist = app->player.last_fall;
         app->player.last_fall = -1.0f;
         player_anim_notify_landed(&app->panim, dist);
-        bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
+bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
         float dmg = splashed ? 0.0f : survival_fall_damage(dist);
         if (dmg > 0.0f) {
             survival_damage_player(&app->player, dmg);
@@ -2583,6 +2595,13 @@ static void app_tick_playing(AppContext *app, float dt)
             audio_play(&app->audio, AUDIO_PLAYER_HURT);
             LOG_INFO("fall: %.1f blocks -> %.1f damage (HP %.1f)", (double)dist, (double)dmg,
                      (double)app->player.health);
+        } else if (dist >= 1.5f && !splashed) {
+            /* Hard but harmless landing: a footstep thud on the ground
+             * material (no new assets, just the step bank). */
+            audio_play_block(&app->audio, AUDIO_STEP_STONE,
+                             world_get_block(app->world, (int)floorf(app->player.pos.x),
+                                             (int)floorf(app->player.pos.y - 0.01f),
+                                             (int)floorf(app->player.pos.z)));
         }
     } else {
         app->player.last_fall = -1.0f;
@@ -2633,9 +2652,8 @@ static void app_tick_playing(AppContext *app, float dt)
         if (mev.player_hits > 0 && !app->player.dead && !creative && app->player.hurt_t <= 0.0f) {
             survival_damage_player(&app->player, mev.player_damage);
             player_anim_notify_hurt(&app->panim);
-            app->player.vel.x += mev.player_knock.x;
-            app->player.vel.y += mev.player_knock.y;
-            app->player.vel.z += mev.player_knock.z;
+            player_apply_knockback(&app->player, mev.player_knock.x, mev.player_knock.y,
+                                   mev.player_knock.z);
             app->player.hurt_t = PLAYER_HURT_WINDOW;
             audio_play(&app->audio, AUDIO_PLAYER_HURT);
             LOG_INFO("mob hit: %d strike(s) %.1f damage (HP %.1f)", mev.player_hits,
@@ -2663,9 +2681,8 @@ static void app_tick_playing(AppContext *app, float dt)
         if (pev.player_hits > 0 && !app->player.dead && !creative && app->player.hurt_t <= 0.0f) {
             survival_damage_player(&app->player, pev.player_damage);
             player_anim_notify_hurt(&app->panim);
-            app->player.vel.x += pev.player_knock.x;
-            app->player.vel.y += pev.player_knock.y;
-            app->player.vel.z += pev.player_knock.z;
+            player_apply_knockback(&app->player, pev.player_knock.x, pev.player_knock.y,
+                                   pev.player_knock.z);
             app->player.hurt_t = PLAYER_HURT_WINDOW;
             audio_play(&app->audio, AUDIO_PLAYER_HURT);
             LOG_INFO("arrow hit: %d strike(s) %.1f damage (HP %.1f)", pev.player_hits,

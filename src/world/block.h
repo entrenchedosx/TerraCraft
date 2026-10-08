@@ -59,7 +59,7 @@ typedef struct BlockInfo {
     float color_r, color_g, color_b; /* Placeholder base color (0..1). */
     float hardness;   /* MC hardness (break time derives in survival_mine_time). */
     int tool;         /* Preferred tool (0 none, 1 pickaxe, 2 axe, 3 shovel). */
-    int min_tier;     /* Minimum tier for full tool speed (0..2). */
+    int min_tier;     /* Minimum tier for full tool speed (0..4). */
     uint16_t drop;    /* Dropped ItemId (0 = none). */
     uint8_t drop_count; /* Dropped count (>= 1 when drop != 0). */
     bool unbreakable; /* True: survival mining never finishes (bedrock). */

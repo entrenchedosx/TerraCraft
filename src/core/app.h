@@ -120,7 +120,7 @@ typedef struct AppContext {
     Streamer streamer;    /* Streaming state (borrows world). */
     Player player;        /* Physical player body + inventory. */
     TimeSystem clock;     /* Day/night cycle state. */
-    SimulationClock simulation; /* Authoritative world tick scheduler (20 TPS). */
+    SimulationClock simulation; /* Authoritative world tick scheduler (60 TPS). */
     bool discard_next_simulation_elapsed; /* Drop wall time spanning a frozen-to-live transition. */
     EntityPool entities;  /* Dropped-item entities (bounded pool). */
     MobPool mobs;         /* Living mobs (bounded pool, M8). */

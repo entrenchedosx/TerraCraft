@@ -367,3 +367,40 @@ int test_esave_transient(void)
     esave_cleanup(dir);
     return failures;
 }
+
+/* Test: pool-full merge fallback preserves every item (mob/mining path).
+ *
+ * Returns: failure count.
+ */
+int test_entity_merge_fallback(void)
+{
+    int failures = 0;
+    EntityPool pool;
+    entity_pool_clear(&pool);
+    /* Fill the pool: slot 0 holds a partial coal stack near the origin,
+     * the rest hold full stone stacks far away. */
+    ItemStack partial = {ITEM_COAL, 60, 0};
+    TEST_ASSERT(entity_spawn(&pool, mmath_vec3(0.0f, 64.0f, 0.0f), &partial) == 0);
+    ItemStack filler = {(ItemId)BLOCK_STONE, 64, 0};
+    for (int i = 1; i < ENTITY_MAX; ++i) {
+        TEST_ASSERT(entity_spawn(&pool, mmath_vec3(100.0f, 64.0f, 100.0f), &filler) == i);
+    }
+    TEST_ASSERT(entity_active_count(&pool) == ENTITY_MAX);
+    /* Direct spawn fails (pool full); the merge fallback folds 4 coal
+     * into the partial stack (60 -> 64) with nothing left over. */
+    ItemStack loot = {ITEM_COAL, 4, 0};
+    TEST_ASSERT(entity_spawn(&pool, mmath_vec3(1.0f, 64.0f, 0.0f), &loot) < 0);
+    TEST_ASSERT(entity_try_merge(&pool, &loot, mmath_vec3(1.0f, 64.0f, 0.0f), 4.0f) == 4);
+    TEST_ASSERT(stack_is_empty(&loot));
+    TEST_ASSERT(pool.items[0].stack.count == 64);
+    /* Overflow past max stays in the source (never deleted). */
+    ItemStack more = {ITEM_COAL, 10, 0};
+    TEST_ASSERT(entity_try_merge(&pool, &more, mmath_vec3(0.0f, 64.0f, 0.0f), 4.0f) == 0);
+    TEST_ASSERT(more.count == 10);
+    /* Wrong item and bad args merge nothing. */
+    ItemStack wrong = {ITEM_STICK, 5, 0};
+    TEST_ASSERT(entity_try_merge(&pool, &wrong, mmath_vec3(0.0f, 64.0f, 0.0f), 4.0f) == 0);
+    TEST_ASSERT(entity_try_merge(&pool, &wrong, mmath_vec3(0.0f, 64.0f, 0.0f), 0.0f) == 0);
+    TEST_ASSERT(entity_try_merge(NULL, &wrong, mmath_vec3(0.0f, 64.0f, 0.0f), 4.0f) == 0);
+    return failures;
+}

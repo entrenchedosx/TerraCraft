@@ -63,6 +63,7 @@ int main(void)
     RUN_TEST(test_physics_water_step_up);
     RUN_TEST(test_physics_water_fall_cushion);
     RUN_TEST(test_physics_spawn);
+    RUN_TEST(test_physics_step_up_and_eject);
     RUN_TEST(test_interaction_break_place);
     RUN_TEST(test_raycast_down);
     RUN_TEST(test_raycast_wall);
@@ -143,6 +144,7 @@ int main(void)
     RUN_TEST(test_esave_corrupt);
     RUN_TEST(test_esave_missing);
     RUN_TEST(test_esave_transient);
+    RUN_TEST(test_entity_merge_fallback);
     RUN_TEST(test_recipe_registry);
     RUN_TEST(test_recipe_shapeless);
     RUN_TEST(test_recipe_shaped);

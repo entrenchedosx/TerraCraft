@@ -111,6 +111,7 @@ int test_physics_water_contact(void);
 int test_physics_water_step_up(void);
 int test_physics_water_fall_cushion(void);
 int test_physics_spawn(void);
+int test_physics_step_up_and_eject(void);
 int test_interaction_break_place(void);
 
 /* Raycast tests (defined in test_raycast.c). */
@@ -214,6 +215,7 @@ int test_entity_drop_stack(void);
 int test_esave_corrupt(void);
 int test_esave_missing(void);
 int test_esave_transient(void);
+int test_entity_merge_fallback(void);
 
 /* Crafting/durability/food tests (defined in test_craft.c). */
 int test_recipe_registry(void);

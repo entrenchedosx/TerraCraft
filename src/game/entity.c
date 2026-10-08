@@ -53,6 +53,30 @@ int entity_spawn(EntityPool *pool, Vec3 pos, const ItemStack *stack)
     return -1;
 }
 
+/* Merge a stack into a nearby same-item entity (pool-full fallback). */
+uint16_t entity_try_merge(EntityPool *pool, ItemStack *stack, Vec3 pos, float radius)
+{
+    if (pool == NULL || stack == NULL || stack_is_empty(stack) || radius <= 0.0f) {
+        return 0;
+    }
+    uint16_t merged = 0;
+    float r2 = radius * radius;
+    for (int i = 0; i < ENTITY_MAX && !stack_is_empty(stack); ++i) {
+        ItemEntity *e = &pool->items[i];
+        if (!e->active) {
+            continue;
+        }
+        float dx = e->pos.x - pos.x;
+        float dy = e->pos.y - pos.y;
+        float dz = e->pos.z - pos.z;
+        if (dx * dx + dy * dy + dz * dz > r2) {
+            continue;
+        }
+        merged = (uint16_t)(merged + stack_add(&e->stack, stack));
+    }
+    return merged;
+}
+
 /* Count active entities. */
 int entity_active_count(const EntityPool *pool)
 {
