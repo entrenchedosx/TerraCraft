@@ -382,6 +382,7 @@ static void app_poll_move_input(PlayerInput *in)
     in->jump = false;
     in->sneak = false;
     in->sprint = false;
+    in->auto_jump = false;
     if (window_is_key_down(SDL_SCANCODE_W)) {
         in->fwd += 1.0f;
     }
@@ -2489,6 +2490,7 @@ static void app_tick_playing(AppContext *app, float dt)
     PlayerInput in;
     if (controllable) {
         app_poll_move_input(&in);
+        in.auto_jump = app->settings.auto_jump;
         /* Preserve a quick jump tap until one simulation tick can consume it. */
         in.jump = in.jump || window_take_key_pressed(app->window, SDL_SCANCODE_SPACE);
     } else {
@@ -2881,6 +2883,22 @@ static void app_position_camera(AppContext *app)
 {
     Vec3 eye = player_eye_pos(&app->player);
     if (!app->third_person) {
+        /* Gentle first-person view bob (MC viewBobbing, default ON):
+         * distance-driven from walk_phase via player_view_bob_offset,
+         * independent of the hand controller. Lateral rides camera-right,
+         * vertical is a downward dip. Gameplay rays still start at the
+         * unbobbled eye (pure presentation). */
+        if (app->settings.view_bobbing) {
+            float lat = 0.0f;
+            float vert = 0.0f;
+            player_view_bob_offset(&app->player, &lat, &vert);
+            if (lat != 0.0f || vert != 0.0f) {
+                float cy = app->player.yaw;
+                Vec3 right = mmath_vec3(cosf(cy), 0.0f, -sinf(cy));
+                eye = mmath_vec3_add(eye, mmath_vec3_scale(right, lat));
+                eye.y += vert;
+            }
+        }
         camera_set_position(app->camera, eye);
     } else {
         HitResult back = raycast_from_eye(eye, app->player.yaw + MMATH_PI, -app->player.pitch,

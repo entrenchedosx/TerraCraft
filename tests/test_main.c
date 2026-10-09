@@ -70,6 +70,11 @@ int main(void)
     RUN_TEST(test_physics_water_fall_cushion);
     RUN_TEST(test_physics_spawn);
     RUN_TEST(test_physics_step_up_and_eject);
+    RUN_TEST(test_physics_auto_jump_off);
+    RUN_TEST(test_physics_sneak_edge);
+    RUN_TEST(test_physics_sneak_posture);
+    RUN_TEST(test_physics_sneak_edge_corner);
+    RUN_TEST(test_player_view_bob);
     RUN_TEST(test_interaction_break_place);
     RUN_TEST(test_raycast_down);
     RUN_TEST(test_raycast_wall);

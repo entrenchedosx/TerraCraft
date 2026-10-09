@@ -20,6 +20,8 @@ typedef struct Settings {
     float sensitivity;   /* Mouse rad/px 0.0005..0.010 (default 0.0025). */
     float fov;           /* Vertical FOV degrees 60..110 (default 70). */
     bool vsync;          /* Swap interval on/off (default true). */
+    bool auto_jump;      /* Auto-step 1-block ledges/shores (MC autoJump, default false). */
+    bool view_bobbing;   /* First-person walk bob (MC viewBobbing, default true). */
     int volume;          /* Master 0..100 (default 80). */
     int sfx_volume;      /* Effects 0..100, M7 (default 80; old files omit). */
     char pack[SETTINGS_PACK_LEN]; /* Active resource pack ("Default"). */

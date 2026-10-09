@@ -94,6 +94,7 @@ void player_init(Player *p)
     p->fall_peak = -1.0f;
     p->last_fall = -1.0f;
     p->walk_phase = 0.0f;
+    p->bob_amp = 0.0f;
     p->mine_active = false;
     p->mine_bx = 0;
     p->mine_by = 0;
@@ -281,6 +282,44 @@ bool player_eye_in_water(const World *w, const Player *p)
     return block_is_water(id);
 }
 
+bool player_can_stand(const Player *p, const World *w)
+{
+    if (p == NULL) {
+        return false;
+    }
+    if (w == NULL) {
+        return true;
+    }
+    if (!isfinite(p->pos.x) || !isfinite(p->pos.y) || !isfinite(p->pos.z) || !(p->width > 0.0f)) {
+        return false;
+    }
+    float hw = p->width * 0.5f;
+    Vec3 mn = mmath_vec3(p->pos.x - hw, p->pos.y, p->pos.z - hw);
+    Vec3 mx = mmath_vec3(p->pos.x + hw, p->pos.y + PLAYER_STAND_HEIGHT, p->pos.z + hw);
+    return !player_aabb_solid(w, mn, mx);
+}
+
+void player_view_bob_offset(const Player *p, float *out_lateral, float *out_vertical)
+{
+    float lat = 0.0f;
+    float vert = 0.0f;
+    if (p != NULL && isfinite(p->walk_phase) && isfinite(p->bob_amp) && p->bob_amp > 0.0f) {
+        float amp = p->bob_amp;
+        if (amp < 0.0f) {
+            amp = 0.0f;
+        }
+        lat = sinf(p->walk_phase) * amp * 0.5f;
+        float c = cosf(p->walk_phase) * amp;
+        vert = -(c < 0.0f ? -c : c);
+    }
+    if (out_lateral != NULL) {
+        *out_lateral = lat;
+    }
+    if (out_vertical != NULL) {
+        *out_vertical = vert;
+    }
+}
+
 /* Dry step-up: walking into a single-block ledge while grounded climbs it
  * instead of grinding. The candidate position is up one PLUS the blocked
  * horizontal motion applied: only a real 1-high obstacle ahead accepts the
@@ -379,6 +418,32 @@ static void player_resolve_axis(Player *p, World *w, int axis, float delta, bool
     }
 }
 
+/* Support test for sneak edge protection (MC Entity.moveEntity clip):
+ * true when any solid block overlaps the 1-block slab directly under the
+ * footprint, so a ledge with no ground beneath reads as unsupported.
+ * Standing exactly on a block top counts (epsilon shrink is max-side only).
+ */
+static bool player_has_support(const Player *p, const World *w)
+{
+    float hw = p->width * 0.5f;
+    Vec3 mn = mmath_vec3(p->pos.x - hw, p->pos.y - 1.0f, p->pos.z - hw);
+    Vec3 mx = mmath_vec3(p->pos.x + hw, p->pos.y, p->pos.z + hw);
+    return player_aabb_solid(w, mn, mx);
+}
+
+/* Support test at an arbitrary feet position (for pre-move corner checks).
+ * Uses the player's width; y is the feet Y. */
+static bool player_has_support_at(const Player *p, const World *w, float x, float y, float z)
+{
+    if (p == NULL) {
+        return false;
+    }
+    float hw = p->width * 0.5f;
+    Vec3 mn = mmath_vec3(x - hw, y - 1.0f, z - hw);
+    Vec3 mx = mmath_vec3(x + hw, y, z + hw);
+    return player_aabb_solid(w, mn, mx);
+}
+
 /* Single fixed physics step.
  *
  * Args:
@@ -391,13 +456,37 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     float fwd = in ? in->fwd : 0.0f;
     float strafe = in ? in->strafe : 0.0f;
     bool jump = in ? in->jump : false;
-    bool sneak = in ? in->sneak : false;
+    bool sneak_in = in ? in->sneak : false;
     bool sprint = in ? in->sprint : false;
+    bool auto_jump = in ? in->auto_jump : false;
     const float dt = PLAYER_STEP_DT;
+
+    /* Pose first (feet stay, head shrinks/grows): sneak forces the 1.5 /
+     * 1.27 crouch; releasing sneak stands only with headroom, otherwise
+     * the crouch persists (forced). Flying never crouches (sneak is
+     * fly-down there). Camera rides eye_height via player_eye_pos. */
+    if (p->flying) {
+        p->sneaking = false;
+        p->height = PLAYER_STAND_HEIGHT;
+        p->eye_height = PLAYER_STAND_EYE;
+    } else if (sneak_in) {
+        p->sneaking = true;
+        p->height = PLAYER_SNEAK_HEIGHT;
+        p->eye_height = PLAYER_SNEAK_EYE;
+    } else if (player_can_stand(p, w)) {
+        p->sneaking = false;
+        p->height = PLAYER_STAND_HEIGHT;
+        p->eye_height = PLAYER_STAND_EYE;
+    } else {
+        p->sneaking = true;
+        p->height = PLAYER_SNEAK_HEIGHT;
+        p->eye_height = PLAYER_SNEAK_EYE;
+    }
+    bool sneak = p->sneaking;
+
     float water_contact = player_water_contact(w, p);
 
     p->sprinting = sprint && !sneak;
-    p->sneaking = sneak && !p->flying;
 
     if (p->flying) {
         /* Creative no-clip flight: direct velocity, no gravity/collision. */
@@ -406,7 +495,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         if (jump) {
             vy += 1.0f;
         }
-        if (sneak) {
+        if (sneak_in) {
             vy -= 1.0f;
         }
         p->vel = mmath_vec3_add(mmath_vec3_scale(wish, p->fly_speed), mmath_vec3(0.0f, vy * p->fly_speed, 0.0f));
@@ -415,6 +504,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         p->grounded = false;
         p->fall_peak = -1.0f; /* Flight never counts as falling. */
         p->last_fall = -1.0f;
+        p->bob_amp += (0.0f - p->bob_amp) * PLAYER_BOB_LERP;
         return;
     }
 
@@ -474,19 +564,51 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     }
 
     /* Axis-separated move + collide: X, then Z, then Y. */
+    bool was_grounded = p->grounded;
     p->grounded = false;
     float dx = p->vel.x * dt;
     float dz = p->vel.z * dt;
     float dy = p->vel.y * dt;
     float pre_x = p->pos.x;
     float pre_z = p->pos.z;
+    /* Diagonal corner-cut guard (MC Entity.moveEntity third loop): when
+     * both single-axis destinations are supported but the combined
+     * diagonal hangs over the void (outer L-corner), cancel both so the
+     * corner needs axis-aligned steps. Single-axis slides (narrow ledge
+     * along X, sideways Z unsupported) still pass through to the per-axis
+     * clips below. Tested at intended positions; walls do not count as
+     * support (slab is y-1..y only). */
+    if (sneak && was_grounded && dx != 0.0f && dz != 0.0f) {
+        bool x_only = player_has_support_at(p, w, pre_x + dx, p->pos.y, pre_z);
+        bool z_only = player_has_support_at(p, w, pre_x, p->pos.y, pre_z + dz);
+        bool both = player_has_support_at(p, w, pre_x + dx, p->pos.y, pre_z + dz);
+        if (x_only && z_only && !both) {
+            dx = 0.0f;
+            dz = 0.0f;
+            p->vel.x = 0.0f;
+            p->vel.z = 0.0f;
+        }
+    }
     p->pos.x += dx;
     player_resolve_axis(p, w, 0, dx, false);
+    /* Sneak edge protection (MC Entity.moveEntity clip: grounded +
+     * sneaking clips the move where the 1-below slab has no support,
+     * per axis). Stairs still descend: the lower step is inside the
+     * 1-below slab, so it counts. */
+    if (sneak && was_grounded && dx != 0.0f && !player_has_support(p, w)) {
+        p->pos.x = pre_x;
+        p->vel.x = 0.0f;
+    }
     p->pos.z += dz;
     player_resolve_axis(p, w, 2, dz, false);
+    if (sneak && was_grounded && dz != 0.0f && !player_has_support(p, w)) {
+        p->pos.z = pre_z;
+        p->vel.z = 0.0f;
+    }
     /* Dry step-up: grounded, pushing a ledge, barely moving -> climb one
-     * block instead of grinding. Sneak never steps up (ledge safety). */
-    if (water_contact <= 0.0f && !sneak && mmath_vec3_length_sq(wish) > 1e-8f) {
+     * block instead of grinding. Sneak never steps up (ledge safety).
+     * Gated on the autoJump setting (MC default off). */
+    if (auto_jump && water_contact <= 0.0f && !sneak && mmath_vec3_length_sq(wish) > 1e-8f) {
         float moved = fabsf(p->pos.x - pre_x) + fabsf(p->pos.z - pre_z);
         float wanted = fabsf(dx) + fabsf(dz);
         if (wanted > 1e-6f && moved < wanted * 0.25f) {
@@ -496,8 +618,8 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     /* Shore clamber: swimming into a bank while partially immersed steps
      * up one block instead of grinding against it. Gated on stalled
      * horizontal motion with live input so open-water swimming never
-     * climbs. */
-    if (water_contact > 0.15f && water_contact < 0.75f &&
+     * climbs. Also gated on autoJump, like the dry step-up. */
+    if (auto_jump && water_contact > 0.15f && water_contact < 0.75f &&
         mmath_vec3_length_sq(wish) > 1e-8f) {
         float hs = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
         if (hs < 0.05f) {
@@ -509,6 +631,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
 
     /* Fall tracking: peak while airborne, distance sampled on landing. */
     float hspeed = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
+    float bob_target = 0.0f;
     if (p->grounded) {
         if (p->fall_peak >= 0.0f) {
             p->last_fall = p->fall_peak - p->pos.y;
@@ -520,6 +643,11 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         /* Stride phase for third-person limb swing (same cadence as mobs:
          * distance-paced, so the swing matches ground speed at any rate). */
         p->walk_phase += hspeed * dt * 4.0f;
+        /* View-bob amplitude chases locomotion (Java cameraYaw): full
+         * while striding on ground, calmer while sneaking, silent still. */
+        if (hspeed > 0.5f) {
+            bob_target = sneak ? PLAYER_BOB_AMP_SNEAK : PLAYER_BOB_AMP_WALK;
+        }
     } else {
         if (p->fall_peak < p->pos.y) {
             p->fall_peak = p->pos.y;
@@ -530,6 +658,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
             p->walk_phase += hspeed * dt * 6.0f;
         }
     }
+    p->bob_amp += (bob_target - p->bob_amp) * PLAYER_BOB_LERP;
 }
 
 /* Advance the player with fixed substeps.

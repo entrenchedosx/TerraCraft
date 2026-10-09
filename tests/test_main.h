@@ -118,6 +118,11 @@ int test_physics_water_step_up(void);
 int test_physics_water_fall_cushion(void);
 int test_physics_spawn(void);
 int test_physics_step_up_and_eject(void);
+int test_physics_auto_jump_off(void);
+int test_physics_sneak_edge(void);
+int test_physics_sneak_posture(void);
+int test_physics_sneak_edge_corner(void);
+int test_player_view_bob(void);
 int test_interaction_break_place(void);
 
 /* Raycast tests (defined in test_raycast.c). */

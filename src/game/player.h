@@ -26,6 +26,24 @@ typedef struct World World;
 #define PLAYER_STEP_DT (1.0f / 60.0f)
 #define PLAYER_MAX_STEPS 5
 
+/* Body dimensions (blocks): standing vs crouched (Java 26.3 reference:
+ * standing 0.6x1.8 eye 1.62; crouched 0.6x1.5 eye ~1.27). The crouch pose
+ * only changes collision where fractional headroom exists (future slabs);
+ * with full unit cubes both poses need the same two free cells, but the
+ * dimensions and eye stay exact for the camera and future geometry. */
+#define PLAYER_STAND_HEIGHT 1.8f
+#define PLAYER_SNEAK_HEIGHT 1.5f
+#define PLAYER_STAND_EYE 1.62f
+#define PLAYER_SNEAK_EYE 1.27f
+
+/* View-bob smoothing: per-physics-step lerp of the bob amplitude toward
+ * its target (grounded + moving ? 0.1 walk / 0.05 sneak : 0). Matches the
+ * Java cameraYaw approach (0.4 per 20 TPS tick ~= 0.16 per 60 Hz step;
+ * 0.2 is used for a slightly snappier settle). */
+#define PLAYER_BOB_LERP 0.2f
+#define PLAYER_BOB_AMP_WALK 0.1f
+#define PLAYER_BOB_AMP_SNEAK 0.05f
+
 /* Per-frame input snapshot consumed by player_update. */
 typedef struct PlayerInput {
     float fwd;    /* Forward input -1..1 (W positive). */
@@ -33,6 +51,7 @@ typedef struct PlayerInput {
     bool jump;    /* Jump / fly-up held. */
     bool sneak;   /* Sneak / fly-down held. */
     bool sprint;  /* Sprint held. */
+    bool auto_jump; /* Auto-step 1-block ledges (MC autoJump, default off). */
 } PlayerInput;
 
 /* Player entity: body state, dimensions, tuning, inventory, survival.
@@ -83,6 +102,7 @@ typedef struct Player {
     float fall_peak;    /* Highest feet Y while airborne (<0 = none). */
     float last_fall;    /* Fall distance of the last landing (<0 = none). */
     float walk_phase;   /* Stride phase for limb swing (distance-paced). */
+    float bob_amp;      /* Smoothed view-bob amplitude (0 still .. 0.1 walk). */
     bool mine_active;   /* Survival mining in progress. */
     int mine_bx, mine_by, mine_bz; /* Mining target cell. */
     uint16_t mine_block; /* Block ID at target when started. */
@@ -163,6 +183,31 @@ float player_water_contact(const World *w, const Player *p);
  *   p: player (NULL reads as false).
  */
 bool player_eye_in_water(const World *w, const Player *p);
+
+/* True when a standing (1.8-block) body at the player's current feet
+ * fits without solid overlap (headroom to stand up from a crouch).
+ * NULL world reads as roomy; NULL player reads as no room.
+ *
+ * Args:
+ *   p: player.
+ *   w: world.
+ *
+ * Returns: true when the standing box is free.
+ */
+bool player_can_stand(const Player *p, const World *w);
+
+/* Distance-driven first-person bob scalars from the stride clock.
+ * lateral = sin(walk_phase) * amp * 0.5 (camera-right),
+ * vertical = -|cos(walk_phase) * amp| (always a downward dip, double
+ * frequency like the Java setupViewBobbing translate). Zero amplitude
+ * reads as zero offset regardless of phase, so stopping settles cleanly.
+ * Pure math, headless-testable; gameplay (raycast) never reads this.
+ *
+ * Args:
+ *   p: player (NULL reads as zero).
+ *   out_lateral/out_vertical: receivers (each may be NULL).
+ */
+void player_view_bob_offset(const Player *p, float *out_lateral, float *out_vertical);
 
 /* Apply a knockback impulse with the same caps mobs use (horizontal
  * speed <= 12, upward <= 6) so chained hits cannot launch the player.

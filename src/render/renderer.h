@@ -246,7 +246,8 @@ void renderer_draw_particles(Renderer *r, const ParticlePool *pool, const Camera
  *   cam: camera (must not be NULL).
  *   aspect: viewport width/height (> 0).
  *   ts: time of day (may be NULL for fixed noon lighting).
- *   anim_time: seconds for idle motion (any epoch).
+ *   anim_time: seconds for motion (any epoch; reserved, currently unused —
+ *     locomotion is distance-paced per mob).
  *   out_drawn/out_culled: receive per-mob counts (each may be NULL).
  */
 void renderer_draw_mobs(Renderer *r, const MobPool *pool, const Camera *cam, float aspect,

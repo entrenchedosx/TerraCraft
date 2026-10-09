@@ -1149,6 +1149,28 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     }
     y += 52.0f;
 
+    /* Auto-Jump toggle (MC default OFF: 1-block ledges need a jump). */
+    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
+                       "Auto-Jump");
+    char autojump_label[32];
+    snprintf(autojump_label, sizeof(autojump_label), "%s", app->settings.auto_jump ? "ON" : "OFF");
+    if (sbutton(app, ui, rects, &rn, fx + sw + 12.0f, y - 6.0f, 118.0f, 36.0f, autojump_label, true)) {
+        app->settings.auto_jump = !app->settings.auto_jump;
+        settings_save(&app->settings, SETTINGS_PATH);
+    }
+    y += 52.0f;
+
+    /* View Bobbing toggle (MC default ON: gentle first-person walk bob). */
+    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
+                       "View Bobbing");
+    char bobbing_label[32];
+    snprintf(bobbing_label, sizeof(bobbing_label), "%s", app->settings.view_bobbing ? "ON" : "OFF");
+    if (sbutton(app, ui, rects, &rn, fx + sw + 12.0f, y - 6.0f, 118.0f, 36.0f, bobbing_label, true)) {
+        app->settings.view_bobbing = !app->settings.view_bobbing;
+        settings_save(&app->settings, SETTINGS_PATH);
+    }
+    y += 52.0f;
+
     /* Pack cycle: "<" + name + ">" (immediate atlas reload on change). */
     renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
                        "Resource Pack");

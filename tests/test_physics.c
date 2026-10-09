@@ -41,6 +41,9 @@ static World *make_floor_world(void)
     return w;
 }
 
+/* Pool world builder (defined below; forward declaration for earlier tests). */
+static World *make_pool_world(void);
+
 /* Empty input snapshot. */
 static PlayerInput no_input(void)
 {
@@ -50,6 +53,7 @@ static PlayerInput no_input(void)
     in.jump = false;
     in.sneak = false;
     in.sprint = false;
+    in.auto_jump = false;
     return in;
 }
 
@@ -299,6 +303,7 @@ int test_physics_step_up_and_eject(void)
     p.yaw = -1.5707963f; /* Face +X (wish dir convention: yaw -pi/2). */
     PlayerInput in = no_input();
     in.fwd = 1.0f;
+    in.auto_jump = true;
     for (int i = 0; i < 60; ++i) {
         player_update(&p, &in, w, PLAYER_STEP_DT);
     }
@@ -333,6 +338,139 @@ int test_physics_step_up_and_eject(void)
     Vec3 out = mmath_vec3(0.0f, 0.0f, 0.0f);
     TEST_ASSERT(player_find_spawn(w, 8, 8, &out) == false);
     world_destroy(w);
+    return failures;
+}
+
+/* Test: autoJump OFF (MC default) disables both step-ups: a 1-block
+ * ledge blocks dry walking, and a shore blocks swimming out.
+ *
+ * Returns: failure count.
+ */
+int test_physics_auto_jump_off(void)
+{
+    int failures = 0;
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    TEST_ASSERT(world_set_block(w, 10, 65, 8, BLOCK_STONE));
+    TEST_ASSERT(world_set_block(w, 11, 65, 8, BLOCK_STONE));
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    p.yaw = -1.5707963f; /* Face +X. */
+    PlayerInput in = no_input();
+    in.fwd = 1.0f;
+    in.auto_jump = false;
+    for (int i = 0; i < 120; ++i) {
+        player_update(&p, &in, w, PLAYER_STEP_DT);
+    }
+    /* Still on the floor level, held at the ledge (never climbed). */
+    TEST_ASSERT(p.pos.y < 65.5f);
+    TEST_ASSERT(p.pos.x < 10.0f);
+    world_destroy(w);
+
+    /* Shore clamber is gated too: swimming into the bank stalls. */
+    World *pool = make_pool_world();
+    TEST_ASSERT(pool != NULL);
+    if (pool == NULL) {
+        return failures + 1;
+    }
+    Player s;
+    player_init(&s);
+    s.pos = mmath_vec3(6.5f, 63.0f, 8.5f);
+    s.yaw = -1.5707963f;
+    PlayerInput swim = no_input();
+    swim.fwd = 1.0f;
+    swim.auto_jump = false;
+    for (int i = 0; i < 120; ++i) {
+        player_update(&s, &swim, pool, 1.0f / 60.0f);
+    }
+    TEST_ASSERT(s.pos.y < 63.5f);
+    TEST_ASSERT(player_water_contact(pool, &s) > 0.0f);
+    world_destroy(pool);
+    return failures;
+}
+
+/* Test: sneaking stops at a cliff edge (MC edge protection) while a
+ * non-sneaking control walks off and falls in. A 1-block drop also holds:
+ * this matches the traced 1.5-era reference (Entity.moveEntity clips X/Z
+ * where the 1-below slab has no support; descent needs unsneak or a jump).
+ *
+ * Returns: failure count.
+ */
+int test_physics_sneak_edge(void)
+{
+    int failures = 0;
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    /* Pit x8..15 (floor top 63, walls 2 high): carve y63..64 to air. */
+    for (int x = 8; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            TEST_ASSERT(world_set_block(w, x, 63, z, BLOCK_AIR));
+            TEST_ASSERT(world_set_block(w, x, 64, z, BLOCK_AIR));
+        }
+    }
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(6.5f, 65.0f, 8.5f);
+    p.yaw = -1.5707963f; /* Face +X (toward the pit). */
+    PlayerInput in = no_input();
+    in.fwd = 1.0f;
+    in.sneak = true;
+    for (int i = 0; i < 240; ++i) {
+        player_update(&p, &in, w, PLAYER_STEP_DT);
+    }
+    /* Held on the top level at the edge, standing, never fell in. */
+    TEST_ASSERT(p.pos.y > 64.5f);
+    TEST_ASSERT_FLOAT_EQ(p.pos.y, 65.0f, 0.05f);
+    TEST_ASSERT(p.pos.x < 8.5f);
+    TEST_ASSERT(p.grounded == true);
+
+    /* Control: same walk without sneak leaves the top level. */
+    Player c;
+    player_init(&c);
+    c.pos = mmath_vec3(6.5f, 65.0f, 8.5f);
+    c.yaw = -1.5707963f;
+    PlayerInput walk = no_input();
+    walk.fwd = 1.0f;
+    for (int i = 0; i < 240; ++i) {
+        player_update(&c, &walk, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(c.pos.x > 8.0f);
+    TEST_ASSERT(c.pos.y < 64.5f);
+    world_destroy(w);
+
+    /* Single 1-block drop while sneaking: holds the top edge (documented
+     * 1.5-era semantics; release sneak or jump to descend). */
+    World *step = make_floor_world();
+    TEST_ASSERT(step != NULL);
+    if (step == NULL) {
+        return failures + 1;
+    }
+    for (int x = 8; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            TEST_ASSERT(world_set_block(step, x, 64, z, BLOCK_AIR));
+        }
+    }
+    Player d;
+    player_init(&d);
+    d.pos = mmath_vec3(6.5f, 65.0f, 8.5f);
+    d.yaw = -1.5707963f;
+    PlayerInput creep = no_input();
+    creep.fwd = 1.0f;
+    creep.sneak = true;
+    for (int i = 0; i < 240; ++i) {
+        player_update(&d, &creep, step, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT_FLOAT_EQ(d.pos.y, 65.0f, 0.05f);
+    TEST_ASSERT(d.pos.x < 8.5f);
+    TEST_ASSERT(d.grounded == true);
+    world_destroy(step);
     return failures;
 }
 
@@ -588,6 +726,7 @@ int test_physics_water_step_up(void)
     p.yaw = -1.5707963f; /* Face +X (toward the x=8 shore). */
     PlayerInput in = no_input();
     in.fwd = 1.0f;
+    in.auto_jump = true;
     bool climbed = false;
     for (int i = 0; i < 120; ++i) {
         player_update(&p, &in, w, 1.0f / 60.0f);
@@ -642,6 +781,292 @@ int test_physics_water_fall_cushion(void)
     TEST_ASSERT(p.grounded == true);
     TEST_ASSERT(p.last_fall > 9.0f);
     TEST_ASSERT_FLOAT_EQ(player_water_contact(w, &p), 0.0f, 1e-6f);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: sneak posture uses crouched dimensions (1.5 / eye 1.27), restores
+ * standing (1.8 / 1.62) on release, and stays crouched without headroom
+ * (forced). Fractional headroom proves the 0.3 difference with full cubes.
+ *
+ * Returns: failure count.
+ */
+int test_physics_sneak_posture(void)
+{
+    int failures = 0;
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    p.render_pos = p.pos;
+    PlayerInput in = no_input();
+    player_update(&p, &in, w, PLAYER_STEP_DT);
+    TEST_ASSERT(p.sneaking == false);
+    TEST_ASSERT_FLOAT_EQ(p.height, PLAYER_STAND_HEIGHT, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(p.eye_height, PLAYER_STAND_EYE, 1e-6f);
+    TEST_ASSERT(player_can_stand(&p, w) == true);
+    TEST_ASSERT_FLOAT_EQ(p.pos.y + p.eye_height, 65.0f + PLAYER_STAND_EYE, 0.05f);
+
+    /* Crouch: dimensions shrink, eye follows. */
+    PlayerInput creep = no_input();
+    creep.sneak = true;
+    player_update(&p, &creep, w, PLAYER_STEP_DT);
+    TEST_ASSERT(p.sneaking == true);
+    TEST_ASSERT_FLOAT_EQ(p.height, PLAYER_SNEAK_HEIGHT, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(p.eye_height, PLAYER_SNEAK_EYE, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(p.pos.y + p.eye_height, p.pos.y + PLAYER_SNEAK_EYE, 1e-5f);
+
+    /* Release: standing restores. */
+    player_update(&p, &in, w, PLAYER_STEP_DT);
+    TEST_ASSERT(p.sneaking == false);
+    TEST_ASSERT_FLOAT_EQ(p.height, PLAYER_STAND_HEIGHT, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(p.eye_height, PLAYER_STAND_EYE, 1e-6f);
+
+    /* Forced crouch uses fractional headroom (full cubes need it): feet
+     * at 65.4 with a ceiling block at 67 leaves crouched top 66.9 free
+     * but standing top 67.2 colliding. Crouch first, add the ceiling,
+     * release sneak: the pose persists until headroom returns. */
+    p.pos = mmath_vec3(8.5f, 65.4f, 8.5f);
+    p.render_pos = p.pos;
+    p.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
+    p.grounded = false;
+    player_update(&p, &creep, w, PLAYER_STEP_DT);
+    TEST_ASSERT(p.sneaking == true);
+    TEST_ASSERT(world_set_block(w, 8, 67, 8, BLOCK_STONE));
+    p.pos.y = 65.4f;
+    p.render_pos = p.pos;
+    player_update(&p, &in, w, PLAYER_STEP_DT);
+    TEST_ASSERT(p.sneaking == true);
+    TEST_ASSERT_FLOAT_EQ(p.height, PLAYER_SNEAK_HEIGHT, 1e-6f);
+    p.pos.y = 65.4f;
+    TEST_ASSERT(player_can_stand(&p, w) == false);
+    TEST_ASSERT(world_set_block(w, 8, 67, 8, BLOCK_AIR));
+    player_update(&p, &in, w, PLAYER_STEP_DT);
+    TEST_ASSERT(p.sneaking == false);
+    TEST_ASSERT(player_can_stand(&p, w) == true);
+
+    /* Fractional headroom direct: same 65.4/67 pair blocks standing. */
+    TEST_ASSERT(world_set_block(w, 8, 67, 8, BLOCK_STONE));
+    p.pos = mmath_vec3(8.5f, 65.4f, 8.5f);
+    TEST_ASSERT(player_can_stand(&p, w) == false);
+    p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    TEST_ASSERT(player_can_stand(&p, w) == true);
+    TEST_ASSERT(world_set_block(w, 8, 67, 8, BLOCK_AIR));
+
+    /* Bad args: NULL player never stands, NULL world reads roomy. */
+    TEST_ASSERT(player_can_stand(NULL, w) == false);
+    TEST_ASSERT(player_can_stand(&p, NULL) == true);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: sneak edge corner-cut guard and narrow-ledge behavior.
+ * Outer L-corner (void quadrant x>=8,z>=8): diagonal sneak holds instead
+ * of cutting the corner (MC third clip loop). Narrow 1-wide bridge along
+ * X at z=8: walking its length advances, sideways sneak holds, sideways
+ * walk falls.
+ *
+ * Returns: failure count.
+ */
+int test_physics_sneak_edge_corner(void)
+{
+    int failures = 0;
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    /* Void quadrant x 8..15, z 8..15, y 63..64 (2 deep). */
+    for (int x = 8; x < 16; ++x) {
+        for (int z = 8; z < 16; ++z) {
+            TEST_ASSERT(world_set_block(w, x, 63, z, BLOCK_AIR));
+            TEST_ASSERT(world_set_block(w, x, 64, z, BLOCK_AIR));
+        }
+    }
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(7.5f, 65.0f, 7.5f);
+    p.yaw = 0.0f; /* fwd -Z, right +X: fwd -1 + strafe +1 = +X+Z diagonal. */
+    PlayerInput diag = no_input();
+    diag.fwd = -1.0f;
+    diag.strafe = 1.0f;
+    diag.sneak = true;
+    for (int i = 0; i < 240; ++i) {
+        player_update(&p, &diag, w, PLAYER_STEP_DT);
+    }
+    /* Held before the void, never fell, corner not cut. */
+    TEST_ASSERT(p.grounded == true);
+    TEST_ASSERT(p.pos.y > 64.5f);
+    TEST_ASSERT(p.pos.x < 8.5f);
+    TEST_ASSERT(p.pos.z < 8.5f);
+    world_destroy(w);
+
+    /* Narrow bridge: keep only the z=8 row solid, void both sides. */
+    World *narrow = make_floor_world();
+    TEST_ASSERT(narrow != NULL);
+    if (narrow == NULL) {
+        return failures + 1;
+    }
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            if (z == 8) {
+                continue;
+            }
+            TEST_ASSERT(world_set_block(narrow, x, 63, z, BLOCK_AIR));
+            TEST_ASSERT(world_set_block(narrow, x, 64, z, BLOCK_AIR));
+        }
+    }
+    /* Along the bridge while sneaking: advances, stays centered. */
+    Player q;
+    player_init(&q);
+    q.pos = mmath_vec3(4.5f, 65.0f, 8.5f);
+    q.yaw = -1.5707963f; /* Face +X. */
+    PlayerInput along = no_input();
+    along.fwd = 1.0f;
+    along.sneak = true;
+    for (int i = 0; i < 120; ++i) {
+        player_update(&q, &along, narrow, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(q.pos.x > 5.0f);
+    TEST_ASSERT_FLOAT_EQ(q.pos.y, 65.0f, 0.05f);
+    TEST_ASSERT(q.grounded == true);
+    TEST_ASSERT(q.pos.z > 8.0f && q.pos.z < 9.0f);
+
+    /* Sideways off the bridge while sneaking: holds the edge. */
+    Player s;
+    player_init(&s);
+    s.pos = mmath_vec3(4.5f, 65.0f, 8.5f);
+    s.yaw = 0.0f; /* Face -Z (toward z decreasing, off the bridge). */
+    PlayerInput side = no_input();
+    side.fwd = 1.0f;
+    side.sneak = true;
+    for (int i = 0; i < 240; ++i) {
+        player_update(&s, &side, narrow, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(s.pos.y > 64.5f);
+    TEST_ASSERT_FLOAT_EQ(s.pos.y, 65.0f, 0.05f);
+    TEST_ASSERT(s.grounded == true);
+    TEST_ASSERT(s.pos.z > 7.5f);
+
+    /* Control: same sideways walk without sneak falls off. */
+    Player c;
+    player_init(&c);
+    c.pos = mmath_vec3(4.5f, 65.0f, 8.5f);
+    c.yaw = 0.0f;
+    PlayerInput walk = no_input();
+    walk.fwd = 1.0f;
+    for (int i = 0; i < 240; ++i) {
+        player_update(&c, &walk, narrow, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(c.pos.z < 8.0f);
+    TEST_ASSERT(c.pos.y < 64.5f);
+    world_destroy(narrow);
+    return failures;
+}
+
+/* Test: distance-driven view bob (MC viewBobbing, default ON).
+ * Offset derives from walk_phase/bob_amp only (no wall clock): zero amp
+ * reads zero, known phases give exact lateral/vertical, walking builds
+ * amplitude (sneak calmer), stopping/flying decays to still.
+ *
+ * Returns: failure count.
+ */
+int test_player_view_bob(void)
+{
+    int failures = 0;
+    Player p;
+    player_init(&p);
+    TEST_ASSERT_FLOAT_EQ(p.bob_amp, 0.0f, 1e-6f);
+    float lat = 99.0f;
+    float vert = 99.0f;
+    player_view_bob_offset(&p, &lat, &vert);
+    TEST_ASSERT_FLOAT_EQ(lat, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(vert, 0.0f, 1e-6f);
+
+    /* Exact phases at full walk amplitude. */
+    p.walk_phase = 0.0f;
+    p.bob_amp = PLAYER_BOB_AMP_WALK;
+    player_view_bob_offset(&p, &lat, &vert);
+    TEST_ASSERT_FLOAT_EQ(lat, 0.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(vert, -PLAYER_BOB_AMP_WALK, 1e-5f);
+    p.walk_phase = 1.5707963f; /* pi/2: full lateral, zero dip. */
+    player_view_bob_offset(&p, &lat, &vert);
+    TEST_ASSERT_FLOAT_EQ(lat, PLAYER_BOB_AMP_WALK * 0.5f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(vert, 0.0f, 1e-4f);
+
+    /* Zero amplitude always reads zero, any phase. */
+    p.walk_phase = 2.3f;
+    p.bob_amp = 0.0f;
+    player_view_bob_offset(&p, &lat, &vert);
+    TEST_ASSERT_FLOAT_EQ(lat, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(vert, 0.0f, 1e-6f);
+    player_view_bob_offset(NULL, &lat, &vert);
+    TEST_ASSERT_FLOAT_EQ(lat, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(vert, 0.0f, 1e-6f);
+
+    /* Walking builds the stride clock and amplitude; stopping settles.
+     * Walk 60 steps (1 s, ~4.3 blocks) to stay inside the 16-wide floor. */
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player m;
+    player_init(&m);
+    m.pos = mmath_vec3(4.5f, 65.0f, 8.5f);
+    m.render_pos = m.pos;
+    m.yaw = -1.5707963f;
+    PlayerInput walk = no_input();
+    walk.fwd = 1.0f;
+    for (int i = 0; i < 60; ++i) {
+        player_update(&m, &walk, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(m.grounded == true);
+    TEST_ASSERT(m.walk_phase > 1.0f);
+    TEST_ASSERT(m.bob_amp > 0.05f && m.bob_amp <= PLAYER_BOB_AMP_WALK + 1e-5f);
+    player_view_bob_offset(&m, &lat, &vert);
+    TEST_ASSERT(fabsf(lat) <= PLAYER_BOB_AMP_WALK * 0.5f + 1e-5f);
+    TEST_ASSERT(vert <= 1e-6f && vert >= -PLAYER_BOB_AMP_WALK - 1e-5f);
+
+    /* Sneak strides calmer (0.05 target, below the walk level). */
+    Player sne;
+    player_init(&sne);
+    sne.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    sne.yaw = -1.5707963f;
+    PlayerInput creep = no_input();
+    creep.fwd = 1.0f;
+    creep.sneak = true;
+    for (int i = 0; i < 120; ++i) {
+        player_update(&sne, &creep, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(sne.bob_amp > 0.01f && sne.bob_amp <= PLAYER_BOB_AMP_SNEAK + 1e-4f);
+    TEST_ASSERT(sne.bob_amp < m.bob_amp);
+
+    /* Stillness decays to zero (no frozen offset). */
+    PlayerInput still = no_input();
+    for (int i = 0; i < 120; ++i) {
+        player_update(&m, &still, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(m.bob_amp < 0.01f);
+    player_view_bob_offset(&m, &lat, &vert);
+    TEST_ASSERT_FLOAT_EQ(lat, 0.0f, 0.01f);
+    TEST_ASSERT_FLOAT_EQ(vert, 0.0f, 0.01f);
+
+    /* Flight never bobs. */
+    Player f;
+    player_init(&f);
+    f.flying = true;
+    f.pos = mmath_vec3(8.5f, 70.0f, 8.5f);
+    PlayerInput fly = no_input();
+    fly.fwd = 1.0f;
+    for (int i = 0; i < 60; ++i) {
+        player_update(&f, &fly, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT_FLOAT_EQ(f.bob_amp, 0.0f, 1e-5f);
     world_destroy(w);
     return failures;
 }

@@ -416,6 +416,9 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4
                              float anim_time, int model_filter, const MobSkin *skin, size_t o,
                              int *drawn, int *culled)
 {
+    /* Locomotion reads each mob's own walk_phase (distance-paced); there is
+     * no global idle sine, so stationary mobs stand still like the reference. */
+    (void)anim_time;
     for (int i = 0; i < MOB_MAX; ++i) {
         const Mob *m = &pool->mobs[i];
         if (!m->active) {
@@ -449,7 +452,7 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4
          * cow's long torso/muzzle and the skeleton's arms). Enclose the full
          * articulated model around its smoothed render position so visible
          * geometry never disappears at a frustum edge. Small padding covers
-         * hurt shake, idle bob, and the corpse sink. */
+         * hurt shake and the corpse sink. */
         float model_radius = m->width * 0.5f;
         float model_min_y = 0.0f;
         float model_max_y = m->height;
@@ -486,9 +489,8 @@ static size_t mob_emit_batch(Renderer *r, const MobPool *pool, float planes[6][4
             death_tilt = k * 1.5707963f;
             sink = m->dead_t < 0.6f ? m->dead_t * 0.3f : 0.18f;
         }
-        float idle_bob = sinf(anim_time * 2.0f + (float)i) * 0.02f;
         Vec3 base = mmath_vec3(m->render_pos.x + hurt_shake,
-                               m->render_pos.y - sink + (m->grounded ? idle_bob : 0.0f),
+                               m->render_pos.y - sink,
                                m->render_pos.z);
         /* Stride blend: full swing underfoot, stagger through HURT,
          * frozen rest once dead (no mid-stride corpses). */

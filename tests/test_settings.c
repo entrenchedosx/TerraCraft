@@ -20,6 +20,8 @@ int test_settings_defaults(void)
     TEST_ASSERT_FLOAT_EQ(s.sensitivity, 0.0025f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(s.fov, 70.0f, 1e-5f);
     TEST_ASSERT(s.vsync == true);
+    TEST_ASSERT(s.auto_jump == false);
+    TEST_ASSERT(s.view_bobbing == true);
     TEST_ASSERT(s.volume == 80);
     TEST_ASSERT(s.sfx_volume == 80);
     TEST_ASSERT(strcmp(s.pack, "Default") == 0);
@@ -61,7 +63,7 @@ int test_settings_parse(void)
         return failures + 1;
     }
     fprintf(f, "# comment\nrender_distance=6\nsensitivity=0.005\nfov=90\nvsync=0\nvolume=42\n");
-    fprintf(f, "sfx_volume=33\n");
+    fprintf(f, "sfx_volume=33\nauto_jump=1\nview_bobbing=0\n");
     fprintf(f, "pack=My Pack\nevil_key=1\ngarbage without equals\n");
     fclose(f);
 
@@ -71,6 +73,8 @@ int test_settings_parse(void)
     TEST_ASSERT_FLOAT_EQ(s.sensitivity, 0.005f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(s.fov, 90.0f, 1e-4f);
     TEST_ASSERT(s.vsync == false);
+    TEST_ASSERT(s.auto_jump == true);
+    TEST_ASSERT(s.view_bobbing == false);
     TEST_ASSERT(s.volume == 42);
     TEST_ASSERT(s.sfx_volume == 33);
     TEST_ASSERT(strcmp(s.pack, "My Pack") == 0);
@@ -87,6 +91,8 @@ int test_settings_parse(void)
     TEST_ASSERT(settings_load(&s, path) == 0);
     TEST_ASSERT(s.volume == 42);
     TEST_ASSERT(s.sfx_volume == 80);
+    TEST_ASSERT(s.auto_jump == false); /* Pre-autoJump files keep the default. */
+    TEST_ASSERT(s.view_bobbing == true); /* Pre-bobbing files keep default ON. */
     remove(path);
 
     /* Missing file keeps defaults with an error code. */
@@ -110,6 +116,8 @@ int test_settings_roundtrip(void)
     s.sensitivity = 0.008f;
     s.fov = 100.0f;
     s.vsync = false;
+    s.auto_jump = true;
+    s.view_bobbing = false;
     s.volume = 11;
     s.sfx_volume = 22;
     memcpy(s.pack, "Retro", 6);
@@ -122,6 +130,8 @@ int test_settings_roundtrip(void)
     TEST_ASSERT_FLOAT_EQ(back.sensitivity, 0.008f, 1e-6f);
     TEST_ASSERT_FLOAT_EQ(back.fov, 100.0f, 1e-4f);
     TEST_ASSERT(back.vsync == false);
+    TEST_ASSERT(back.auto_jump == true);
+    TEST_ASSERT(back.view_bobbing == false);
     TEST_ASSERT(back.volume == 11);
     TEST_ASSERT(back.sfx_volume == 22);
     TEST_ASSERT(strcmp(back.pack, "Retro") == 0);

@@ -39,6 +39,8 @@ void settings_defaults(Settings *s)
     s->sensitivity = 0.0025f;
     s->fov = 70.0f;
     s->vsync = true;
+    s->auto_jump = false;
+    s->view_bobbing = true;
     s->volume = 80;
     s->sfx_volume = 80;
     memset(s->pack, 0, sizeof(s->pack));
@@ -117,6 +119,10 @@ int settings_load(Settings *s, const char *path)
             s->fov = strtof(val, NULL);
         } else if (strcmp(key, "vsync") == 0) {
             s->vsync = !(strcmp(val, "0") == 0 || strcmp(val, "false") == 0 || strcmp(val, "off") == 0);
+        } else if (strcmp(key, "auto_jump") == 0) {
+            s->auto_jump = !(strcmp(val, "0") == 0 || strcmp(val, "false") == 0 || strcmp(val, "off") == 0);
+        } else if (strcmp(key, "view_bobbing") == 0) {
+            s->view_bobbing = !(strcmp(val, "0") == 0 || strcmp(val, "false") == 0 || strcmp(val, "off") == 0);
         } else if (strcmp(key, "volume") == 0) {
             s->volume = (int)strtol(val, NULL, 10);
         } else if (strcmp(key, "sfx_volume") == 0) {
@@ -182,6 +188,8 @@ int settings_save(const Settings *s, const char *path)
     fprintf(f, "sensitivity=%.6f\n", (double)s->sensitivity);
     fprintf(f, "fov=%.2f\n", (double)s->fov);
     fprintf(f, "vsync=%d\n", s->vsync ? 1 : 0);
+    fprintf(f, "auto_jump=%d\n", s->auto_jump ? 1 : 0);
+    fprintf(f, "view_bobbing=%d\n", s->view_bobbing ? 1 : 0);
     fprintf(f, "volume=%d\n", s->volume);
     fprintf(f, "sfx_volume=%d\n", s->sfx_volume);
     fprintf(f, "pack=%s\n", s->pack);

@@ -14,8 +14,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* Total time from the start of a punch to its resting pose. */
-#define PLAYER_SWING_DURATION 0.42f
+/* Total time from the start of a punch to its resting pose.
+ * 0.30 s = 6 simulation ticks at 20 TPS, matching the Java Edition arm
+ * swing (EntityLiving.getArmSwingAnimationEnd() == 6 ticks, verified
+ * against the vendored Eaglercraft reference). */
+#define PLAYER_SWING_DURATION 0.30f
 
 /* One-shot durations (seconds of simulation time). */
 #define PLAYER_ANIM_LAND_DURATION 0.25f

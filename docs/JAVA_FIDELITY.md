@@ -50,9 +50,13 @@ and rendering all affect what a player observes.
 - Player physics subdivides each authoritative world tick into smaller
   collision steps; those steps do not replace the 60 TPS world scheduler.
 - Standing body dimensions are 0.6×1.8 blocks and eye height is 1.62
-  (`player_init()` in `src/game/player.c`). Sneaking changes the speed and
-  flag only. There are no crouch/swim/crawl dimensions or headroom checks.
-  Water detection samples the standing collision body; movement slows in
+  (`player_init()` in `src/game/player.c`). Sneaking switches to 0.6×1.5
+  with eye 1.27 (`PLAYER_SNEAK_HEIGHT/EYE`); releasing sneak stands only
+  when `player_can_stand()` finds headroom for 1.8, otherwise the crouch
+  persists (forced). With full unit cubes both poses need the same two
+  free cells at integer feet; the 0.3 difference matters at fractional
+  headroom (e.g. feet 65.4 vs ceiling 67) and for future partial blocks.
+  Water detection samples the current collision body; movement slows in
   water and jump/sneak add upward/downward buoyancy, but it does not switch
   to Minecraft's swimming pose or compact collision shape.
 - Walk and sprint speed values match the reference targets. The controller
@@ -63,11 +67,17 @@ and rendering all affect what a player observes.
 - Jump velocity is 8.8 blocks/s and gravity is 32 blocks/s². The continuous
   ballistic apex from those values is about 1.21 blocks; the simulation
   uses discrete 1/60 s steps.
-- Collision separates X, Z, and Y and slides along walls. Automatic
-  player step-up and edge-safe sneak are not implemented.
-- The camera follows the current player eye and rotation. It has no
-  simulation-position interpolation, sprint FOV response, or implemented
-  view bob.
+- Collision separates X, Z, and Y and slides along walls. Sneak edge
+  protection clips per-axis moves with no 1-below support plus a diagonal
+  corner-cut guard (`player_has_support`, `player_has_support_at` in
+  `src/game/player.c`, traced from 1.5-era `Entity.moveEntity`). Automatic
+  player step-up for dry ledges/shores is gated on `auto_jump` (default
+  OFF).
+- The camera follows the current player eye and rotation, plus gentle
+  distance-driven first-person bob from `walk_phase`/`bob_amp`
+  (`player_view_bob_offset`, `app_position_camera` in `src/core/app.c`,
+  `view_bobbing` default ON). It has no simulation-position interpolation
+  or sprint FOV response.
 
 ### Targeting, mining, and placing
 
@@ -208,8 +218,9 @@ and rendering all affect what a player observes.
    every frame; render positions track the sim exactly (no smoothing
    lag). Discrete toggles and hotbar changes still process after
    each event drain rather than inside a world tick.
-2. Direct-velocity movement, no player pose geometry, and no edge-safe
-   sneaking or step-up behavior.
+2. Direct-velocity movement, no acceleration/friction model; sneak posture,
+   headroom, edge protection (per-axis + corner guard), and view bobbing
+   are implemented, step-up remains gated on `auto_jump`.
 3. Hunger has no saturation, and sprint hunger gating is absent.
 4. Lighting has no propagated sky/block channels. Fluid timing and player
    buoyancy are simplified, and underwater breathing/drowning are absent.
