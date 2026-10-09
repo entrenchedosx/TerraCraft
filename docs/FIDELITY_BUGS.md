@@ -25,10 +25,16 @@ alone.
 - **Fix:** Pack paths now use a separate intermediate buffer, discovery uses
   the same checked path helper, and changing the selected pack reloads the
   atlas immediately. The static mapping and BMP checks remain intact.
+  The converter also missed 12 newer stems (gravel, sandstone, deepslate,
+  copper/lapis/redstone/emerald ores, tuff, granite, raw iron/copper, lava),
+  which silently stayed procedural; those mappings are added and the
+  generated set is complete at 73/73 tiles.
 - **Tests added:** `test_atlas_resource_pack_paths` verifies the pack path,
   discovery, and application of a tile with an item icon index. The existing
   `test_item_texture_mapping` covers all 32 registered items and fallback
-  pixels.
+  pixels. `test_atlas_mcassets_coverage` asserts every engine tile stem
+  loads from `mcassets/generated/tiles` when owner assets are present
+  (passes trivially without them, e.g. CI).
 - **Human verified?:** No. The custom-pack cause is fixed, but the user's
   affected item, screen path, and active pack are still unknown; visual
   confirmation is needed before closing the report.

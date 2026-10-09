@@ -56,6 +56,7 @@ int main(void)
     RUN_TEST(test_atlas_mcfaces);
     RUN_TEST(test_atlas_apply_dir);
     RUN_TEST(test_atlas_resource_pack_paths);
+    RUN_TEST(test_atlas_mcassets_coverage);
     RUN_TEST(test_hashmap_basic);
     RUN_TEST(test_world_gen_chunk);
     RUN_TEST(test_streamer_load_unload);

@@ -100,6 +100,18 @@ TILES = {
     "crack2": "block/destroy_stage_4.png",
     "crack3": "block/destroy_stage_6.png",
     "crack4": "block/destroy_stage_8.png",
+    "gravel": "block/gravel.png",
+    "sandstone": "block/sandstone.png",
+    "deepslate": "block/deepslate.png",
+    "copper_ore": "block/copper_ore.png",
+    "lapis_ore": "block/lapis_ore.png",
+    "redstone_ore": "block/redstone_ore.png",
+    "emerald_ore": "block/emerald_ore.png",
+    "tuff": "block/tuff.png",
+    "granite": "block/granite.png",
+    "raw_iron": "block/raw_iron_block.png",
+    "raw_copper": "block/raw_copper_block.png",
+    "lava": "block/lava_still.png",
 }
 
 # Mob skins: generated name -> (source, keep-native-size). Skins keep

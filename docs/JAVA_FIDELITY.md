@@ -202,7 +202,7 @@ and rendering all affect what a player observes.
   Survival spawns the replaced decor's usual drop.
 - Item registry-to-atlas mapping and nonempty procedural fallback pixels
   now have explicit test coverage.
-- Resource-pack documentation now lists all 46 current tile names and the
+- Resource-pack documentation now lists all 73 current tile names and the
   current sound event stems.
 - A fixed 60 TPS simulation clock now drives the world and logs dropped
   catch-up ticks; inventory/workbench continue world simulation while pause

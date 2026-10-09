@@ -1,5 +1,6 @@
 #include "test_main.h"
 
+#include "core/bmp.h"
 #include "core/path.h"
 #include "render/texture_atlas.h"
 #include "world/block.h"
@@ -348,5 +349,55 @@ int test_atlas_resource_pack_paths(void)
     path_remove_dir(tiles_dir);
     path_remove_dir(pack_dir);
     path_remove_dir(root);
+    return failures;
+}
+
+/* Test: owner-converted tiles cover every engine tile stem when present.
+ *
+ * On machines with mcassets/generated/tiles (owner-local, never on CI),
+ * every stem from texture_atlas_tile_file() must load as a 16x16 tile so
+ * the converter and the engine stay in sync (missing stems silently keep
+ * procedural art). Without the directory the test passes trivially.
+ *
+ * Returns: failure count.
+ */
+int test_atlas_mcassets_coverage(void)
+{
+    int failures = 0;
+    /* Prefer the source tree (fresh after a converter run) over the
+     * exe-relative copy (refreshed only when the game target rebuilds). */
+    char dir[PATH_MAX_LEN];
+    if (path_is_dir("mcassets/generated/tiles")) {
+        if (path_join(dir, sizeof(dir), "mcassets/generated", "tiles") != 0) {
+            return failures;
+        }
+    } else if (path_mcassets_dir(dir, sizeof(dir), "generated/tiles") != 0 || !path_is_dir(dir)) {
+        return failures; /* No owner assets here: fallbacks cover it. */
+    }
+    int count = texture_atlas_tile_file_count();
+    TEST_ASSERT(count > 0);
+    for (int t = 0; t < count; ++t) {
+        const char *stem = texture_atlas_tile_file(t);
+        TEST_ASSERT(stem != NULL && stem[0] != '\0');
+        if (stem == NULL || stem[0] == '\0') {
+            continue;
+        }
+        char leaf[96];
+        int n = snprintf(leaf, sizeof(leaf), "%s.bmp", stem);
+        if (n <= 0 || (size_t)n >= sizeof(leaf)) {
+            TEST_ASSERT(0);
+            continue;
+        }
+        char file[PATH_MAX_LEN];
+        TEST_ASSERT(path_join(file, sizeof(file), dir, leaf) == 0);
+        BmpImage img;
+        img.px = NULL;
+        if (bmp_load_file(file, &img) != 0 || img.px == NULL) {
+            TEST_ASSERT(0);
+            continue;
+        }
+        TEST_ASSERT(bmp_is_tile(&img) == true);
+        bmp_free(&img);
+    }
     return failures;
 }

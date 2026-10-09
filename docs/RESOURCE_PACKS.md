@@ -60,22 +60,29 @@ owner-local layer.
 
 ### Texture tiles
 
-The current atlas exposes 51 named tiles. Each tile is a 16×16 BMP; files
+The current atlas exposes 73 named tiles. Each tile is a 16×16 BMP; files
 may be omitted individually.
 
 ```text
-grass_top.bmp       grass_side.bmp      dirt.bmp             stone.bmp
-sand.bmp            wood.bmp            leaves.bmp           glass.bmp
-water.bmp           bedrock.bmp         coal_ore.bmp         iron_ore.bmp
-gold_ore.bmp        diamond_ore.bmp     snow.bmp             grass_bottom.bmp
-plant.bmp           flower.bmp          torch.bmp            tool_pickaxe.bmp
-tool_axe.bmp        tool_shovel.bmp     coal.bmp             crack0.bmp
-crack1.bmp          crack2.bmp          crack3.bmp            crack4.bmp
-workbench.bmp       planks.bmp          apple.bmp            stick.bmp
-wood_top.bmp        workbench_top.bmp  workbench_side.bmp   wood_pickaxe.bmp
-stone_pickaxe.bmp   wood_axe.bmp        stone_axe.bmp        wood_shovel.bmp
-stone_shovel.bmp    bow.bmp             arrow.bmp             bone.bmp
-beef.bmp            leather.bmp           wood_sword.bmp       stone_sword.bmp
+grass_top.bmp     grass_side.bmp    dirt.bmp           stone.bmp
+sand.bmp          wood.bmp          leaves.bmp         glass.bmp
+water.bmp         bedrock.bmp       coal_ore.bmp       iron_ore.bmp
+gold_ore.bmp      diamond_ore.bmp   snow.bmp           grass_bottom.bmp
+plant.bmp         flower.bmp        torch.bmp          tool_pickaxe.bmp
+tool_axe.bmp      tool_shovel.bmp   coal.bmp           crack0.bmp
+crack1.bmp        crack2.bmp        crack3.bmp         crack4.bmp
+workbench.bmp     planks.bmp        apple.bmp          stick.bmp
+wood_top.bmp      workbench_top.bmp workbench_side.bmp wood_pickaxe.bmp
+stone_pickaxe.bmp wood_axe.bmp      stone_axe.bmp      wood_shovel.bmp
+stone_shovel.bmp  bow.bmp           arrow.bmp          bone.bmp
+beef.bmp          leather.bmp       player_skin.bmp    player_sleeve.bmp
+flesh.bmp         wood_sword.bmp    stone_sword.bmp    iron_ingot.bmp
+diamond.bmp       iron_pickaxe.bmp  iron_axe.bmp       iron_shovel.bmp
+diamond_pickaxe.bmp diamond_axe.bmp diamond_shovel.bmp iron_sword.bmp
+diamond_sword.bmp gravel.bmp        sandstone.bmp      deepslate.bmp
+copper_ore.bmp    lapis_ore.bmp     redstone_ore.bmp   emerald_ore.bmp
+tuff.bmp          granite.bmp       raw_iron.bmp       raw_copper.bmp
+lava.bmp
 ```
 
 The source of truth for names and item mappings is

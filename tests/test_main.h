@@ -308,3 +308,4 @@ int test_lan_discover_scan(void);
 int test_atlas_mcfaces(void);
 int test_atlas_apply_dir(void);
 int test_atlas_resource_pack_paths(void);
+int test_atlas_mcassets_coverage(void);
