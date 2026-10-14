@@ -920,8 +920,19 @@ static unsigned int renderer_load_menu_bitmap(const char *leaf, int expected_w, 
     minec_glTexImage2D((MinecGLenum)MINEC_GL_TEXTURE_2D, 0, (MinecGLint)MINEC_GL_RGBA,
                        (MinecGLsizei)image.width, (MinecGLsizei)image.height, 0,
                        (MinecGLenum)MINEC_GL_RGBA, (MinecGLenum)MINEC_GL_UNSIGNED_BYTE, image.px);
+    /* Menu panorama (linear) gets a full mipmap chain + trilinear min
+     * filtering: the drifted slice is magnified ~4-8x at 1080p, and
+     * without mipmaps minification shimmer reads as blockiness on large
+     * windows. Pixel-art font/atlas stay NEAREST (intended crispness). */
+    bool mipmapped = false;
+    if (linear && minec_glGenerateMipmap != NULL) {
+        minec_glGenerateMipmap((MinecGLenum)MINEC_GL_TEXTURE_2D);
+        mipmapped = true;
+    }
     minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_MIN_FILTER,
-                          (MinecGLint)(linear ? MINEC_GL_LINEAR : MINEC_GL_NEAREST));
+                          (MinecGLint)(linear ? (mipmapped ? MINEC_GL_LINEAR_MIPMAP_LINEAR
+                                                          : MINEC_GL_LINEAR)
+                                              : MINEC_GL_NEAREST));
     minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_MAG_FILTER,
                           (MinecGLint)(linear ? MINEC_GL_LINEAR : MINEC_GL_NEAREST));
     minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_WRAP_S,

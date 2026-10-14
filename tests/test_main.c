@@ -221,6 +221,19 @@ int main(void)
     RUN_TEST(test_lan_local_address_filter);
     RUN_TEST(test_lan_discover_codec);
     RUN_TEST(test_lan_discover_scan);
+    RUN_TEST(test_pvp_hit_in_range);
+    RUN_TEST(test_pvp_miss_beyond_range);
+    RUN_TEST(test_pvp_miss_wrong_direction);
+    RUN_TEST(test_pvp_sneak_hitbox);
+    RUN_TEST(test_pvp_validate_strike);
+    RUN_TEST(test_pvp_clamp_damage);
+    RUN_TEST(test_gamerules_defaults);
+    RUN_TEST(test_gamerules_keep_inventory);
+    RUN_TEST(test_gamerules_meta_roundtrip);
+    RUN_TEST(test_gamerules_meta_missing_defaults);
+    RUN_TEST(test_gamerules_session_create);
+    RUN_TEST(test_gamerules_lan_framing);
+    RUN_TEST(test_menu_background_granularity);
 
     printf("==============================\n");
     printf("Ran %d test(s), %d failed\n", g_tests_run, g_tests_failed);

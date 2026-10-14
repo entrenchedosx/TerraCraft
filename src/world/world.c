@@ -83,6 +83,7 @@ World *world_create(void)
     }
     w->name[0] = '\0';
     w->mode = 0; /* WORLD_MODE_SURVIVAL without pulling world_meta.h here. */
+    game_rules_defaults(&w->rules);
     if (hashmap_init(&w->chunk_map, WORLD_MAX_CHUNKS) != 0) {
         LOG_ERROR("world_create: chunk map init failed");
         free(w->falling_blocks);

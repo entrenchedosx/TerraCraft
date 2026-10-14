@@ -304,6 +304,23 @@ int test_lan_local_address_filter(void);
 int test_lan_discover_codec(void);
 int test_lan_discover_scan(void);
 
+/* PvP combat tests (defined in test_pvp.c). */
+int test_pvp_hit_in_range(void);
+int test_pvp_miss_beyond_range(void);
+int test_pvp_miss_wrong_direction(void);
+int test_pvp_sneak_hitbox(void);
+int test_pvp_validate_strike(void);
+int test_pvp_clamp_damage(void);
+
+/* Game-rule / cheats tests (defined in test_gamerules.c). */
+int test_gamerules_defaults(void);
+int test_gamerules_keep_inventory(void);
+int test_gamerules_meta_roundtrip(void);
+int test_gamerules_meta_missing_defaults(void);
+int test_gamerules_session_create(void);
+int test_gamerules_lan_framing(void);
+int test_menu_background_granularity(void);
+
 /* Atlas tile tests (defined in test_texture.c). */
 int test_atlas_mcfaces(void);
 int test_atlas_apply_dir(void);

@@ -6,6 +6,8 @@
  * format versions are rejected with a clear error, never migrated silently.
  */
 
+#include "game/game_rules.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -61,6 +63,7 @@ typedef struct WorldMeta {
      * load every tool at full durability. Values are clamped by
      * inv_sanitize on apply, never trusted blindly. */
     uint16_t inv_dur[WORLD_META_INV_SLOTS];
+    GameRules rules; /* World game rules / cheats (M9+ keys, defaults when absent). */
 } WorldMeta;
 
 /* Fill safe defaults (version current, name "World", survival, no player).

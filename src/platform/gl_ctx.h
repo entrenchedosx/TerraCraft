@@ -122,6 +122,7 @@ typedef unsigned char MinecGLubyte;
 #define MINEC_GL_TEXTURE_MAG_FILTER 0x2800u
 #define MINEC_GL_NEAREST 0x2600u
 #define MINEC_GL_LINEAR 0x2601u
+#define MINEC_GL_LINEAR_MIPMAP_LINEAR 0x2703u
 #define MINEC_GL_CLAMP_TO_EDGE 0x812Fu
 #define MINEC_GL_REPEAT 0x2901u
 #define MINEC_GL_TEXTURE_WRAP_S 0x2802u
@@ -169,6 +170,7 @@ typedef void (*MinecPFN_glTexImage2D)(MinecGLenum target, MinecGLint level, Mine
 typedef void (*MinecPFN_glTexParameteri)(MinecGLenum target, MinecGLenum pname, MinecGLint param);
 typedef void (*MinecPFN_glDeleteTextures)(MinecGLsizei n, const MinecGLuint *textures);
 typedef void (*MinecPFN_glActiveTexture)(MinecGLenum texture);
+typedef void (*MinecPFN_glGenerateMipmap)(MinecGLenum target);
 typedef void (*MinecPFN_glUniform1i)(MinecGLint location, MinecGLint v0);
 typedef void (*MinecPFN_glUniform1f)(MinecGLint location, MinecGLfloat v0);
 typedef void (*MinecPFN_glUniform3f)(MinecGLint location, MinecGLfloat v0, MinecGLfloat v1, MinecGLfloat v2);
@@ -207,6 +209,7 @@ extern MinecPFN_glTexImage2D minec_glTexImage2D;
 extern MinecPFN_glTexParameteri minec_glTexParameteri;
 extern MinecPFN_glDeleteTextures minec_glDeleteTextures;
 extern MinecPFN_glActiveTexture minec_glActiveTexture;
+extern MinecPFN_glGenerateMipmap minec_glGenerateMipmap;
 extern MinecPFN_glUniform1i minec_glUniform1i;
 extern MinecPFN_glUniform1f minec_glUniform1f;
 extern MinecPFN_glUniform3f minec_glUniform3f;

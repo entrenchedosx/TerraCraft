@@ -6,6 +6,8 @@
  * Everything here performs real filesystem I/O with validation — no fakes.
  */
 
+#include "game/game_rules.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -56,6 +58,23 @@ int session_list_worlds(const char *saves_root, WorldEntry *out, size_t cap);
  */
 int session_create_world(const char *saves_root, const char *name, const char *seed_field, int mode,
                          char out_dir[512]);
+
+/* Create a new world with explicit game rules (cheats section).
+ * Same semantics as session_create_world, plus the authoritative rules
+ * stored into world.meta. NULL rules read as defaults.
+ *
+ * Args:
+ *   saves_root: saves directory.
+ *   name: display name from the form (must not be NULL).
+ *   seed_field: raw seed text (blank generates one).
+ *   mode: WorldMode value.
+ *   rules: game rules to store (may be NULL for defaults).
+ *   out_dir: receives the world directory path (must not be NULL, 512+ B).
+ *
+ * Returns: 0 on success, non-zero on failure.
+ */
+int session_create_world_ex(const char *saves_root, const char *name, const char *seed_field, int mode,
+                            const GameRules *rules, char out_dir[512]);
 
 /* Open a world session: reads metadata, builds world/streamer/player/clock,
  * and primes the staged loader counters (caller enters LOADING next).

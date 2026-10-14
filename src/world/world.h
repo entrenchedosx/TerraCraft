@@ -9,6 +9,7 @@
  */
 
 #include "core/hashmap.h"
+#include "game/game_rules.h"
 #include "world/gravity.h"
 
 #include <stdbool.h>
@@ -68,6 +69,7 @@ typedef struct World {
     HashMap chunk_map;               /* Maps hashmap_chunk_key(cx,cz) -> Chunk*. */
     char name[WORLD_NAME_LEN];        /* Session display name. */
     int mode;                        /* Session game mode (WorldMode value). */
+    GameRules rules;                 /* Authoritative world game rules. */
     char save_dir[512];              /* World directory ("" = no persistence). */
     WorldBlockChangeCallback block_change_callback; /* Optional synchronous replication hook. */
     void *block_change_context;       /* Borrowed callback context. */

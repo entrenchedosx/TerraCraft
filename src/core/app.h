@@ -16,6 +16,7 @@
 #include "core/profile.h"
 #include "audio/audio.h"
 #include "game/entity.h"
+#include "game/game_rules.h"
 #include "game/mob.h"
 #include "game/particle.h"
 #include "game/projectile.h"
@@ -51,6 +52,18 @@ typedef struct LanRemotePlayer {
     float walk_phase;
     bool sneaking;
     bool moving;
+    /* PvP/health replication (host-authoritative damage, self-authoritative
+     * vitals relay). health tracks the last known value; has_health is
+     * false until the first HEALTH frame arrives. dead mirrors it.
+     * last_attack_seq is the last applied ATTACK sequence from this peer
+     * (duplicate/retransmit suppression on the host). */
+    float health;
+    bool dead;
+    bool has_health;
+    uint32_t last_attack_seq;
+    uint8_t held_slot;
+    uint16_t held_item;
+    bool has_held;
 } LanRemotePlayer;
 
 /* Default world seed when no session overrides it (legacy constant). */
@@ -84,6 +97,8 @@ typedef struct MenuData {
     char name_buf[64];      /* Create-world name field. */
     char seed_buf[32];      /* Create-world seed field. */
     int create_mode;        /* 0 survival, 1 creative. */
+    GameRules create_rules; /* Create-world cheats section scratch. */
+    bool create_show_rules; /* Cheats section expanded. */
     bool name_focused;      /* Text-field focus flags. */
     bool seed_focused;      /* Text-field focus flags. */
     char error[128];        /* Last menu error line ("" = none). */
@@ -150,6 +165,10 @@ typedef struct AppContext {
     uint32_t lan_local_player_id; /* Host is 0; clients receive an ID in WELCOME. */
     double lan_player_send_timer; /* Snapshot cadence for remote avatars. */
     double lan_connect_timer; /* Timeout for pending LAN joins. */
+    uint32_t lan_attack_seq;  /* Next outgoing PvP ATTACK sequence (>= 1). */
+    double lan_health_send_timer; /* Health snapshot cadence. */
+    float lan_last_sent_health; /* Last broadcast health (change detect). */
+    bool lan_last_sent_dead;  /* Last broadcast dead flag. */
     uint8_t lan_block_queue[MINEC_LAN_BLOCK_QUEUE][15]; /* Bounded reliable edit backlog. */
     size_t lan_block_queue_head;
     size_t lan_block_queue_count;

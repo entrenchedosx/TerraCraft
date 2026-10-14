@@ -6,12 +6,15 @@
 #include "core/time.h"
 #include "game/audio.h"
 #include "game/entity.h"
+#include "game/game_rules.h"
 #include "game/particle.h"
 #include "game/interaction.h"
 #include "game/inventory.h"
 #include "game/item.h"
+#include "game/mob.h"
 #include "game/player.h"
 #include "game/player_animation.h"
+#include "game/pvp.h"
 #include "game/raycast.h"
 #include "game/session.h"
 #include "game/survival.h"
@@ -418,6 +421,7 @@ static bool app_aim_mob(AppContext *app, EntityId *out_id);
 static bool app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock_power);
 static void app_start_arm_swing(AppContext *app);
 static bool app_try_attack(AppContext *app);
+static const GameRules *app_world_rules(const AppContext *app);
 static bool app_drop_stack_from_player(AppContext *app, ItemStack *stack, bool all);
 static void app_poll_cursor_drop(AppContext *app);
 static void app_debug_spawn_mob(AppContext *app, EntityType type);
@@ -484,8 +488,13 @@ static void app_poll_discrete_input(AppContext *app)
      * mob; F9/F10/F11 spawn cow/zombie/skeleton; F12 clears all arrows
      * (shift+F6 gives bow + arrows). */
 #ifndef NDEBUG
+    bool cheats_on = app_world_rules(app)->allow_cheats;
     bool f6_down = window_is_key_down(SDL_SCANCODE_F6);
     bool f6_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F6);
+    if (f6_pressed && !cheats_on) {
+        LOG_INFO("Dev give blocked: enable Allow Cheats for this world");
+        f6_pressed = false;
+    }
     if (f6_pressed) {
         bool shift = window_is_key_down(SDL_SCANCODE_LSHIFT) || window_is_key_down(SDL_SCANCODE_RSHIFT);
         if (shift) {
@@ -523,6 +532,10 @@ static void app_poll_discrete_input(AppContext *app)
     app->prev_f8_key = f8_down;
     bool f7_down = window_is_key_down(SDL_SCANCODE_F7);
     bool f7_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F7);
+    if (f7_pressed && !cheats_on) {
+        LOG_INFO("Dev mob hurt blocked: enable Allow Cheats for this world");
+        f7_pressed = false;
+    }
     if (f7_pressed) {
         EntityId eid = ENTITY_ID_NULL;
         if (app_aim_mob(app, &eid)) {
@@ -534,18 +547,30 @@ static void app_poll_discrete_input(AppContext *app)
     app->prev_f7_key = f7_down;
     bool f9_down = window_is_key_down(SDL_SCANCODE_F9);
     bool f9_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F9);
+    if (f9_pressed && !cheats_on) {
+        LOG_INFO("Dev spawn blocked: enable Allow Cheats for this world");
+        f9_pressed = false;
+    }
     if (f9_pressed) {
         app_debug_spawn_mob(app, ENTITY_COW);
     }
     app->prev_f9_key = f9_down;
     bool f10_down = window_is_key_down(SDL_SCANCODE_F10);
     bool f10_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F10);
+    if (f10_pressed && !cheats_on) {
+        LOG_INFO("Dev spawn blocked: enable Allow Cheats for this world");
+        f10_pressed = false;
+    }
     if (f10_pressed) {
         app_debug_spawn_mob(app, ENTITY_ZOMBIE);
     }
     app->prev_f10_key = f10_down;
     bool f11_down = window_is_key_down(SDL_SCANCODE_F11);
     bool f11_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F11);
+    if (f11_pressed && !cheats_on) {
+        LOG_INFO("Dev spawn blocked: enable Allow Cheats for this world");
+        f11_pressed = false;
+    }
     if (f11_pressed) {
         app_debug_spawn_mob(app, ENTITY_SKELETON);
     }
@@ -638,6 +663,12 @@ enum {
     APP_LAN_MSG_PLAYER_LEFT = 6,
     APP_LAN_MSG_GRAVITY_START = 7,
     APP_LAN_MSG_GRAVITY_LAND = 8,
+    APP_LAN_MSG_ATTACK = 9,  /* Client->host PvP strike request. */
+    APP_LAN_MSG_DAMAGE = 10, /* Host->all authoritative PvP damage. */
+    APP_LAN_MSG_HEALTH = 11, /* Peer self-health snapshot (host relays). */
+    APP_LAN_MSG_RESPAWN = 12, /* Peer respawn announcement (host relays). */
+    APP_LAN_MSG_RULES = 13,  /* Host->all world game rules. */
+    APP_LAN_MSG_HELD = 14,   /* Peer held-slot/item snapshot (host relays). */
     APP_LAN_PROTOCOL_VERSION = 3, /* Profile 4 and appended geological block registry. */
     APP_LAN_PORT = 25566,
     APP_CHAT_MAX_BYTES = 160
@@ -647,6 +678,14 @@ enum {
 #define APP_CHAT_HIDE_AFTER_SECONDS 5.0
 #define APP_CHAT_FADE_SECONDS 1.0
 #define APP_CHAT_RECENT_VISIBLE 6u
+
+/* Forward declarations for LAN replication helpers (defined below). */
+static bool app_lan_send_rules(AppContext *app, uint32_t target);
+static bool app_lan_send_health(AppContext *app, uint32_t target, uint32_t player_id, float health,
+                               bool dead);
+static bool app_lan_send_held(AppContext *app, uint32_t target, uint32_t player_id, uint8_t slot,
+                              uint16_t item);
+static bool app_lan_send_respawn(AppContext *app, uint32_t target, uint32_t player_id, Vec3 pos);
 
 static void app_net_write_u16(uint8_t *out, uint16_t value)
 {
@@ -826,6 +865,130 @@ static void app_lan_send_current_players(AppContext *app, uint32_t target)
                                       remote->walk_phase, remote->sneaking, remote->moving);
         }
     }
+    /* Late-join state: authoritative rules, host vitals, and every known
+     * peer's vitals + held item so the joiner converges immediately. */
+    (void)app_lan_send_rules(app, target);
+    (void)app_lan_send_health(app, target, app->lan_local_player_id, app->player.health,
+                              app->player.dead);
+    {
+        int sel = app->player.hotbar_sel >= 0 && app->player.hotbar_sel < 9 ? app->player.hotbar_sel : 0;
+        uint16_t held = 0;
+        if (sel >= 0 && sel < INV_SIZE) {
+            held = app->player.inv.slots[sel].item;
+        }
+        (void)app_lan_send_held(app, target, app->lan_local_player_id, (uint8_t)sel, held);
+    }
+    for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
+        const LanRemotePlayer *remote = &app->lan_players[i];
+        if (remote->active && remote->username[0] != '\0' && remote->has_health) {
+            (void)app_lan_send_health(app, target, remote->peer_id, remote->health, remote->dead);
+        }
+        if (remote->active && remote->username[0] != '\0') {
+            (void)app_lan_send_held(app, target, remote->peer_id, remote->held_slot,
+                                    remote->held_item);
+        }
+    }
+}
+
+/* Authoritative world rules (world-owned; defaults when no session). */
+static const GameRules *app_world_rules(const AppContext *app)
+{
+    static GameRules fallback;
+    static bool fallback_init = false;
+    if (!fallback_init) {
+        game_rules_defaults(&fallback);
+        fallback_init = true;
+    }
+    if (app != NULL && app->world_open && app->world != NULL) {
+        return &app->world->rules;
+    }
+    return &fallback;
+}
+
+/* Encode 7 rule bytes after the message type (shared by send/parse). */
+static void app_rules_write(uint8_t *out, const GameRules *rules)
+{
+    GameRules def;
+    game_rules_defaults(&def);
+    const GameRules *r = rules != NULL ? rules : &def;
+    out[0] = r->allow_cheats ? 1u : 0u;
+    out[1] = r->keep_inventory ? 1u : 0u;
+    out[2] = r->mob_spawning ? 1u : 0u;
+    out[3] = r->daylight_cycle ? 1u : 0u;
+    out[4] = r->natural_regen ? 1u : 0u;
+    out[5] = r->fall_damage ? 1u : 0u;
+    out[6] = r->pvp ? 1u : 0u;
+}
+
+static void app_rules_read(GameRules *out, const uint8_t *in)
+{
+    game_rules_defaults(out);
+    if (out == NULL || in == NULL) {
+        return;
+    }
+    out->allow_cheats = in[0] != 0;
+    out->keep_inventory = in[1] != 0;
+    out->mob_spawning = in[2] != 0;
+    out->daylight_cycle = in[3] != 0;
+    out->natural_regen = in[4] != 0;
+    out->fall_damage = in[5] != 0;
+    out->pvp = in[6] != 0;
+}
+
+static bool app_lan_send_rules(AppContext *app, uint32_t target)
+{
+    if (app == NULL || app->lan == NULL) {
+        return false;
+    }
+    uint8_t payload[8];
+    payload[0] = APP_LAN_MSG_RULES;
+    app_rules_write(payload + 1, app_world_rules(app));
+    return lan_send(app->lan, target, payload, sizeof(payload));
+}
+
+static bool app_lan_send_health(AppContext *app, uint32_t target, uint32_t player_id, float health,
+                               bool dead)
+{
+    if (app == NULL || app->lan == NULL) {
+        return false;
+    }
+    if (!(health >= 0.0f) || !(health <= 100.0f)) {
+        return false;
+    }
+    uint8_t payload[10];
+    payload[0] = APP_LAN_MSG_HEALTH;
+    app_net_write_u32(payload + 1, player_id);
+    app_net_write_f32(payload + 5, health);
+    payload[9] = dead ? 1u : 0u;
+    return lan_send(app->lan, target, payload, sizeof(payload));
+}
+
+static bool app_lan_send_held(AppContext *app, uint32_t target, uint32_t player_id, uint8_t slot,
+                              uint16_t item)
+{
+    if (app == NULL || app->lan == NULL || slot >= 9) {
+        return false;
+    }
+    uint8_t payload[8];
+    payload[0] = APP_LAN_MSG_HELD;
+    app_net_write_u32(payload + 1, player_id);
+    payload[5] = slot;
+    app_net_write_u16(payload + 6, item);
+    return lan_send(app->lan, target, payload, sizeof(payload));
+}
+
+static bool app_lan_send_respawn(AppContext *app, uint32_t target, uint32_t player_id, Vec3 pos)
+{
+    if (app == NULL || app->lan == NULL || !isfinite(pos.x) || !isfinite(pos.y) || !isfinite(pos.z)) {
+        return false;
+    }
+    uint8_t payload[17];
+    payload[0] = APP_LAN_MSG_RESPAWN;
+    app_net_write_u32(payload + 1, player_id);
+    app_net_write_f32(payload + 5, pos.x);
+    app_net_write_f32(payload + 9, pos.y);
+    app_net_write_f32(payload + 13, pos.z);
+    return lan_send(app->lan, target, payload, sizeof(payload));
 }
 
 static bool app_lan_send_welcome(AppContext *app, uint32_t peer_id)
@@ -952,6 +1115,10 @@ bool app_lan_host(AppContext *app)
     app->lan_local_player_id = 0;
     app->lan_player_send_timer = 0.0;
     app->lan_connect_timer = 0.0;
+    app->lan_attack_seq = 0;
+    app->lan_health_send_timer = 0.0;
+    app->lan_last_sent_health = -1.0f;
+    app->lan_last_sent_dead = false;
     app->lan_block_queue_head = 0;
     /* Best-effort beacons so joiners see this world without an IP. */
     lan_discover_destroy(app->lan_discover);
@@ -998,6 +1165,10 @@ bool app_lan_join_endpoint(AppContext *app, const char *address, uint16_t port)
     app->lan_local_player_id = 0;
     app->lan_player_send_timer = 0.0;
     app->lan_connect_timer = 0.0;
+    app->lan_attack_seq = 0;
+    app->lan_health_send_timer = 0.0;
+    app->lan_last_sent_health = -1.0f;
+    app->lan_last_sent_dead = false;
     app->lan_block_queue_head = 0;
     app->lan_block_queue_count = 0;
     app->lan_block_queue_warned = false;
@@ -1027,6 +1198,10 @@ void app_lan_disconnect(AppContext *app)
     app->lan_local_player_id = 0;
     app->lan_player_send_timer = 0.0;
     app->lan_connect_timer = 0.0;
+    app->lan_attack_seq = 0;
+    app->lan_health_send_timer = 0.0;
+    app->lan_last_sent_health = -1.0f;
+    app->lan_last_sent_dead = false;
     app->lan_block_queue_head = 0;
     app->lan_block_queue_count = 0;
     app->lan_block_queue_warned = false;
@@ -1307,6 +1482,314 @@ static bool app_lan_parse_player(AppContext *app, const LanEvent *event)
     return true;
 }
 
+/* --- PvP + replication handlers (host-authoritative damage/rules) --- */
+
+static void app_lan_handle_rules(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size != 8 || event->payload[0] != APP_LAN_MSG_RULES) {
+        return;
+    }
+    /* Only the host speaks rules; clients apply to their local copy.
+     * The host ignores RULES (it owns them). */
+    if (!app->lan_client || app->lan_host || event->peer_id != LAN_SERVER_PEER_ID) {
+        return;
+    }
+    if (!app->world_open || app->world == NULL) {
+        return;
+    }
+    GameRules r;
+    app_rules_read(&r, event->payload + 1);
+    app->world->rules = r;
+}
+
+static void app_lan_handle_health(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size != 10 || event->payload[0] != APP_LAN_MSG_HEALTH) {
+        return;
+    }
+    uint32_t pid = app_net_read_u32(event->payload + 1);
+    float health = app_net_read_f32(event->payload + 5);
+    bool dead = event->payload[9] != 0;
+    if (!(health >= 0.0f) || !(health <= 100.0f) || pid == app->lan_local_player_id) {
+        return;
+    }
+    if (app->lan_host) {
+        /* Bind to socket identity; ignore spoofed IDs. Clients only report
+         * themselves, so the sender must match the claimed ID. */
+        if (pid != event->peer_id) {
+            return;
+        }
+        LanRemotePlayer *remote = app_lan_find_player(app, pid, false);
+        if (remote == NULL) {
+            return;
+        }
+        remote->health = health;
+        remote->dead = dead;
+        remote->has_health = true;
+        /* Relay authoritative snapshot to everyone else. */
+        uint8_t out[10];
+        memcpy(out, event->payload, sizeof(out));
+        (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+    } else {
+        if (event->peer_id != LAN_SERVER_PEER_ID) {
+            return;
+        }
+        /* Never fabricate entries from health frames (stale/invalid IDs
+         * must not consume the bounded slot table); remotes are created
+         * by PLAYER snapshots. */
+        LanRemotePlayer *remote = app_lan_find_player(app, pid, false);
+        if (remote == NULL) {
+            return;
+        }
+        remote->health = health;
+        remote->dead = dead;
+        remote->has_health = true;
+    }
+}
+
+static void app_lan_handle_held(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size != 8 || event->payload[0] != APP_LAN_MSG_HELD) {
+        return;
+    }
+    uint32_t pid = app_net_read_u32(event->payload + 1);
+    uint8_t slot = event->payload[5];
+    uint16_t item = app_net_read_u16(event->payload + 6);
+    if (slot >= 9 || pid == app->lan_local_player_id) {
+        return;
+    }
+    if (app->lan_host) {
+        if (pid != event->peer_id) {
+            return;
+        }
+        LanRemotePlayer *remote = app_lan_find_player(app, pid, false);
+        if (remote == NULL) {
+            return;
+        }
+        remote->held_slot = slot;
+        remote->held_item = item;
+        remote->has_held = true;
+        uint8_t out[8];
+        memcpy(out, event->payload, sizeof(out));
+        (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+    } else {
+        if (event->peer_id != LAN_SERVER_PEER_ID) {
+            return;
+        }
+        LanRemotePlayer *remote = app_lan_find_player(app, pid, false);
+        if (remote == NULL) {
+            return;
+        }
+        remote->held_slot = slot;
+        remote->held_item = item;
+        remote->has_held = true;
+    }
+}
+
+static void app_lan_handle_respawn(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size != 17 ||
+        event->payload[0] != APP_LAN_MSG_RESPAWN) {
+        return;
+    }
+    uint32_t pid = app_net_read_u32(event->payload + 1);
+    Vec3 pos = mmath_vec3(app_net_read_f32(event->payload + 5), app_net_read_f32(event->payload + 9),
+                          app_net_read_f32(event->payload + 13));
+    if (!isfinite(pos.x) || !isfinite(pos.y) || !isfinite(pos.z) || pos.y < -64.0f ||
+        pos.y > 512.0f || pid == app->lan_local_player_id) {
+        return;
+    }
+    if (app->lan_host) {
+        if (pid != event->peer_id) {
+            return;
+        }
+        LanRemotePlayer *remote = app_lan_find_player(app, pid, false);
+        if (remote == NULL) {
+            return;
+        }
+        remote->pos = pos;
+        remote->dead = false;
+        remote->health = 20.0f;
+        remote->has_health = true;
+        uint8_t out[17];
+        memcpy(out, event->payload, sizeof(out));
+        (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+    } else {
+        if (event->peer_id != LAN_SERVER_PEER_ID) {
+            return;
+        }
+        LanRemotePlayer *remote = app_lan_find_player(app, pid, false);
+        if (remote == NULL) {
+            return;
+        }
+        remote->pos = pos;
+        remote->dead = false;
+        remote->health = 20.0f;
+        remote->has_health = true;
+    }
+}
+
+/* Client->host PvP strike request. Host validates range/LOS/rules/seq
+ * and, on success, applies authoritative damage + broadcasts DAMAGE. */
+static void app_lan_handle_attack(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || !app->lan_host || event->size != 13 ||
+        event->payload[0] != APP_LAN_MSG_ATTACK || !app->world_open || app->world == NULL) {
+        return;
+    }
+    LanRemotePlayer *attacker = app_lan_find_player(app, event->peer_id, false);
+    if (attacker == NULL) {
+        return;
+    }
+    uint32_t victim_id = app_net_read_u32(event->payload + 1);
+    float damage = app_net_read_f32(event->payload + 5);
+    uint32_t seq = app_net_read_u32(event->payload + 9);
+    damage = pvp_clamp_damage(damage);
+    if (!(damage > 0.0f) || seq == 0) {
+        return;
+    }
+    const GameRules *rules = app_world_rules(app);
+    /* Resolve victim liveness + position. Victim 0 is the host itself. */
+    bool victim_alive = false;
+    Vec3 victim_pos = mmath_vec3(0.0f, 0.0f, 0.0f);
+    float victim_h = PVP_TARGET_HEIGHT_STAND;
+    if (victim_id == app->lan_local_player_id) {
+        victim_alive = !app->player.dead;
+        victim_pos = app->player.pos;
+        victim_h = app->player.sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+    } else {
+        LanRemotePlayer *victim = app_lan_find_player(app, victim_id, false);
+        if (victim == NULL) {
+            return;
+        }
+        victim_alive = !victim->dead;
+        victim_pos = victim->pos;
+        victim_h = victim->sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+    }
+    bool attacker_alive = !attacker->dead;
+    if (attacker->has_health) {
+        attacker_alive = !attacker->dead;
+    }
+    /* Server-side range check: attacker pos -> victim pos (feet distance
+     * plus eye/height slack, matching the client's ray budget). */
+    float dx = victim_pos.x - attacker->pos.x;
+    float dy = (victim_pos.y + victim_h * 0.5f) - (attacker->pos.y + 1.62f);
+    float dz = victim_pos.z - attacker->pos.z;
+    float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (!pvp_validate_strike(rules->pvp, attacker_alive, victim_alive, event->peer_id, victim_id,
+                             damage, dist, seq, &attacker->last_attack_seq)) {
+        return;
+    }
+    /* Block occlusion: the strike must have a clear solid-block LOS on the
+     * host's canonical world (prevents hitting through walls). */
+    {
+        Vec3 eye = mmath_vec3(attacker->pos.x, attacker->pos.y + 1.62f, attacker->pos.z);
+        Vec3 to = mmath_vec3(dx, dy, dz);
+        float len = sqrtf(to.x * to.x + to.y * to.y + to.z * to.z);
+        if (len > 1e-6f) {
+            Vec3 dir = mmath_vec3(to.x / len, to.y / len, to.z / len);
+            float edist = 0.0f;
+            if (!pvp_ray_hits_player(eye, dir, PVP_REACH + 0.5f, victim_pos, PVP_TARGET_WIDTH,
+                                     victim_h, &edist)) {
+                return;
+            }
+            /* Solid blocks shield: reuse the melee rule (plants pass). */
+            float yaw = atan2f(-dir.x, -dir.z);
+            float pitch = asinf(dir.y > 1.0f ? 1.0f : (dir.y < -1.0f ? -1.0f : dir.y));
+            HitResult hit = raycast_from_eye(eye, yaw, pitch, app->world, edist);
+            if (hit.hit && hit.dist < edist &&
+                mob_block_shields(world_get_block(app->world, hit.block[0], hit.block[1],
+                                                  hit.block[2]))) {
+                return;
+            }
+        }
+    }
+    /* Apply authoritative damage. */
+    if (victim_id == app->lan_local_player_id) {
+        if (app->player.hurt_t <= 0.0f && !app->player.dead &&
+            !survival_is_creative(&app->player)) {
+            survival_damage_player(&app->player, damage);
+            app->player.hurt_t = PLAYER_HURT_WINDOW;
+            /* Knockback away from the attacker. */
+            Vec3 k = mmath_vec3(app->player.pos.x - attacker->pos.x, 0.0f,
+                                app->player.pos.z - attacker->pos.z);
+            float kl = sqrtf(k.x * k.x + k.z * k.z);
+            if (kl > 1e-4f) {
+                player_apply_knockback(&app->player, k.x / kl * 4.0f, 2.0f, k.z / kl * 4.0f);
+            }
+        }
+    }
+    /* Broadcast authoritative DAMAGE to all (victim applies, others cache).
+     * Duplicate suppression: host validates ATTACK seq strictly increasing
+     * (retransmits rejected there), TCP delivers each DAMAGE frame once,
+     * and victims gate on hurt_t — a resent DAMAGE inside the hurt window
+     * is a safe no-op. */
+    {
+        uint8_t out[13];
+        out[0] = APP_LAN_MSG_DAMAGE;
+        app_net_write_u32(out + 1, victim_id);
+        app_net_write_f32(out + 5, damage);
+        app_net_write_u32(out + 9, event->peer_id);
+        (void)seq;
+        (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+    }
+}
+
+/* Host->all authoritative PvP damage. Victim applies through hurt gate;
+ * others update their health cache. Duplicate frames are safe: hurt_t
+ * blocks multi-hit within a swing and TCP delivers each frame once. */
+static void app_lan_handle_damage(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->payload[0] != APP_LAN_MSG_DAMAGE ||
+        !app->world_open) {
+        return;
+    }
+    if (event->size != 13) {
+        return;
+    }
+    bool is_host = app->lan_host;
+    if (!is_host && event->peer_id != LAN_SERVER_PEER_ID) {
+        return;
+    }
+    if (is_host) {
+        return; /* Host applied authoritatively in handle_attack. */
+    }
+    uint32_t victim_id = app_net_read_u32(event->payload + 1);
+    float damage = app_net_read_f32(event->payload + 5);
+    damage = pvp_clamp_damage(damage);
+    if (!(damage > 0.0f)) {
+        return;
+    }
+    if (victim_id == app->lan_local_player_id) {
+        const GameRules *rules = app_world_rules(app);
+        if (!rules->pvp || app->player.dead || survival_is_creative(&app->player)) {
+            return;
+        }
+        if (app->player.hurt_t <= 0.0f) {
+            survival_damage_player(&app->player, damage);
+            app->player.hurt_t = PLAYER_HURT_WINDOW;
+            audio_play(&app->audio, AUDIO_PLAYER_HURT);
+        }
+    } else {
+        LanRemotePlayer *remote = app_lan_find_player(app, victim_id, false);
+        if (remote == NULL || !remote->has_health) {
+            return;
+        }
+        /* Cache-only: authoritative health arrives via HEALTH; DAMAGE only
+         * nudges the display cache down (never up, never kills). */
+        float next = remote->health - damage;
+        if (next < 0.0f) {
+            next = 0.0f;
+        }
+        if (next < remote->health) {
+            remote->health = next;
+            if (next <= 0.0f) {
+                remote->dead = true;
+            }
+        }
+    }
+}
+
 static void app_lan_handle_welcome(AppContext *app, const LanEvent *event)
 {
     if (app == NULL || event == NULL || !app->lan_client || !app->lan_join_pending) {
@@ -1383,6 +1866,24 @@ static void app_lan_handle_message(AppContext *app, const LanEvent *event)
     case APP_LAN_MSG_GRAVITY_START:
     case APP_LAN_MSG_GRAVITY_LAND:
         app_lan_handle_gravity(app, event);
+        break;
+    case APP_LAN_MSG_ATTACK:
+        app_lan_handle_attack(app, event);
+        break;
+    case APP_LAN_MSG_DAMAGE:
+        app_lan_handle_damage(app, event);
+        break;
+    case APP_LAN_MSG_HEALTH:
+        app_lan_handle_health(app, event);
+        break;
+    case APP_LAN_MSG_RESPAWN:
+        app_lan_handle_respawn(app, event);
+        break;
+    case APP_LAN_MSG_RULES:
+        app_lan_handle_rules(app, event);
+        break;
+    case APP_LAN_MSG_HELD:
+        app_lan_handle_held(app, event);
         break;
     case APP_LAN_MSG_PLAYER_LEFT:
         if (app->lan_client && event->size == 5) {
@@ -1511,6 +2012,23 @@ static void app_lan_update(AppContext *app, double dt)
         return;
     }
     app->lan_player_send_timer += dt;
+    app->lan_health_send_timer += dt;
+    /* Health snapshots: on change or at 1 Hz (death/respawn converge even
+     * if a single frame is dropped; TCP is reliable but the relay may
+     * drop on a full TX queue). */
+    bool health_dirty = app->player.health != app->lan_last_sent_health ||
+                        app->player.dead != app->lan_last_sent_dead;
+    if (app->lan_health_send_timer >= 1.0 || (health_dirty && app->lan_health_send_timer >= 0.15)) {
+        uint32_t htarget = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
+        if (app_lan_send_health(app, htarget, app->lan_local_player_id, app->player.health,
+                                app->player.dead)) {
+            app->lan_last_sent_health = app->player.health;
+            app->lan_last_sent_dead = app->player.dead;
+            app->lan_health_send_timer = 0.0;
+        } else if (app->lan_health_send_timer >= 1.0) {
+            app->lan_health_send_timer = 0.0;
+        }
+    }
     if (app->lan_player_send_timer < 0.10) {
         return;
     }
@@ -1520,6 +2038,15 @@ static void app_lan_update(AppContext *app, double dt)
                               app->player.render_pos, app->player.yaw, app->player.pitch,
                               app->player.walk_phase, app->player.sneaking,
                               sqrtf(app->player.vel.x * app->player.vel.x + app->player.vel.z * app->player.vel.z) > 0.15f);
+    /* Held-slot snapshot piggybacks the 10 Hz movement tick (cheap, 8 B). */
+    {
+        int sel = app->player.hotbar_sel >= 0 && app->player.hotbar_sel < 9 ? app->player.hotbar_sel : 0;
+        uint16_t held = 0;
+        if (sel >= 0 && sel < INV_SIZE) {
+            held = app->player.inv.slots[sel].item;
+        }
+        (void)app_lan_send_held(app, target, app->lan_local_player_id, (uint8_t)sel, held);
+    }
 }
 
 static void app_chat_close(AppContext *app)
@@ -1843,13 +2370,163 @@ static void app_start_arm_swing(AppContext *app)
     player_anim_notify_attacked(&app->panim);
 }
 
-/* Resolve a melee click against mobs before blocks. Returns true whenever a
- * mob owns the crosshair, including during cooldown, so blocks behind it do
- * not start mining or break through the creature. */
+/* Aim at a remote LAN player: nearest ray hit within PVP_REACH that is
+ * strictly nearer than any shielding solid block (plants pass, like mobs).
+ * Skips dead/inactive remotes. Returns true with the victim's game ID. */
+static bool app_aim_remote_player(AppContext *app, uint32_t *out_victim, float *out_dist)
+{
+    if (out_victim != NULL) {
+        *out_victim = UINT32_MAX;
+    }
+    if (out_dist != NULL) {
+        *out_dist = 0.0f;
+    }
+    if (app == NULL || !app->world_open || app->lan == NULL ||
+        (!app->lan_host && !app->lan_client)) {
+        return false;
+    }
+    const GameRules *rules = app_world_rules(app);
+    if (!rules->pvp || app->player.dead) {
+        return false;
+    }
+    Vec3 eye = player_eye_pos(&app->player);
+    float cp = cosf(app->player.pitch);
+    Vec3 dir =
+        mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch), -cosf(app->player.yaw) * cp);
+    HitResult block_hit =
+        raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world, RAYCAST_MAX_DIST);
+    float block_dist = -1.0f;
+    if (block_hit.hit) {
+        uint16_t b = world_get_block(app->world, block_hit.block[0], block_hit.block[1],
+                                     block_hit.block[2]);
+        if (mob_block_shields(b)) {
+            block_dist = block_hit.dist;
+        }
+    }
+    bool found = false;
+    float best = PVP_REACH + 0.5f;
+    uint32_t best_id = UINT32_MAX;
+    for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
+        const LanRemotePlayer *remote = &app->lan_players[i];
+        if (!remote->active || remote->username[0] == '\0' || remote->dead) {
+            continue;
+        }
+        float h = remote->sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+        float d = 0.0f;
+        if (!pvp_ray_hits_player(eye, dir, PVP_REACH, remote->pos, PVP_TARGET_WIDTH, h, &d)) {
+            continue;
+        }
+        if (block_dist >= 0.0f && block_dist < d) {
+            continue;
+        }
+        if (!found || d < best) {
+            found = true;
+            best = d;
+            best_id = remote->peer_id;
+        }
+    }
+    if (!found) {
+        return false;
+    }
+    if (out_victim != NULL) {
+        *out_victim = best_id;
+    }
+    if (out_dist != NULL) {
+        *out_dist = best;
+    }
+    return true;
+}
+
+/* Send a PvP strike request (clients) or apply directly (host/single-player
+ * has no remote victim; host validates remote strikes in handle_attack).
+ * Host attackers apply locally-validated damage immediately AND broadcast
+ * DAMAGE so the victim and spectators converge. */
+static void app_pvp_strike_remote(AppContext *app, uint32_t victim_id, float damage)
+{
+    if (app == NULL || app->lan == NULL) {
+        return;
+    }
+    damage = pvp_clamp_damage(damage);
+    if (!(damage > 0.0f)) {
+        return;
+    }
+    if (app->lan_host) {
+        /* Host path: validate like an incoming ATTACK (range/LOS/rules),
+         * then apply + broadcast. Reuses handle_attack policy by
+         * synthesizing the check inline (no network round-trip). */
+        LanRemotePlayer *victim = app_lan_find_player(app, victim_id, false);
+        if (victim == NULL || victim->dead) {
+            return;
+        }
+        const GameRules *rules = app_world_rules(app);
+        if (!rules->pvp || app->player.dead || survival_is_creative(&app->player)) {
+            return;
+        }
+        float h = victim->sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+        Vec3 eye = player_eye_pos(&app->player);
+        float cp = cosf(app->player.pitch);
+        Vec3 dir = mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch),
+                              -cosf(app->player.yaw) * cp);
+        float edist = 0.0f;
+        if (!pvp_ray_hits_player(eye, dir, PVP_REACH, victim->pos, PVP_TARGET_WIDTH, h, &edist)) {
+            return;
+        }
+        HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world, edist);
+        if (hit.hit && hit.dist < edist &&
+            mob_block_shields(world_get_block(app->world, hit.block[0], hit.block[1],
+                                              hit.block[2]))) {
+            return;
+        }
+        /* Victim-side hurt window lives on the victim client; the host
+         * tracks nothing per-victim here (victim gates on hurt_t). Update
+         * the display cache optimistically; HEALTH will correct it. */
+        float next = victim->has_health ? victim->health - damage : 20.0f - damage;
+        if (next < 0.0f) {
+            next = 0.0f;
+        }
+        victim->health = next;
+        victim->has_health = true;
+        if (next <= 0.0f) {
+            victim->dead = true;
+        }
+        uint8_t out[13];
+        out[0] = APP_LAN_MSG_DAMAGE;
+        app_net_write_u32(out + 1, victim_id);
+        app_net_write_f32(out + 5, damage);
+        app_net_write_u32(out + 9, app->lan_local_player_id);
+        (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+        return;
+    }
+    /* Client path: request host validation (seq-guarded). */
+    if (!app->lan_client) {
+        return;
+    }
+    app->lan_attack_seq++;
+    if (app->lan_attack_seq == 0) {
+        app->lan_attack_seq = 1;
+    }
+    uint8_t out[13];
+    out[0] = APP_LAN_MSG_ATTACK;
+    app_net_write_u32(out + 1, victim_id);
+    app_net_write_f32(out + 5, damage);
+    app_net_write_u32(out + 9, app->lan_attack_seq);
+    (void)lan_send(app->lan, LAN_SERVER_PEER_ID, out, sizeof(out));
+}
+
+/* Resolve a melee click against mobs, then remote players, before blocks.
+ * Returns true whenever a mob or player owns the crosshair, including
+ * during cooldown, so blocks behind it do not start mining or break
+ * through the creature. Single-player combat is unchanged (no remotes). */
 static bool app_try_attack(AppContext *app)
 {
     EntityId eid = ENTITY_ID_NULL;
-    if (!app_aim_mob(app, &eid)) {
+    bool mob_aimed = app_aim_mob(app, &eid);
+    uint32_t victim = UINT32_MAX;
+    float victim_dist = 0.0f;
+    bool player_aimed = app_aim_remote_player(app, &victim, &victim_dist);
+    /* Nearest valid target wins (mob vs player); block shielding already
+     * applied inside each aim query against the same world ray. */
+    if (!mob_aimed && !player_aimed) {
         return false;
     }
     if (app->player.attack_cd > 0.0f || app->player.dead) {
@@ -1859,6 +2536,35 @@ static bool app_try_attack(AppContext *app)
     float dmg = 1.0f;
     float cd = 0.4f;
     mob_tool_stats(held->item, &dmg, &cd);
+    if (mob_aimed && player_aimed) {
+        /* Both aimed: nearest eye-distance wins. Recompute the mob model
+         * distance for the tie-break (app_aim_mob only returns the ID). */
+        Vec3 eye = player_eye_pos(&app->player);
+        float cp = cosf(app->player.pitch);
+        Vec3 dir = mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch),
+                              -cosf(app->player.yaw) * cp);
+        float edist = 0.0f;
+        EntityId tmp = ENTITY_ID_NULL;
+        bool mob_nearer = mob_raycast(&app->mobs, eye, dir, PLAYER_ATTACK_REACH, &edist, &tmp) &&
+                          edist <= victim_dist;
+        if (!mob_nearer) {
+            app_pvp_strike_remote(app, victim, dmg);
+            if (stack_use_melee_hit(held)) {
+                audio_play(&app->audio, AUDIO_TOOL_BREAK);
+            }
+            app->player.attack_cd = cd;
+            app_start_arm_swing(app);
+            return true;
+        }
+    } else if (player_aimed) {
+        app_pvp_strike_remote(app, victim, dmg);
+        if (stack_use_melee_hit(held)) {
+            audio_play(&app->audio, AUDIO_TOOL_BREAK);
+        }
+        app->player.attack_cd = cd;
+        app_start_arm_swing(app);
+        return true;
+    }
     bool damaged = app_strike_mob(app, eid, dmg, 5.0f);
     if (damaged && stack_use_melee_hit(held)) {
         audio_play(&app->audio, AUDIO_TOOL_BREAK);
@@ -2245,12 +2951,22 @@ static void app_tick_place(AppContext *app)
 /* Drop the whole inventory as entities at the death position (bounded:
  * 36 stacks always fit the 128 pool unless it is nearly full; leftovers
  * stay equipped so nothing is ever destroyed or duplicated).
+ * Keep-inventory worlds skip the drop entirely (authoritative rule).
  *
  * Args:
  *   app: context with an open world.
  */
 static void app_death_drop_inventory(AppContext *app)
 {
+    if (app != NULL && app_world_rules(app)->keep_inventory) {
+        /* Crafting output is derived (not owned): clear it so a respawn
+         * cannot duplicate the ingredients still held in the grids. */
+        stack_clear(&app->craft_out);
+        app->craft_hash = 0;
+        app->craft_hash3 = 0;
+        LOG_INFO("death: keep-inventory kept %s", "inventory+hotbar+cursor");
+        return;
+    }
     Vec3 at = mmath_vec3(app->player.pos.x, app->player.pos.y + 0.5f, app->player.pos.z);
     /* The held cursor stack scatters too: death drops everything, and the
      * HUD never shows a cursor in PLAYING (an invisible kept stack would
@@ -2309,6 +3025,17 @@ void app_respawn_player(AppContext *app)
     app->hurt_flash = 0.0f;
     app->last_health = app->player.health;
     camera_set_position(app->camera, player_eye_pos(&app->player));
+    /* Announce authoritative respawn so remotes clear death state and the
+     * corpse position (prevents ghost entities at the death site). */
+    if (app->lan != NULL && (app->lan_host || app->lan_client) && lan_is_connected(app->lan)) {
+        uint32_t target = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
+        (void)app_lan_send_respawn(app, target, app->lan_local_player_id, spawn);
+        (void)app_lan_send_health(app, target, app->lan_local_player_id, app->player.health,
+                                  app->player.dead);
+        app->lan_last_sent_health = app->player.health;
+        app->lan_last_sent_dead = app->player.dead;
+        app->lan_health_send_timer = 0.0;
+    }
     LOG_INFO("respawned at (%.1f, %.1f, %.1f)", (double)spawn.x, (double)spawn.y, (double)spawn.z);
 }
 
@@ -2480,8 +3207,11 @@ static void app_tick_playing(AppContext *app, float dt)
         return;
     }
     bool controllable = app->state == GAME_STATE_PLAYING && !app->chat_open;
+    const GameRules *tick_rules = app_world_rules(app);
 
-    time_system_update(&app->clock, dt);
+    if (tick_rules->daylight_cycle) {
+        time_system_update(&app->clock, dt);
+    }
     /* The host's fluid transitions are canonical. Clients run the same
      * fixed-step simulation for responsiveness but never echo predictions. */
     world_water_tick_mode(app->world, dt, !app->lan_client);
@@ -2594,7 +3324,7 @@ static void app_tick_playing(AppContext *app, float dt)
         app->player.last_fall = -1.0f;
         player_anim_notify_landed(&app->panim, dist);
 bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
-        float dmg = splashed ? 0.0f : survival_fall_damage(dist);
+        float dmg = (splashed || !tick_rules->fall_damage) ? 0.0f : survival_fall_damage(dist);
         if (dmg > 0.0f) {
             survival_damage_player(&app->player, dmg);
             player_anim_notify_hurt(&app->panim);
@@ -2644,7 +3374,17 @@ bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
         mpi.creative = creative;
         mpi.day_progress = app->clock.day_progress;
         MobFrameEvents mev;
+        /* Mob-spawning rule: freeze the natural-spawn timer while disabled
+         * (existing mobs still think/physics/despawn; only new natural
+         * spawns stop — no API change, no test churn). */
+        float saved_spawn_t = app->mobs.spawn_t;
+        if (!tick_rules->mob_spawning) {
+            app->mobs.spawn_t = -1000000.0f;
+        }
         mob_update_all(&app->mobs, &app->entities, app->world, &mpi, dt, &mev);
+        if (!tick_rules->mob_spawning) {
+            app->mobs.spawn_t = saved_spawn_t;
+        }
         for (int i = 0; i < mev.fire_requests; ++i) {
             const ProjectileShot *s = &mev.shots[i];
             if (projectile_fire(&app->projectiles, PROJECTILE_ARROW, s->origin, s->dir, s->speed,
@@ -2744,7 +3484,7 @@ bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
             survival_damage_player(&app->player, 4.0f);
             app->player.hurt_t = .5f;
         }
-        survival_hunger_update(&app->player, dt);
+        survival_hunger_update_ex(&app->player, dt, tick_rules->natural_regen);
     }
 
     /* Damage flash tracks any health loss (fall, starve, dev hurt): the
@@ -2760,9 +3500,21 @@ bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
         }
     }
 
-    /* Death gate: drop inventory as entities, then show the death screen. */
+    /* Death gate: drop inventory as entities, then show the death screen.
+     * Broadcast death health immediately so remotes converge (no ghost). */
     if (app->player.dead) {
+        /* Guard: the death gate runs once per death (state leaves PLAYING).
+         * app_death_drop_inventory is exactly-once per death because the
+         * transition to DEAD stops play ticks; respawn re-arms. */
         app_death_drop_inventory(app);
+        if (app->lan != NULL && (app->lan_host || app->lan_client) && lan_is_connected(app->lan)) {
+            uint32_t target = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
+            (void)app_lan_send_health(app, target, app->lan_local_player_id, app->player.health,
+                                      true);
+            app->lan_last_sent_health = app->player.health;
+            app->lan_last_sent_dead = true;
+            app->lan_health_send_timer = 0.0;
+        }
         audio_play(&app->audio, AUDIO_PLAYER_DIE);
         app_enter_state(app, GAME_STATE_DEAD);
         return;
@@ -2784,7 +3536,7 @@ static void app_draw_remote_players(AppContext *app, float aspect)
     }
     for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
         const LanRemotePlayer *remote = &app->lan_players[i];
-        if (!remote->active || remote->username[0] == '\0') {
+        if (!remote->active || remote->username[0] == '\0' || remote->dead) {
             continue;
         }
         Player avatar = app->player;

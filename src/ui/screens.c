@@ -298,7 +298,11 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
 {
     const float w = (float)app->width;
     const float h = (float)app->height;
-    const int sky_bands = 20;
+    /* Fine-grained bands/columns: the old 20-band sky + 30-column ridges
+     * produced visible ~36-42 px stripes at 720p (the reported menu
+     * pixelation). 48 bands + 96 columns keep the same flat-quad style
+     * but below the ~15 px perception threshold at 1080p. */
+    const int sky_bands = 48;
     renderer_set_clear_color(app->renderer, 0.36f, 0.57f, 0.69f, 1.0f);
     renderer_clear(app->renderer);
 
@@ -344,7 +348,7 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
 
     /* Two rolling ridges form the distant terrain silhouette, panning
      * almost imperceptibly so the panorama feels alive. */
-    const int ridge_cols = 30;
+    const int ridge_cols = 96;
     float cell = w / (float)ridge_cols;
     float horizon = h * 0.57f;
     for (int i = -2; i <= ridge_cols + 2; ++i) {
@@ -365,21 +369,22 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
     }
 
     /* Foreground terraces and sparse pixel patches suggest block-scale
-     * terrain while leaving the menu controls easy to read. */
+     * terrain while leaving the menu controls easy to read. Finer grid
+     * (26x8 vs 13x5) so patches read as texture, not blocks. */
     float ground = h * 0.68f;
     srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, ground, w, h - ground,
           0.20f, 0.31f, 0.15f, 1.0f);
-    float patch_w = fmaxf(20.0f, w / 15.0f);
-    float patch_h = fmaxf(10.0f, h / 18.0f);
-    for (int row = 0; row < 5; ++row) {
-        for (int col = 0; col < 13; ++col) {
+    float patch_w = fmaxf(10.0f, w / 30.0f);
+    float patch_h = fmaxf(6.0f, h / 32.0f);
+    for (int row = 0; row < 8; ++row) {
+        for (int col = 0; col < 26; ++col) {
             if (((row * 7 + col * 3) % 4) == 0) {
-                float x = (float)col * w / 13.0f + (row % 2 ? patch_w * 0.3f : 0.0f);
-                float y = ground + (float)row * patch_h * 1.25f;
+                float x = (float)col * w / 26.0f + (row % 2 ? patch_w * 0.3f : 0.0f);
+                float y = ground + (float)row * patch_h * 1.4f;
                 if (x < w && y < h) {
-                    float tint = (float)((row + col) % 3) * 0.025f;
+                    float tint = (float)((row + col) % 3) * 0.018f;
                     srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, patch_w, patch_h,
-                          0.22f + tint, 0.34f + tint, 0.16f + tint, 0.65f);
+                          0.21f + tint, 0.325f + tint, 0.155f + tint, 0.55f);
                 }
             }
         }
@@ -724,6 +729,8 @@ static void screen_world_select(AppContext *app, const UiFrame *ui)
         app->menu.name_buf[0] = '\0';
         app->menu.seed_buf[0] = '\0';
         app->menu.create_mode = 0;
+        game_rules_defaults(&app->menu.create_rules);
+        app->menu.create_show_rules = false;
         app->menu.name_focused = true;
         app->menu.seed_focused = false;
         app->menu.error[0] = '\0';
@@ -1002,79 +1009,174 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
     }
 }
 
-/* Create-world form: name, seed, mode, create/cancel. */
+/* One game-rule toggle row: label left, ON/OFF button right, dim
+ * description below. Compact (fits 7 rules + actions at 720p). */
+static void srule_row(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label,
+                      const char *desc, bool *value, float x, float y, float w)
+{
+    renderer_draw_text(app->renderer, x, y + 4.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B, 1.0f,
+                       label);
+    char state[8];
+    snprintf(state, sizeof(state), "%s", *value ? "ON" : "OFF");
+    if (sbutton(app, ui, rects, rn, x + w - 118.0f, y - 4.0f, 118.0f, 32.0f, state, true)) {
+        *value = !*value;
+    }
+    renderer_draw_text(app->renderer, x, y + 34.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B,
+                       1.0f, desc);
+}
+
+static void screen_create_world_commit(AppContext *app)
+{
+    char dir[512];
+    int rc = session_create_world_ex(SESSION_SAVES_DIR, app->menu.name_buf, app->menu.seed_buf,
+                                     app->menu.create_mode, &app->menu.create_rules, dir);
+    if (rc != 0) {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not create world (see log).");
+        return;
+    }
+    window_text_input(false);
+    screens_refresh_worlds(app);
+    if (session_open_world(app, dir) == 0) {
+        app_enter_state(app, GAME_STATE_LOADING);
+    } else {
+        snprintf(app->menu.error, sizeof(app->menu.error), "Could not open world (see log).");
+    }
+}
+
+/* Create-world form: name, seed, mode on page one; Game Rules / Cheats on
+ * page two (expandable section, not crammed onto one screen). Pending
+ * values live in menu.create_* until Create (stored) or Cancel (dropped). */
 static void screen_create_world(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
     float cx = (float)app->width * 0.5f;
     sbackground(app, rects, &rn);
-    float y = 56.0f;
-    y = stitle(app, "Create New World", NULL, cx, y);
+    float y = 40.0f;
     float fw = SCR_BTN_W + 80.0f;
+    /* Wider rules page keeps labels + ON/OFF on one line at small widths. */
+    if (app->menu.create_show_rules && fw < 520.0f) {
+        fw = 520.0f;
+        if (fw > (float)app->width - 24.0f) {
+            fw = (float)app->width - 24.0f;
+        }
+    }
     float fx = cx - fw * 0.5f;
 
-    bool confirm = sfield(app, ui, rects, &rn, "World Name", app->menu.name_buf, sizeof(app->menu.name_buf),
-                          &app->menu.name_focused, fx, y, fw);
-    y += 22.0f + 34.0f + 14.0f;
-    confirm = sfield(app, ui, rects, &rn, "Seed (blank = random)", app->menu.seed_buf,
-                     sizeof(app->menu.seed_buf), &app->menu.seed_focused, fx, y, fw) ||
-              confirm;
-    y += 22.0f + 34.0f + 14.0f;
+    if (!app->menu.create_show_rules) {
+        y = stitle(app, "Create New World", NULL, cx, y);
 
-    /* Seed preview line (parsed live, never writes anything). */
-    {
-        bool blank = false;
-        long seed = seed_parse(app->menu.seed_buf, &blank);
-        char prev[96];
-        if (blank) {
-            snprintf(prev, sizeof(prev), "Seed: <random on create>");
-        } else {
-            snprintf(prev, sizeof(prev), "Seed: %ld", seed);
+        bool confirm = sfield(app, ui, rects, &rn, "World Name", app->menu.name_buf,
+                              sizeof(app->menu.name_buf), &app->menu.name_focused, fx, y, fw);
+        y += 22.0f + 34.0f + 14.0f;
+        confirm = sfield(app, ui, rects, &rn, "Seed (blank = random)", app->menu.seed_buf,
+                         sizeof(app->menu.seed_buf), &app->menu.seed_focused, fx, y, fw) ||
+                  confirm;
+        y += 22.0f + 34.0f + 14.0f;
+
+        /* Seed preview line (parsed live, never writes anything). */
+        {
+            bool blank = false;
+            long seed = seed_parse(app->menu.seed_buf, &blank);
+            char prev[96];
+            if (blank) {
+                snprintf(prev, sizeof(prev), "Seed: <random on create>");
+            } else {
+                snprintf(prev, sizeof(prev), "Seed: %ld", seed);
+            }
+            renderer_draw_text(app->renderer, fx, y, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G,
+                               SCR_DIM_B, 1.0f, prev);
+            y += 22.0f;
         }
-        renderer_draw_text(app->renderer, fx, y, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
-                           prev);
+
+        /* Mode cycle button. */
+        renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B,
+                           1.0f, "Game Mode");
         y += 22.0f;
-    }
+        const char *mode_label = app->menu.create_mode == 1 ? "Mode: Creative" : "Mode: Survival";
+        if (sbutton(app, ui, rects, &rn, fx, y, fw, 40.0f, mode_label, true)) {
+            app->menu.create_mode = (app->menu.create_mode == 1) ? 0 : 1;
+        }
+        y += 40.0f + 14.0f;
 
-    /* Mode cycle button. */
-    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
-                       "Game Mode");
-    y += 22.0f;
-    const char *mode_label = app->menu.create_mode == 1 ? "Mode: Creative" : "Mode: Survival";
-    if (sbutton(app, ui, rects, &rn, fx, y, fw, 40.0f, mode_label, true)) {
-        app->menu.create_mode = (app->menu.create_mode == 1) ? 0 : 1;
-    }
-    y += 40.0f + 18.0f;
+        if (sbutton(app, ui, rects, &rn, fx, y, fw, 36.0f, "Game Rules / Cheats...", true)) {
+            app->menu.create_show_rules = true;
+            app->menu.name_focused = false;
+            app->menu.seed_focused = false;
+            window_text_input(false);
+        }
+        y += 36.0f + 14.0f;
 
-    bool do_create = sbutton(app, ui, rects, &rn, fx, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Create World", true);
-    bool do_cancel =
-        sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Cancel", true);
-    sflush(app, rects, &rn);
-    if (app->menu.error[0] != '\0') {
-        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R, SCR_WARN_G,
-                SCR_WARN_B);
-    }
-    if (do_cancel || ui->key_escape) {
-        window_text_input(false);
-        app_enter_state(app, GAME_STATE_WORLD_SELECT);
-        return;
-    }
-    if (do_create || confirm) {
-        char dir[512];
-        int rc = session_create_world(SESSION_SAVES_DIR, app->menu.name_buf, app->menu.seed_buf,
-                                      app->menu.create_mode, dir);
-        if (rc != 0) {
-            snprintf(app->menu.error, sizeof(app->menu.error), "Could not create world (see log).");
+        bool do_create =
+            sbutton(app, ui, rects, &rn, fx, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Create World", true);
+        bool do_cancel = sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, y,
+                                 (fw - 12.0f) * 0.5f, SCR_BTN_H, "Cancel", true);
+        sflush(app, rects, &rn);
+        if (app->menu.error[0] != '\0') {
+            stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R,
+                    SCR_WARN_G, SCR_WARN_B);
+        }
+        if (do_cancel || ui->key_escape) {
+            window_text_input(false);
+            app->menu.create_show_rules = false;
+            app_enter_state(app, GAME_STATE_WORLD_SELECT);
             return;
         }
-        window_text_input(false);
-        screens_refresh_worlds(app);
-        if (session_open_world(app, dir) == 0) {
-            app_enter_state(app, GAME_STATE_LOADING);
-        } else {
-            snprintf(app->menu.error, sizeof(app->menu.error), "Could not open world (see log).");
+        if (do_create || confirm) {
+            screen_create_world_commit(app);
         }
+        return;
+    }
+
+    /* Rules page: clearly grouped cheats with descriptions. */
+    y = stitle(app, "Create New World", "Game Rules - stored in world.meta, host-authoritative", cx, y);
+    GameRules *r = &app->menu.create_rules;
+    srule_row(app, ui, rects, &rn, "Allow Cheats", "Unlocks debug give/spawn keys (debug builds).", &r->allow_cheats,
+              fx, y, fw);
+    y += 52.0f;
+    srule_row(app, ui, rects, &rn, "Keep Inventory", "Keep hotbar + inventory + held item through death.",
+              &r->keep_inventory, fx, y, fw);
+    y += 52.0f;
+    srule_row(app, ui, rects, &rn, "Player vs Player", "Players can damage each other in multiplayer.",
+              &r->pvp, fx, y, fw);
+    y += 52.0f;
+    srule_row(app, ui, rects, &rn, "Mob Spawning", "New creatures spawn over time.", &r->mob_spawning, fx,
+              y, fw);
+    y += 52.0f;
+    srule_row(app, ui, rects, &rn, "Daylight Cycle", "The sun/moon clock advances.", &r->daylight_cycle, fx,
+              y, fw);
+    y += 52.0f;
+    srule_row(app, ui, rects, &rn, "Natural Regeneration", "Heal over time at high hunger (starve still hurts).",
+              &r->natural_regen, fx, y, fw);
+    y += 52.0f;
+    srule_row(app, ui, rects, &rn, "Fall Damage", "Falling more than 3 blocks hurts.", &r->fall_damage, fx,
+              y, fw);
+    y += 52.0f + 6.0f;
+
+    bool done = sbutton(app, ui, rects, &rn, fx, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Done", true);
+    bool do_cancel2 = sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, y,
+                              (fw - 12.0f) * 0.5f, SCR_BTN_H, "Cancel", true);
+    sflush(app, rects, &rn);
+    if (app->menu.error[0] != '\0') {
+        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R,
+                SCR_WARN_G, SCR_WARN_B);
+    }
+    if (done) {
+        app->menu.create_show_rules = false;
+        app->menu.name_focused = true;
+        return;
+    }
+    if (do_cancel2 || ui->key_escape) {
+        window_text_input(false);
+        app->menu.create_show_rules = false;
+        if (do_cancel2) {
+            app_enter_state(app, GAME_STATE_WORLD_SELECT);
+        } else {
+            /* Escape on the rules page steps back to the main form
+             * (pending rules kept); Escape there cancels. */
+            app->menu.name_focused = true;
+        }
+        return;
     }
 }
 

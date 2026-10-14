@@ -112,6 +112,8 @@ set(TERRACRAFT_SOURCES
   src/game/pathfind.c
   src/game/survival.c
   src/game/entity.c
+  src/game/game_rules.c
+  src/game/pvp.c
   src/ui/hud.c
   src/ui/ui.c
   src/ui/screens.c
@@ -203,6 +205,8 @@ add_executable(terracraft_tests
   tests/test_path.c
   tests/test_projectile.c
   tests/test_lan.c
+  tests/test_pvp.c
+  tests/test_gamerules.c
 )
 target_link_libraries(terracraft_tests PRIVATE terracraft_core)
 

@@ -194,6 +194,11 @@ float survival_fall_damage(float dist)
 /* Hunger/regen/starve timers. */
 void survival_hunger_update(Player *p, float dt)
 {
+    survival_hunger_update_ex(p, dt, true);
+}
+
+void survival_hunger_update_ex(Player *p, float dt, bool allow_regen)
+{
     if (p == NULL || dt <= 0.0f || p->dead || survival_is_creative(p)) {
         return;
     }
@@ -215,7 +220,7 @@ void survival_hunger_update(Player *p, float dt)
         p->regen_t -= SURVIVAL_REGEN_PERIOD;
         if (p->hunger <= 0.0f) {
             survival_damage_player(p, 1.0f); /* Starving. */
-        } else if (p->hunger >= SURVIVAL_REGEN_MIN_HUNGER) {
+        } else if (allow_regen && p->hunger >= SURVIVAL_REGEN_MIN_HUNGER) {
             /* No heal, no cost (MC): full health never burns hunger. */
             float before = p->health;
             survival_heal_player(p, 1.0f);

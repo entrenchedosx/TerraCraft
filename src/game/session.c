@@ -78,8 +78,8 @@ int session_list_worlds(const char *saves_root, WorldEntry *out, size_t cap)
 }
 
 /* Create a world directory + initial metadata. */
-int session_create_world(const char *saves_root, const char *name, const char *seed_field, int mode,
-                         char out_dir[512])
+int session_create_world_ex(const char *saves_root, const char *name, const char *seed_field, int mode,
+                            const GameRules *rules, char out_dir[512])
 {
     if (saves_root == NULL || name == NULL || seed_field == NULL || out_dir == NULL) {
         return -1;
@@ -135,6 +135,9 @@ int session_create_world(const char *saves_root, const char *name, const char *s
     m.name[nl] = '\0';
     m.seed = (int64_t)seed;
     m.mode = mode;
+    if (rules != NULL) {
+        m.rules = *rules;
+    }
     m.has_player = false; /* Spawn finder runs on first load. */
     if (world_meta_write(dir, &m) != 0) {
         return -4;
@@ -146,6 +149,13 @@ int session_create_world(const char *saves_root, const char *name, const char *s
     memcpy(out_dir, dir, dl + 1);
     LOG_INFO("session: created world '%s' seed %ld (%s)", safe, seed, dir);
     return 0;
+}
+
+/* Backward-compatible wrapper (defaults for rules). */
+int session_create_world(const char *saves_root, const char *name, const char *seed_field, int mode,
+                         char out_dir[512])
+{
+    return session_create_world_ex(saves_root, name, seed_field, mode, NULL, out_dir);
 }
 
 /* ApplyTunables from settings to a live session (safe anytime). */
@@ -204,6 +214,7 @@ int session_open_world(AppContext *app, const char *world_dir)
     memcpy(w->name, m.name, nl);
     w->name[nl] = '\0';
     w->mode = m.mode;
+    w->rules = m.rules;
     world_set_save_dir(w, world_dir);
 
     size_t dl = strlen(world_dir);

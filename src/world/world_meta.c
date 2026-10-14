@@ -36,6 +36,7 @@ void world_meta_defaults(WorldMeta *m)
     memset(m->inv_items, 0, sizeof(m->inv_items));
     memset(m->inv_counts, 0, sizeof(m->inv_counts));
     memset(m->inv_dur, 0, sizeof(m->inv_dur));
+    game_rules_defaults(&m->rules);
 }
 
 /* Trim trailing CR/LF/space/tab in place. */
@@ -240,6 +241,20 @@ int world_meta_parse(const char *text, WorldMeta *out)
                 }
                 e = (*end == ',') ? end + 1 : end;
             }
+        } else if (strcmp(key, "allow_cheats") == 0) {
+            m.rules.allow_cheats = game_rules_parse_bool(val, false);
+        } else if (strcmp(key, "keep_inventory") == 0) {
+            m.rules.keep_inventory = game_rules_parse_bool(val, false);
+        } else if (strcmp(key, "mob_spawning") == 0) {
+            m.rules.mob_spawning = game_rules_parse_bool(val, true);
+        } else if (strcmp(key, "daylight_cycle") == 0) {
+            m.rules.daylight_cycle = game_rules_parse_bool(val, true);
+        } else if (strcmp(key, "natural_regen") == 0) {
+            m.rules.natural_regen = game_rules_parse_bool(val, true);
+        } else if (strcmp(key, "fall_damage") == 0) {
+            m.rules.fall_damage = game_rules_parse_bool(val, true);
+        } else if (strcmp(key, "pvp") == 0) {
+            m.rules.pvp = game_rules_parse_bool(val, true);
         } else if (strcmp(key, "invdur") == 0) {
             /* Compact list "slot:dur,..." — same skip-per-entry tolerance.
              * Wear is applied to the matching slot and clamped by
@@ -350,6 +365,13 @@ int world_meta_write(const char *dir, const WorldMeta *m)
         fprintf(f, "spawn_y=%.3f\n", (double)stamped.spawn_y);
         fprintf(f, "spawn_z=%.3f\n", (double)stamped.spawn_z);
     }
+    fprintf(f, "allow_cheats=%s\n", game_rules_bool_text(stamped.rules.allow_cheats));
+    fprintf(f, "keep_inventory=%s\n", game_rules_bool_text(stamped.rules.keep_inventory));
+    fprintf(f, "mob_spawning=%s\n", game_rules_bool_text(stamped.rules.mob_spawning));
+    fprintf(f, "daylight_cycle=%s\n", game_rules_bool_text(stamped.rules.daylight_cycle));
+    fprintf(f, "natural_regen=%s\n", game_rules_bool_text(stamped.rules.natural_regen));
+    fprintf(f, "fall_damage=%s\n", game_rules_bool_text(stamped.rules.fall_damage));
+    fprintf(f, "pvp=%s\n", game_rules_bool_text(stamped.rules.pvp));
     /* Compact non-empty inventory: "slot:item:count,...". */
     fprintf(f, "inv=");
     {

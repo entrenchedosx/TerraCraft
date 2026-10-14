@@ -186,6 +186,17 @@ float survival_fall_damage(float dist);
  */
 void survival_hunger_update(Player *p, float dt);
 
+/* Rule-aware hunger update: when allow_regen is false, exhaustion still
+ * burns hunger and starvation still damages, but healing never fires
+ * (Minecraft naturalRegeneration=false semantics).
+ *
+ * Args:
+ *   p: player (must not be NULL).
+ *   dt: seconds to advance (>= 0).
+ *   allow_regen: false suppresses healing (starve still applies).
+ */
+void survival_hunger_update_ex(Player *p, float dt, bool allow_regen);
+
 /* Respawn: restore health/hunger, clear velocity/fall/mining/dead flags,
  * teleport to spawn. Inventory is handled by the caller (death drops).
  *
