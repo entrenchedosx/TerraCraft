@@ -38,6 +38,41 @@ const MobSkin *player_body_skin(void);
  * camera-facing side mapped to Steve's front arm face. */
 const MobSkinPart *player_viewmodel_arm_skin_part(void);
 
+/* Per-tick body facts for the third-person articulated pose. Plain values
+ * only, so the pose is deterministic and headless-testable. */
+typedef struct PlayerBodyAnimInput {
+    float walk_phase;    /* Distance-paced stride phase (radians). */
+    float idle_time;     /* Monotonic seconds (breathing/air drift). */
+    float move_blend;    /* 0 still .. 1 full stride. */
+    float pitch;         /* Head look pitch (camera convention). */
+    float attack_weight; /* 0..1 one-shot punch envelope. */
+    float hurt_weight;   /* 0..1 one-shot flinch envelope. */
+    float land_weight;   /* 0..1 landing absorb envelope. */
+    float water_contact; /* 0 dry .. 1 submerged. */
+    float vertical_speed;/* m/s (positive rising, negative falling). */
+    bool sprinting;      /* Sprinting on the ground. */
+    bool sneaking;       /* Sneak held (crouched upper body). */
+    bool grounded;       /* Standing on solid. */
+    bool use_hold;       /* Eating or drawing a bow (raised hands). */
+} PlayerBodyAnimInput;
+
+/* Per-part rotation (about the part pivot) plus body-space translation. */
+typedef struct PlayerBodyPartPose {
+    float pitch; /* Rotation about X (radians). */
+    Vec3 offset; /* Body-space translation applied before yaw. */
+} PlayerBodyPartPose;
+
+/* Compute the third-person articulated pose from movement facts.
+ *
+ * Distances/units are blocks. The pose keeps feet planted: torso lean and
+ * crouch lower the upper body instead of sinking the whole model.
+ *
+ * Args:
+ *   in: movement facts (NULL reads as a zero pose).
+ *   out: PLAYER_PART_COUNT entries (must not be NULL).
+ */
+void player_body_pose(const PlayerBodyAnimInput *in, PlayerBodyPartPose out[PLAYER_PART_COUNT]);
+
 /* Fully composed camera-space hand transform. Keeping the pose composition
  * pure lets tests exercise the exact transform consumed by the renderer. */
 typedef struct PlayerViewmodelPose {

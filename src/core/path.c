@@ -343,21 +343,38 @@ int path_exe_dir(char *out, size_t out_cap)
 #endif
 }
 
-/* Resolve an mcassets subdirectory (exe-relative preferred). */
+/* Resolve an mcassets subdirectory. The executable-relative location wins
+ * only when it actually exists; otherwise fall back to the working
+ * directory (dev runs from the repo root). Returning a non-existent
+ * exe-relative path would silently skip the working-directory layer.
+ */
 int path_mcassets_dir(char *out, size_t out_cap, const char *sub)
 {
     if (out == NULL || out_cap == 0 || sub == NULL || sub[0] == '\0') {
         return -1;
     }
+    char candidate[PATH_MAX_LEN];
     char exe[PATH_MAX_LEN];
     if (path_exe_dir(exe, sizeof(exe)) == 0) {
         char root[PATH_MAX_LEN];
         if (path_join(root, sizeof(root), exe, "mcassets") == 0 &&
-            path_join(out, out_cap, root, sub) == 0) {
+            path_join(candidate, sizeof(candidate), root, sub) == 0 &&
+            path_is_dir(candidate)) {
+            size_t n = strlen(candidate);
+            if (n + 1 > out_cap) {
+                return -4;
+            }
+            memcpy(out, candidate, n + 1);
             return 0;
         }
     }
-    if (path_join(out, out_cap, "mcassets", sub) == 0) {
+    if (path_join(candidate, sizeof(candidate), "mcassets", sub) == 0 &&
+        path_is_dir(candidate)) {
+        size_t n = strlen(candidate);
+        if (n + 1 > out_cap) {
+            return -4;
+        }
+        memcpy(out, candidate, n + 1);
         return 0;
     }
     return -2;

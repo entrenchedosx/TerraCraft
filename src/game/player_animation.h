@@ -28,8 +28,16 @@
  * of camera-space hand travel). */
 #define PLAYER_ANIM_STRIDE_WALK 8.0f
 #define PLAYER_ANIM_STRIDE_SPRINT 11.0f
+#define PLAYER_ANIM_STRIDE_SWIM 7.0f
 #define PLAYER_ANIM_BOB_WALK 0.018f
 #define PLAYER_ANIM_BOB_SPRINT 0.030f
+
+/* Idle breathing cadence (radians/second) and amplitude (blocks). */
+#define PLAYER_ANIM_BREATHE_RATE 1.6f
+#define PLAYER_ANIM_BREATHE_BOB 0.004f
+
+/* Held-use hand raise (eating, bow draw). */
+#define PLAYER_ANIM_USE_RAISE 0.14f
 
 /* Hard landing reference: this many blocks of fall = full dip. */
 #define PLAYER_ANIM_LAND_FULL_DIST 6.0f
@@ -51,7 +59,8 @@ typedef enum PlayerAnimState {
     PLAYER_ANIM_LAND,
     PLAYER_ANIM_ATTACK,
     PLAYER_ANIM_USE,
-    PLAYER_ANIM_HURT
+    PLAYER_ANIM_HURT,
+    PLAYER_ANIM_SWIM
 } PlayerAnimState;
 
 /* Per-tick movement snapshot (all plain facts, no history). */
@@ -61,6 +70,7 @@ typedef struct PlayerAnimInput {
     bool grounded; /* Standing on solid. */
     bool sneaking; /* Sneak held (crouch dip + calmer bob). */
     bool use_hold; /* Eating or drawing the bow (steady raised pose). */
+    float water;   /* Water contact fraction 0..1 (SWIM above ~0.3). */
 } PlayerAnimInput;
 
 /* Controller: state + timers + edge latches (notify, then update). */
@@ -68,6 +78,7 @@ typedef struct PlayerAnim {
     PlayerAnimState state; /* Current state. */
     float t;               /* Seconds in the current one-shot (else 0). */
     float stride;          /* Bob phase (radians, advances in locomotion). */
+    float idle_phase;      /* Slow breathing phase (radians, always advances). */
     float land_mag;        /* 0..1 landing strength (LAND only). */
     bool sneak;            /* Sneak held (crouch dip + calmer bob). */
     bool ev_attack;        /* Latched swing start (consumed by update). */

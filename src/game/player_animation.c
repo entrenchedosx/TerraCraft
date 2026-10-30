@@ -27,6 +27,7 @@ void player_anim_init(PlayerAnim *a)
     a->state = PLAYER_ANIM_IDLE;
     a->t = 0.0f;
     a->stride = 0.0f;
+    a->idle_phase = 0.0f;
     a->land_mag = 0.0f;
     a->sneak = false;
     a->ev_attack = false;
@@ -63,11 +64,14 @@ void player_anim_notify_landed(PlayerAnim *a, float dist)
 /* Base locomotion state for a steady input (no one-shot running). */
 static PlayerAnimState player_anim_base(const PlayerAnimInput *in)
 {
-    if (!in->grounded) {
-        return PLAYER_ANIM_AIR;
-    }
     if (in->use_hold) {
         return PLAYER_ANIM_USE;
+    }
+    if (in->water > 0.3f) {
+        return PLAYER_ANIM_SWIM;
+    }
+    if (!in->grounded) {
+        return PLAYER_ANIM_AIR;
     }
     if (!in->moving) {
         return PLAYER_ANIM_IDLE;
@@ -88,6 +92,10 @@ void player_anim_update(PlayerAnim *a, const PlayerAnimInput *in, float dt)
         step = 0.25f;
     }
     a->sneak = in->sneaking;
+    a->idle_phase += step * PLAYER_ANIM_BREATHE_RATE;
+    if (a->idle_phase > 6.2831853f) {
+        a->idle_phase -= 6.2831853f;
+    }
     /* Priority: HURT > ATTACK > LAND > held/base. A fresh latch
      * restarts its one-shot even mid-pose (interruptible). */
     if (a->ev_hurt) {
@@ -134,9 +142,15 @@ void player_anim_update(PlayerAnim *a, const PlayerAnimInput *in, float dt)
             a->t = 0.0f;
         }
     }
-    /* Stride advances only underfoot (walk/sprint, calmer while sneak). */
-    if (a->state == PLAYER_ANIM_WALK || a->state == PLAYER_ANIM_SPRINT) {
-        float rate = a->state == PLAYER_ANIM_SPRINT ? PLAYER_ANIM_STRIDE_SPRINT : PLAYER_ANIM_STRIDE_WALK;
+    /* Stride advances underfoot (walk/sprint) and through swim strokes. */
+    if (a->state == PLAYER_ANIM_WALK || a->state == PLAYER_ANIM_SPRINT ||
+        a->state == PLAYER_ANIM_SWIM) {
+        float rate = PLAYER_ANIM_STRIDE_WALK;
+        if (a->state == PLAYER_ANIM_SPRINT) {
+            rate = PLAYER_ANIM_STRIDE_SPRINT;
+        } else if (a->state == PLAYER_ANIM_SWIM) {
+            rate = PLAYER_ANIM_STRIDE_SWIM;
+        }
         a->stride += rate * step;
     }
 }
@@ -179,14 +193,22 @@ PlayerAnimPose player_anim_pose(const PlayerAnim *a)
         p.arm_roll = -0.06f * a->land_mag * sinf(phase * 3.14159265358979323846f);
         break;
     }
-    case PLAYER_ANIM_ATTACK:
-        p.punch = player_swing_weight(player_swing_phase(a->t));
-        p.arm_roll = -0.20f * p.punch;
-        p.arm_yaw = 0.12f * p.punch;
+    case PLAYER_ANIM_ATTACK: {
+        float phase = player_swing_phase(a->t);
+        p.punch = player_swing_weight(phase);
+        /* Quick diagonal jab: roll in, yaw across, small forward pitch. */
+        float wind = sinf(phase * 6.2831853f);
+        p.arm_roll = -0.24f * p.punch + 0.05f * wind;
+        p.arm_yaw = 0.16f * p.punch;
+        p.arm_pitch = -0.08f * p.punch;
         break;
-    case PLAYER_ANIM_USE:
-        p.raise = 0.10f;
+    }
+    case PLAYER_ANIM_USE: {
+        p.raise = PLAYER_ANIM_USE_RAISE;
+        p.arm_pitch = -0.45f + 0.03f * sinf(a->idle_phase * 2.4f);
+        p.arm_roll = 0.06f;
         break;
+    }
     case PLAYER_ANIM_HURT: {
         float phase = a->t / PLAYER_ANIM_HURT_DURATION;
         if (phase > 1.0f) {
@@ -198,8 +220,30 @@ PlayerAnimPose player_anim_pose(const PlayerAnim *a)
         p.arm_pitch = -0.10f * sinf(phase * 3.14159265358979323846f);
         break;
     }
+    case PLAYER_ANIM_SWIM: {
+        /* Freestyle stroke: reach forward, sweep down, recover. */
+        float stroke = sinf(a->stride);
+        float lift = 0.5f - 0.5f * cosf(2.0f * a->stride);
+        p.bob_x = 0.014f * stroke;
+        p.bob_y = 0.006f * lift;
+        p.dip = 0.035f;
+        p.arm_pitch = -0.55f + 0.55f * stroke;
+        p.arm_roll = 0.20f * stroke;
+        p.arm_yaw = 0.10f * cosf(a->stride);
+        break;
+    }
     case PLAYER_ANIM_AIR:
+        /* Airborne hand floats up a touch and drifts with the body. */
+        p.bob_y = 0.010f + 0.004f * sinf(a->idle_phase * 0.9f);
+        p.arm_pitch = -0.12f;
+        p.arm_roll = 0.05f * sinf(a->idle_phase);
+        break;
     case PLAYER_ANIM_IDLE:
+        /* Slow breathing keeps the hand alive without distracting sway. */
+        p.bob_y = PLAYER_ANIM_BREATHE_BOB * (0.5f - 0.5f * cosf(a->idle_phase));
+        p.arm_pitch = 0.020f * sinf(a->idle_phase);
+        p.arm_roll = 0.012f * sinf(a->idle_phase * 0.8f);
+        break;
     default:
         break;
     }

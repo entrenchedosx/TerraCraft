@@ -568,12 +568,12 @@ static void mob_draw_batch(Renderer *r, const Camera *cam, float aspect, const T
 }
 
 /* Draw the third-person player body (Steve skin when loaded, atlas tile
- * fallback otherwise). Limbs swing distance-paced off walk_phase scaled
- * by move_blend (0 still .. 1 full stride); the head carries the look
- * pitch (clamped +/-89 deg upstream, so no impossible rotations).
+ * fallback otherwise). The articulated pose covers walk/sprint stride,
+ * idle breathing, sneak hunch, swimming, airborne, attack, hurt, landing,
+ * and held-use poses. Feet stay planted; the upper body leans and dips.
  * Frustum-culled like mobs; no-op on bad args. */
 void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts,
-                          const Player *p, float move_blend)
+                          const Player *p, float move_blend, const PlayerAnim *anim)
 {
     if (r == NULL || cam == NULL || p == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
         return;
@@ -597,29 +597,96 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
     if (!camera_aabb_visible(planes, mn, mx)) {
         return;
     }
+    PlayerBodyAnimInput bi;
+    memset(&bi, 0, sizeof(bi));
+    bi.walk_phase = p->walk_phase;
+    bi.idle_time = p->anim_time;
+    bi.move_blend = blend;
+    bi.pitch = p->pitch;
+    bi.attack_weight = 0.0f;
+    bi.hurt_weight = 0.0f;
+    bi.land_weight = 0.0f;
+    bi.water_contact = p->water_contact;
+    bi.vertical_speed = p->vel.y;
+    bi.sprinting = p->sprinting;
+    bi.sneaking = p->sneaking;
+    bi.grounded = p->grounded;
+    bi.use_hold = p->eat_active || p->bow_drawing;
+    if (anim != NULL) {
+        float phase = 0.0f;
+        switch (anim->state) {
+        case PLAYER_ANIM_ATTACK:
+            bi.attack_weight = player_swing_weight(player_swing_phase(anim->t));
+            break;
+        case PLAYER_ANIM_HURT:
+            phase = anim->t / PLAYER_ANIM_HURT_DURATION;
+            if (phase > 1.0f) {
+                phase = 1.0f;
+            }
+            bi.hurt_weight = sinf(phase * 3.14159265f);
+            break;
+        case PLAYER_ANIM_LAND:
+            phase = anim->t / PLAYER_ANIM_LAND_DURATION;
+            if (phase > 1.0f) {
+                phase = 1.0f;
+            }
+            bi.land_weight = anim->land_mag * sinf(phase * 3.14159265f);
+            break;
+        default:
+            break;
+        }
+    }
+    PlayerBodyPartPose body[PLAYER_PART_COUNT];
+    player_body_pose(&bi, body);
     bool skinned = r->player_skin_tex != 0;
-    float crouch = p->sneaking ? 0.08f : 0.0f;
-    Vec3 base = mmath_vec3(p->render_pos.x, p->render_pos.y - crouch, p->render_pos.z);
+    Vec3 base = p->render_pos;
     size_t o = 0;
     for (int i = 0; i < model->nparts; ++i) {
-        const MobModelPart *part = &model->parts[i];
-        float pitch = 0.0f;
-        if (i == PLAYER_PART_HEAD) {
-            /* Negative: the emitter's +pitch tips faces down. */
-            pitch = -p->pitch;
-        } else if (part->anim == MOB_ANIM_LEG) {
-            float phase = p->walk_phase + ((i % 2) ? 3.14159265f : 0.0f);
-            pitch = sinf(phase) * 0.6f * blend;
-        }
+        MobModelPart posed = model->parts[i];
+        posed.offset.x += body[i].offset.x;
+        posed.offset.y += body[i].offset.y;
+        posed.offset.z += body[i].offset.z;
+        posed.pivot_y += body[i].offset.y;
         float fuv[6][4];
         if (skinned) {
             mob_skin_uvs(skin, i, fuv);
         } else {
-            mob_tile_uvs(part, fuv);
+            mob_tile_uvs(&posed, fuv);
         }
-        mob_emit_part(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, p->yaw, part, pitch,
-                      false, fuv);
+        mob_emit_part(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, p->yaw, &posed,
+                      body[i].pitch, false, fuv);
         o += 36;
+    }
+    /* Held item follows the right hand (local avatars only: remote hotbar
+     * contents are not replicated, so a copied stack would be wrong). */
+    if (anim != NULL) {
+        const ItemStack *held = &p->inv.slots[p->hotbar_sel];
+        if (!stack_is_empty(held)) {
+            const ItemInfo *info = item_get_info(held->item);
+            if (info != NULL && info->tile >= 0) {
+                uint16_t block = item_to_block(held->item);
+                float s = block != 0 ? 0.17f : 0.16f;
+                float depth = block != 0 ? 0.17f : 0.02f;
+                MobModelPart item = {{-0.375f - s * 0.5f, 0.62f - s * 0.5f, 0.06f - depth * 0.5f},
+                                     {s, s, depth}, info->tile, -1, 1.35f, MOB_ANIM_NONE};
+                item.offset.x += body[PLAYER_PART_ARM_R].offset.x;
+                item.offset.y += body[PLAYER_PART_ARM_R].offset.y;
+                item.offset.z += body[PLAYER_PART_ARM_R].offset.z;
+                item.pivot_y += body[PLAYER_PART_ARM_R].offset.y;
+                float fuv[6][4];
+                if (block != 0) {
+                    for (int face = 0; face < 6; ++face) {
+                        texture_atlas_tile_uv(block_tile_for_face(block, face), &fuv[face][0],
+                                              &fuv[face][1], &fuv[face][2], &fuv[face][3]);
+                    }
+                } else {
+                    mob_tile_uvs(&item, fuv);
+                }
+                mob_emit_part(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, p->yaw, &item,
+                              body[PLAYER_PART_ARM_R].pitch, false, fuv);
+                o += 36;
+            }
+        }
     }
     mob_draw_batch(r, cam, aspect, ts, o, skinned ? r->player_skin_tex : r->atlas);
 }
@@ -705,10 +772,11 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     }
     if (has_item) {
         /* Gripped at the lower local end of the arm; the shared transform
-         * carries it beside the wrist instead of leaving it upright. */
-        parts[item_part] = (MobModelPart){{0.34f, -0.50f, 0.57f},
-                                          held_block != 0 ? mmath_vec3(0.09f, 0.09f, 0.09f)
-                                                          : mmath_vec3(0.11f, 0.11f, 0.02f),
+         * carries it beside the wrist instead of leaving it upright.
+         * Blocks read as a held cube; flat item sprites face the camera. */
+        parts[item_part] = (MobModelPart){{0.34f, -0.52f, 0.57f},
+                                          held_block != 0 ? mmath_vec3(0.17f, 0.17f, 0.17f)
+                                                          : mmath_vec3(0.16f, 0.16f, 0.02f),
                                           held_tile, -1, 0.0f, MOB_ANIM_NONE};
     }
     /* The shoulder sits off-frame bottom-right and the hand reaches up-left

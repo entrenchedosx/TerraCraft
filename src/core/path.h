@@ -122,9 +122,9 @@ int path_list_files(const char *dir, char out_names[][64], size_t out_cap, size_
  */
 int path_exe_dir(char *out, size_t out_cap);
 
-/* Resolve an mcassets subdirectory: "<exe>/mcassets/<sub>" when the exe
- * directory is known, else working-directory-relative "mcassets/<sub>".
- * The result may not exist (callers keep lower layers then).
+/* Resolve an existing mcassets subdirectory:
+ * "<exe>/mcassets/<sub>" when that directory exists, else
+ * working-directory-relative "mcassets/<sub>" when that one exists.
  *
  * Args:
  *   out: destination (must not be NULL).
@@ -132,6 +132,7 @@ int path_exe_dir(char *out, size_t out_cap);
  *   sub: subdirectory under mcassets/ (must not be NULL, e.g.
  *     "generated/tiles").
  *
- * Returns: 0 on success, non-zero on bad args/truncation.
+ * Returns: 0 on success (directory verified to exist), non-zero on bad
+ * args/truncation/missing directory (callers keep lower layers then).
  */
 int path_mcassets_dir(char *out, size_t out_cap, const char *sub);

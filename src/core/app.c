@@ -10,6 +10,7 @@
 #include "game/particle.h"
 #include "game/interaction.h"
 #include "game/inventory.h"
+#include "game/lan_protocol.h"
 #include "game/item.h"
 #include "game/mob.h"
 #include "game/player.h"
@@ -52,6 +53,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -422,6 +424,12 @@ static bool app_strike_mob(AppContext *app, EntityId eid, float dmg, float knock
 static void app_start_arm_swing(AppContext *app);
 static bool app_try_attack(AppContext *app);
 static const GameRules *app_world_rules(const AppContext *app);
+static bool app_lan_self_creative(const AppContext *app);
+static bool app_pvp_host_victim(AppContext *app, uint32_t victim_id, LanRemotePlayer **out_victim,
+                                Vec3 *out_pos, float *out_h, bool *out_alive);
+static void app_pvp_host_hit_remote(AppContext *app, LanRemotePlayer *victim, uint32_t victim_id,
+                                    float damage, uint32_t attacker_id);
+static bool app_pvp_los_clear(AppContext *app, Vec3 eye, float yaw, float pitch, float max_dist);
 static bool app_drop_stack_from_player(AppContext *app, ItemStack *stack, bool all);
 static void app_poll_cursor_drop(AppContext *app);
 static void app_debug_spawn_mob(AppContext *app, EntityType type);
@@ -654,22 +662,9 @@ bool app_commit_profile(AppContext *app)
     return app->state == GAME_STATE_MAIN_MENU;
 }
 
+/* Game message IDs, sizes, handshake version, and wire codecs live in
+ * game/lan_protocol.h (shared with headless tests). */
 enum {
-    APP_LAN_MSG_HELLO = 1,
-    APP_LAN_MSG_WELCOME = 2,
-    APP_LAN_MSG_PLAYER = 3,
-    APP_LAN_MSG_CHAT = 4,
-    APP_LAN_MSG_BLOCK = 5,
-    APP_LAN_MSG_PLAYER_LEFT = 6,
-    APP_LAN_MSG_GRAVITY_START = 7,
-    APP_LAN_MSG_GRAVITY_LAND = 8,
-    APP_LAN_MSG_ATTACK = 9,  /* Client->host PvP strike request. */
-    APP_LAN_MSG_DAMAGE = 10, /* Host->all authoritative PvP damage. */
-    APP_LAN_MSG_HEALTH = 11, /* Peer self-health snapshot (host relays). */
-    APP_LAN_MSG_RESPAWN = 12, /* Peer respawn announcement (host relays). */
-    APP_LAN_MSG_RULES = 13,  /* Host->all world game rules. */
-    APP_LAN_MSG_HELD = 14,   /* Peer held-slot/item snapshot (host relays). */
-    APP_LAN_PROTOCOL_VERSION = 3, /* Profile 4 and appended geological block registry. */
     APP_LAN_PORT = 25566,
     APP_CHAT_MAX_BYTES = 160
 };
@@ -682,10 +677,11 @@ enum {
 /* Forward declarations for LAN replication helpers (defined below). */
 static bool app_lan_send_rules(AppContext *app, uint32_t target);
 static bool app_lan_send_health(AppContext *app, uint32_t target, uint32_t player_id, float health,
-                               bool dead);
+                               bool dead, bool creative);
 static bool app_lan_send_held(AppContext *app, uint32_t target, uint32_t player_id, uint8_t slot,
                               uint16_t item);
-static bool app_lan_send_respawn(AppContext *app, uint32_t target, uint32_t player_id, Vec3 pos);
+static bool app_lan_send_respawn(AppContext *app, uint32_t target, uint32_t player_id, Vec3 pos,
+                                 float health);
 
 static void app_net_write_u16(uint8_t *out, uint16_t value)
 {
@@ -769,7 +765,7 @@ static bool app_chat_encode(uint8_t *out, size_t out_cap, const char *username,
         return false;
     }
     size_t at = 0;
-    out[at++] = APP_LAN_MSG_CHAT;
+    out[at++] = LAN_MSG_CHAT;
     out[at++] = (uint8_t)name_len;
     memcpy(out + at, username, name_len);
     at += name_len;
@@ -832,7 +828,7 @@ static bool app_lan_send_player(AppContext *app, uint32_t target, uint32_t playe
     uint8_t payload[64];
     size_t name_len = strlen(username);
     size_t at = 0;
-    payload[at++] = APP_LAN_MSG_PLAYER;
+    payload[at++] = LAN_MSG_PLAYER;
     app_net_write_u32(payload + at, player_id);
     at += 4;
     app_net_write_f32(payload + at, pos.x); at += 4;
@@ -869,7 +865,7 @@ static void app_lan_send_current_players(AppContext *app, uint32_t target)
      * peer's vitals + held item so the joiner converges immediately. */
     (void)app_lan_send_rules(app, target);
     (void)app_lan_send_health(app, target, app->lan_local_player_id, app->player.health,
-                              app->player.dead);
+                              app->player.dead, app_lan_self_creative(app));
     {
         int sel = app->player.hotbar_sel >= 0 && app->player.hotbar_sel < 9 ? app->player.hotbar_sel : 0;
         uint16_t held = 0;
@@ -881,7 +877,8 @@ static void app_lan_send_current_players(AppContext *app, uint32_t target)
     for (size_t i = 0; i < MINEC_LAN_MAX_PLAYERS; ++i) {
         const LanRemotePlayer *remote = &app->lan_players[i];
         if (remote->active && remote->username[0] != '\0' && remote->has_health) {
-            (void)app_lan_send_health(app, target, remote->peer_id, remote->health, remote->dead);
+            (void)app_lan_send_health(app, target, remote->peer_id, remote->health, remote->dead,
+                                      remote->creative);
         }
         if (remote->active && remote->username[0] != '\0') {
             (void)app_lan_send_held(app, target, remote->peer_id, remote->held_slot,
@@ -905,34 +902,17 @@ static const GameRules *app_world_rules(const AppContext *app)
     return &fallback;
 }
 
-/* Encode 7 rule bytes after the message type (shared by send/parse). */
-static void app_rules_write(uint8_t *out, const GameRules *rules)
+void app_apply_world_rules(AppContext *app)
 {
-    GameRules def;
-    game_rules_defaults(&def);
-    const GameRules *r = rules != NULL ? rules : &def;
-    out[0] = r->allow_cheats ? 1u : 0u;
-    out[1] = r->keep_inventory ? 1u : 0u;
-    out[2] = r->mob_spawning ? 1u : 0u;
-    out[3] = r->daylight_cycle ? 1u : 0u;
-    out[4] = r->natural_regen ? 1u : 0u;
-    out[5] = r->fall_damage ? 1u : 0u;
-    out[6] = r->pvp ? 1u : 0u;
-}
-
-static void app_rules_read(GameRules *out, const uint8_t *in)
-{
-    game_rules_defaults(out);
-    if (out == NULL || in == NULL) {
+    if (app == NULL || !app->world_open || app->world == NULL) {
         return;
     }
-    out->allow_cheats = in[0] != 0;
-    out->keep_inventory = in[1] != 0;
-    out->mob_spawning = in[2] != 0;
-    out->daylight_cycle = in[3] != 0;
-    out->natural_regen = in[4] != 0;
-    out->fall_damage = in[5] != 0;
-    out->pvp = in[6] != 0;
+    if (app->lan_host && app->lan != NULL) {
+        (void)app_lan_send_rules(app, LAN_BROADCAST_PEER);
+    }
+    if (session_save_now(app) != 0) {
+        LOG_WARN("rules: persisting world.meta after a rule change failed");
+    }
 }
 
 static bool app_lan_send_rules(AppContext *app, uint32_t target)
@@ -941,13 +921,13 @@ static bool app_lan_send_rules(AppContext *app, uint32_t target)
         return false;
     }
     uint8_t payload[8];
-    payload[0] = APP_LAN_MSG_RULES;
-    app_rules_write(payload + 1, app_world_rules(app));
+    payload[0] = LAN_MSG_RULES;
+    lan_rules_encode(payload + 1, app_world_rules(app));
     return lan_send(app->lan, target, payload, sizeof(payload));
 }
 
 static bool app_lan_send_health(AppContext *app, uint32_t target, uint32_t player_id, float health,
-                               bool dead)
+                               bool dead, bool creative)
 {
     if (app == NULL || app->lan == NULL) {
         return false;
@@ -955,12 +935,16 @@ static bool app_lan_send_health(AppContext *app, uint32_t target, uint32_t playe
     if (!(health >= 0.0f) || !(health <= 100.0f)) {
         return false;
     }
-    uint8_t payload[10];
-    payload[0] = APP_LAN_MSG_HEALTH;
-    app_net_write_u32(payload + 1, player_id);
-    app_net_write_f32(payload + 5, health);
-    payload[9] = dead ? 1u : 0u;
+    uint8_t payload[LAN_MSG_HEALTH_SIZE];
+    lan_health_encode(payload, player_id, health, dead, creative);
     return lan_send(app->lan, target, payload, sizeof(payload));
+}
+
+/* Creative mode reported for snapshots: the local player's own mode.
+ * (Modes are world-scoped; receivers clamp to their world mode.) */
+static bool app_lan_self_creative(const AppContext *app)
+{
+    return app != NULL && survival_is_creative(&app->player);
 }
 
 static bool app_lan_send_held(AppContext *app, uint32_t target, uint32_t player_id, uint8_t slot,
@@ -969,25 +953,22 @@ static bool app_lan_send_held(AppContext *app, uint32_t target, uint32_t player_
     if (app == NULL || app->lan == NULL || slot >= 9) {
         return false;
     }
-    uint8_t payload[8];
-    payload[0] = APP_LAN_MSG_HELD;
-    app_net_write_u32(payload + 1, player_id);
-    payload[5] = slot;
-    app_net_write_u16(payload + 6, item);
+    uint8_t payload[LAN_MSG_HELD_SIZE];
+    lan_held_encode(payload, player_id, slot, item);
     return lan_send(app->lan, target, payload, sizeof(payload));
 }
 
-static bool app_lan_send_respawn(AppContext *app, uint32_t target, uint32_t player_id, Vec3 pos)
+/* Respawn announcement carries position AND authoritative health in one
+ * frame so peers converge atomically (no stale-health alive ghosts). */
+static bool app_lan_send_respawn(AppContext *app, uint32_t target, uint32_t player_id, Vec3 pos,
+                                 float health)
 {
-    if (app == NULL || app->lan == NULL || !isfinite(pos.x) || !isfinite(pos.y) || !isfinite(pos.z)) {
+    if (app == NULL || app->lan == NULL || !isfinite(pos.x) || !isfinite(pos.y) || !isfinite(pos.z) ||
+        !(health > 0.0f) || !(health <= 100.0f)) {
         return false;
     }
-    uint8_t payload[17];
-    payload[0] = APP_LAN_MSG_RESPAWN;
-    app_net_write_u32(payload + 1, player_id);
-    app_net_write_f32(payload + 5, pos.x);
-    app_net_write_f32(payload + 9, pos.y);
-    app_net_write_f32(payload + 13, pos.z);
+    uint8_t payload[LAN_MSG_RESPAWN_SIZE];
+    lan_respawn_encode(payload, player_id, pos.x, pos.y, pos.z, health);
     return lan_send(app->lan, target, payload, sizeof(payload));
 }
 
@@ -999,8 +980,8 @@ static bool app_lan_send_welcome(AppContext *app, uint32_t peer_id)
     uint8_t payload[96];
     size_t name_len = strlen(app->username);
     size_t at = 0;
-    payload[at++] = APP_LAN_MSG_WELCOME;
-    payload[at++] = APP_LAN_PROTOCOL_VERSION;
+    payload[at++] = LAN_MSG_WELCOME;
+    payload[at++] = LAN_PROTOCOL_VERSION;
     app_net_write_u32(payload + at, peer_id); at += 4;
     app_net_write_u64(payload + at, (uint64_t)(int64_t)app->world->seed); at += 8;
     payload[at++] = (uint8_t)app->world->terrain_version;
@@ -1053,7 +1034,7 @@ static void app_lan_block_changed(void *context, int wx, int wy, int wz, uint16_
             return;
         }
     }
-    (void)app_lan_queue_world_event(app, APP_LAN_MSG_BLOCK, wx, wy, wz, block_id);
+    (void)app_lan_queue_world_event(app, LAN_MSG_BLOCK, wx, wy, wz, block_id);
 }
 
 static bool app_lan_gravity_event(void *context, bool landed, int wx, int wy, int wz, uint16_t block_id)
@@ -1068,7 +1049,7 @@ static bool app_lan_gravity_event(void *context, bool landed, int wx, int wy, in
     /* START clears the source and LAND installs the destination on clients,
      * so each event also carries its paired canonical block update. */
     bool queued = app_lan_queue_world_event(app,
-                                            landed ? APP_LAN_MSG_GRAVITY_LAND : APP_LAN_MSG_GRAVITY_START,
+                                            landed ? LAN_MSG_GRAVITY_LAND : LAN_MSG_GRAVITY_START,
                                             wx, wy, wz, block_id);
     if (queued) {
         app->lan_gravity_echo_pending = true;
@@ -1219,8 +1200,8 @@ void app_lan_disconnect(AppContext *app)
 
 static bool app_lan_open_client_world(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size < 40 || event->payload[0] != APP_LAN_MSG_WELCOME ||
-        event->payload[1] != APP_LAN_PROTOCOL_VERSION) {
+    if (app == NULL || event == NULL || event->size < 40 || event->payload[0] != LAN_MSG_WELCOME ||
+        !lan_version_supported(event->payload[1])) {
         return false;
     }
     const uint8_t *p = event->payload;
@@ -1290,6 +1271,10 @@ static bool app_lan_open_client_world(AppContext *app, const LanEvent *event)
         memcpy(host->username, host_name, name_len + 1);
         host->pos = host_pos;
         host->yaw = host_yaw;
+        host->rpos = host_pos;
+        host->ryaw = host_yaw;
+        host->rpitch = 0.0f;
+        host->has_render = true;
     }
     snprintf(app->menu.error, sizeof(app->menu.error), "Connected to %s. Loading shared terrain...", host_name);
     app_enter_state(app, GAME_STATE_LOADING);
@@ -1298,7 +1283,7 @@ static bool app_lan_open_client_world(AppContext *app, const LanEvent *event)
 
 static void app_lan_handle_chat(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size < 5 || event->payload[0] != APP_LAN_MSG_CHAT) {
+    if (app == NULL || event == NULL || event->size < 5 || event->payload[0] != LAN_MSG_CHAT) {
         return;
     }
     size_t name_len = event->payload[1];
@@ -1353,7 +1338,7 @@ static int app_floor_div16(int value)
 
 static void app_lan_handle_block(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size != 15 || event->payload[0] != APP_LAN_MSG_BLOCK ||
+    if (app == NULL || event == NULL || event->size != 15 || event->payload[0] != LAN_MSG_BLOCK ||
         app->world == NULL) {
         return;
     }
@@ -1403,7 +1388,7 @@ static void app_lan_handle_gravity(AppContext *app, const LanEvent *event)
 {
     if (app == NULL || event == NULL || !app->lan_client || app->world == NULL ||
         event->size != 15 || event->peer_id != LAN_SERVER_PEER_ID ||
-        (event->payload[0] != APP_LAN_MSG_GRAVITY_START && event->payload[0] != APP_LAN_MSG_GRAVITY_LAND)) {
+        (event->payload[0] != LAN_MSG_GRAVITY_START && event->payload[0] != LAN_MSG_GRAVITY_LAND)) {
         return;
     }
     int32_t wx = (int32_t)app_net_read_u32(event->payload + 1);
@@ -1419,7 +1404,7 @@ static void app_lan_handle_gravity(AppContext *app, const LanEvent *event)
     if (world_get_chunk(app->world, cx, cz) == NULL && world_generate_chunk(app->world, cx, cz) != 0) {
         return;
     }
-    if (event->payload[0] == APP_LAN_MSG_GRAVITY_START) {
+    if (event->payload[0] == LAN_MSG_GRAVITY_START) {
         (void)world_gravity_apply_remote_start(app->world, wx, wy, wz, block_id);
     } else {
         (void)world_gravity_apply_remote_landing(app->world, wx, wy, wz, block_id);
@@ -1431,7 +1416,7 @@ static void app_lan_handle_gravity(AppContext *app, const LanEvent *event)
 
 static bool app_lan_parse_player(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size < 32 || event->payload[0] != APP_LAN_MSG_PLAYER) {
+    if (app == NULL || event == NULL || event->size < 32 || event->payload[0] != LAN_MSG_PLAYER) {
         return false;
     }
     const uint8_t *p = event->payload;
@@ -1475,6 +1460,14 @@ static bool app_lan_parse_player(AppContext *app, const LanEvent *event)
     remote->walk_phase = phase;
     remote->sneaking = (flags & 1u) != 0;
     remote->moving = (flags & 2u) != 0;
+    if (!remote->has_render) {
+        /* Seed the render pose from the first snapshot so interpolation
+         * never streaks in from the origin. */
+        remote->rpos = pos;
+        remote->ryaw = yaw;
+        remote->rpitch = pitch;
+        remote->has_render = true;
+    }
     if (app->lan_host) {
         (void)app_lan_send_player(app, LAN_BROADCAST_PEER, player_id, name, pos, yaw, pitch,
                                   phase, remote->sneaking, remote->moving);
@@ -1486,7 +1479,7 @@ static bool app_lan_parse_player(AppContext *app, const LanEvent *event)
 
 static void app_lan_handle_rules(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size != 8 || event->payload[0] != APP_LAN_MSG_RULES) {
+    if (app == NULL || event == NULL || event->size != 8 || event->payload[0] != LAN_MSG_RULES) {
         return;
     }
     /* Only the host speaks rules; clients apply to their local copy.
@@ -1498,21 +1491,68 @@ static void app_lan_handle_rules(AppContext *app, const LanEvent *event)
         return;
     }
     GameRules r;
-    app_rules_read(&r, event->payload + 1);
+    lan_rules_decode(&r, event->payload + 1);
     app->world->rules = r;
+}
+
+/* Client->host rule change request. ONLY the host acts on it, and only
+ * from a known peer; everyone else (including clients receiving it)
+ * ignores it. Any 7-byte combination is a legal ruleset, so validation
+ * is about authority, not content. Accepted changes broadcast via
+ * RULES and persist to world.meta through app_apply_world_rules.
+ * Deliberately independent of Allow Cheats: guests never gain rule
+ * editing, with or without cheats; the host always has it. */
+static void app_lan_handle_rules_set(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || event->size != LAN_MSG_RULES_SET_SIZE ||
+        event->payload[0] != LAN_MSG_RULES_SET || !app->world_open || app->world == NULL) {
+        return;
+    }
+    if (!app->lan_host || app_lan_find_player(app, event->peer_id, false) == NULL) {
+        return;
+    }
+    GameRules r;
+    lan_rules_decode(&r, event->payload + 1);
+    if (game_rules_equal(&r, &app->world->rules)) {
+        return;
+    }
+    app->world->rules = r;
+    LOG_INFO("LAN: applied rule change requested by player %u", (unsigned)event->peer_id);
+    app_apply_world_rules(app);
+}
+
+/* Clamp a reported remote mode to this world's mode. Modes are
+ * world-scoped (every legitimate peer runs the host's mode), so a
+ * mismatch is a spoof attempt or a stale frame — never trust it into
+ * privileges. Returns the effective mode. */
+static bool app_lan_clamp_remote_mode(const AppContext *app, bool reported, uint32_t pid)
+{
+    bool world_creative = app != NULL && app->world_open && app->world != NULL &&
+                          app->world->mode == WORLD_MODE_CREATIVE;
+    if (reported != world_creative) {
+        LOG_INFO("LAN: clamping mode report from player %u to world mode (%s)", (unsigned)pid,
+                 world_creative ? "creative" : "survival");
+    }
+    return world_creative;
 }
 
 static void app_lan_handle_health(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size != 10 || event->payload[0] != APP_LAN_MSG_HEALTH) {
+    if (app == NULL || event == NULL || event->size != LAN_MSG_HEALTH_SIZE ||
+        event->payload[0] != LAN_MSG_HEALTH) {
         return;
     }
-    uint32_t pid = app_net_read_u32(event->payload + 1);
-    float health = app_net_read_f32(event->payload + 5);
-    bool dead = event->payload[9] != 0;
+    uint32_t pid = 0;
+    float health = 0.0f;
+    bool dead = false;
+    bool creative = false;
+    if (!lan_health_decode(event->payload, event->size, &pid, &health, &dead, &creative)) {
+        return;
+    }
     if (!(health >= 0.0f) || !(health <= 100.0f) || pid == app->lan_local_player_id) {
         return;
     }
+    creative = app_lan_clamp_remote_mode(app, creative, pid);
     if (app->lan_host) {
         /* Bind to socket identity; ignore spoofed IDs. Clients only report
          * themselves, so the sender must match the claimed ID. */
@@ -1526,8 +1566,9 @@ static void app_lan_handle_health(AppContext *app, const LanEvent *event)
         remote->health = health;
         remote->dead = dead;
         remote->has_health = true;
+        remote->creative = creative;
         /* Relay authoritative snapshot to everyone else. */
-        uint8_t out[10];
+        uint8_t out[LAN_MSG_HEALTH_SIZE];
         memcpy(out, event->payload, sizeof(out));
         (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
     } else {
@@ -1544,12 +1585,13 @@ static void app_lan_handle_health(AppContext *app, const LanEvent *event)
         remote->health = health;
         remote->dead = dead;
         remote->has_health = true;
+        remote->creative = creative;
     }
 }
 
 static void app_lan_handle_held(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size != 8 || event->payload[0] != APP_LAN_MSG_HELD) {
+    if (app == NULL || event == NULL || event->size != 8 || event->payload[0] != LAN_MSG_HELD) {
         return;
     }
     uint32_t pid = app_net_read_u32(event->payload + 1);
@@ -1588,17 +1630,21 @@ static void app_lan_handle_held(AppContext *app, const LanEvent *event)
 
 static void app_lan_handle_respawn(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->size != 17 ||
-        event->payload[0] != APP_LAN_MSG_RESPAWN) {
+    if (app == NULL || event == NULL) {
         return;
     }
-    uint32_t pid = app_net_read_u32(event->payload + 1);
-    Vec3 pos = mmath_vec3(app_net_read_f32(event->payload + 5), app_net_read_f32(event->payload + 9),
-                          app_net_read_f32(event->payload + 13));
-    if (!isfinite(pos.x) || !isfinite(pos.y) || !isfinite(pos.z) || pos.y < -64.0f ||
-        pos.y > 512.0f || pid == app->lan_local_player_id) {
+    uint32_t pid = 0;
+    float x = 0.0f, y = 0.0f, z = 0.0f, health = 0.0f;
+    if (!lan_respawn_decode(event->payload, event->size, &pid, &x, &y, &z, &health)) {
         return;
     }
+    /* Health travels in the frame: a respawn always restores vitals, so a
+     * non-positive value is a malformed frame (never a magic 20.0). */
+    if (!isfinite(x) || !isfinite(y) || !isfinite(z) || y < -64.0f || y > 512.0f ||
+        !(health > 0.0f) || !(health <= 100.0f) || pid == app->lan_local_player_id) {
+        return;
+    }
+    Vec3 pos = mmath_vec3(x, y, z);
     if (app->lan_host) {
         if (pid != event->peer_id) {
             return;
@@ -1609,9 +1655,9 @@ static void app_lan_handle_respawn(AppContext *app, const LanEvent *event)
         }
         remote->pos = pos;
         remote->dead = false;
-        remote->health = 20.0f;
+        remote->health = health;
         remote->has_health = true;
-        uint8_t out[17];
+        uint8_t out[LAN_MSG_RESPAWN_SIZE];
         memcpy(out, event->payload, sizeof(out));
         (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
     } else {
@@ -1624,7 +1670,7 @@ static void app_lan_handle_respawn(AppContext *app, const LanEvent *event)
         }
         remote->pos = pos;
         remote->dead = false;
-        remote->health = 20.0f;
+        remote->health = health;
         remote->has_health = true;
     }
 }
@@ -1633,17 +1679,32 @@ static void app_lan_handle_respawn(AppContext *app, const LanEvent *event)
  * and, on success, applies authoritative damage + broadcasts DAMAGE. */
 static void app_lan_handle_attack(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || !app->lan_host || event->size != 13 ||
-        event->payload[0] != APP_LAN_MSG_ATTACK || !app->world_open || app->world == NULL) {
+    if (app == NULL || event == NULL || !app->lan_host || event->size != LAN_MSG_ATTACK_SIZE ||
+        event->payload[0] != LAN_MSG_ATTACK || !app->world_open || app->world == NULL) {
         return;
     }
     LanRemotePlayer *attacker = app_lan_find_player(app, event->peer_id, false);
     if (attacker == NULL) {
         return;
     }
-    uint32_t victim_id = app_net_read_u32(event->payload + 1);
-    float damage = app_net_read_f32(event->payload + 5);
-    uint32_t seq = app_net_read_u32(event->payload + 9);
+    /* Authoritative swing-rate floor (attacker cooldowns are client-side;
+     * this stops script spam without touching legit 0.4 s+ swings). */
+    double now = time_now_seconds();
+    if (now - attacker->last_strike_time < LAN_MIN_STRIKE_INTERVAL) {
+        return;
+    }
+    if (attacker->last_attack_seq == UINT32_MAX) {
+        /* 2^32 accepted strikes: roll the dedup epoch instead of
+         * rejecting every future strike (positional validation below
+         * still applies, so a replayed frame buys one checked swing). */
+        attacker->last_attack_seq = 0;
+    }
+    uint32_t victim_id = 0;
+    float damage = 0.0f;
+    uint32_t seq = 0;
+    if (!lan_attack_decode(event->payload, event->size, &victim_id, &damage, &seq)) {
+        return;
+    }
     damage = pvp_clamp_damage(damage);
     if (!(damage > 0.0f) || seq == 0) {
         return;
@@ -1660,6 +1721,12 @@ static void app_lan_handle_attack(AppContext *app, const LanEvent *event)
     } else {
         LanRemotePlayer *victim = app_lan_find_player(app, victim_id, false);
         if (victim == NULL) {
+            return;
+        }
+        /* Authoritative creative immunity: creative victims never take
+         * PvP damage (rejected before sequence accounting, so a blocked
+         * strike leaves no trace). Victim-side gates stay as backup. */
+        if (victim->has_health && victim->creative) {
             return;
         }
         victim_alive = !victim->dead;
@@ -1680,6 +1747,7 @@ static void app_lan_handle_attack(AppContext *app, const LanEvent *event)
                              damage, dist, seq, &attacker->last_attack_seq)) {
         return;
     }
+    attacker->last_strike_time = now;
     /* Block occlusion: the strike must have a clear solid-block LOS on the
      * host's canonical world (prevents hitting through walls). */
     {
@@ -1718,6 +1786,13 @@ static void app_lan_handle_attack(AppContext *app, const LanEvent *event)
                 player_apply_knockback(&app->player, k.x / kl * 4.0f, 2.0f, k.z / kl * 4.0f);
             }
         }
+    } else {
+        /* Optimistic remote cache (same discipline as the ranged and
+         * self-strike paths); the victim's HEALTH corrects any drift. */
+        LanRemotePlayer *hit = app_lan_find_player(app, victim_id, false);
+        if (hit != NULL) {
+            app_pvp_host_hit_remote(app, hit, victim_id, damage, event->peer_id);
+        }
     }
     /* Broadcast authoritative DAMAGE to all (victim applies, others cache).
      * Duplicate suppression: host validates ATTACK seq strictly increasing
@@ -1725,12 +1800,111 @@ static void app_lan_handle_attack(AppContext *app, const LanEvent *event)
      * and victims gate on hurt_t — a resent DAMAGE inside the hurt window
      * is a safe no-op. */
     {
-        uint8_t out[13];
-        out[0] = APP_LAN_MSG_DAMAGE;
-        app_net_write_u32(out + 1, victim_id);
-        app_net_write_f32(out + 5, damage);
-        app_net_write_u32(out + 9, event->peer_id);
+        uint8_t out[LAN_MSG_DAMAGE_SIZE];
+        lan_damage_encode(out, victim_id, damage, event->peer_id);
         (void)seq;
+        (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+    }
+}
+
+/* Client->host arrow strike request. Same authority model as melee, but
+ * the range budget is arrow-scale and only solid-block LOS is rechecked
+ * (the swept arrow collision already ran client-side; the host owns the
+ * canonical world for the LOS leg). */
+static void app_lan_handle_attack_ranged(AppContext *app, const LanEvent *event)
+{
+    if (app == NULL || event == NULL || !app->lan_host || !app->world_open || app->world == NULL) {
+        return;
+    }
+    LanRemotePlayer *attacker = app_lan_find_player(app, event->peer_id, false);
+    if (attacker == NULL) {
+        return;
+    }
+    double now = time_now_seconds();
+    if (now - attacker->last_strike_time < LAN_MIN_STRIKE_INTERVAL) {
+        return;
+    }
+    if (attacker->last_attack_seq == UINT32_MAX) {
+        attacker->last_attack_seq = 0;
+    }
+    uint32_t victim_id = 0;
+    float damage = 0.0f;
+    uint32_t seq = 0;
+    if (!lan_attack_ranged_decode(event->payload, event->size, &victim_id, &damage, &seq)) {
+        return;
+    }
+    damage = pvp_clamp_arrow_damage(damage);
+    if (!(damage > 0.0f) || seq == 0) {
+        return;
+    }
+    LanRemotePlayer *victim = NULL;
+    Vec3 vpos = mmath_vec3(0.0f, 0.0f, 0.0f);
+    float h = PVP_TARGET_HEIGHT_STAND;
+    bool victim_alive = false;
+    if (!app_pvp_host_victim(app, victim_id, &victim, &vpos, &h, &victim_alive) &&
+        victim_id != app->lan_local_player_id) {
+        return;
+    }
+    const GameRules *rules = app_world_rules(app);
+    bool attacker_alive = !attacker->dead;
+    if (victim_id == app->lan_local_player_id) {
+        victim_alive = !app->player.dead;
+        vpos = app->player.pos;
+        h = app->player.sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+    } else if (victim != NULL && victim->has_health && victim->creative) {
+        /* Authoritative creative immunity (mirrors the melee handler). */
+        return;
+    }
+    if (!rules->pvp || !attacker_alive || !victim_alive || event->peer_id == victim_id) {
+        return;
+    }
+    float dx = vpos.x - attacker->pos.x;
+    float dy = (vpos.y + h * 0.5f) - (attacker->pos.y + 1.62f);
+    float dz = vpos.z - attacker->pos.z;
+    float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (!(dist <= LAN_ARROW_VALIDATE_RANGE)) {
+        return;
+    }
+    if (!pvp_seq_accept(seq, &attacker->last_attack_seq)) {
+        return;
+    }
+    attacker->last_strike_time = now;
+    /* Solid-block LOS on the canonical world (arrow trajectory itself is
+     * client-simulated; a wall between shooter and victim vetoes). */
+    {
+        float len = sqrtf(dx * dx + dy * dy + dz * dz);
+        if (len > 1e-6f) {
+            float yaw = atan2f(-dx, -dz);
+            float clamped = dy / len;
+            if (clamped > 1.0f) {
+                clamped = 1.0f;
+            } else if (clamped < -1.0f) {
+                clamped = -1.0f;
+            }
+            Vec3 eye = mmath_vec3(attacker->pos.x, attacker->pos.y + 1.62f, attacker->pos.z);
+            if (!app_pvp_los_clear(app, eye, yaw, asinf(clamped), len)) {
+                return;
+            }
+        }
+    }
+    if (victim_id == app->lan_local_player_id) {
+        if (app->player.hurt_t <= 0.0f && !app->player.dead &&
+            !survival_is_creative(&app->player)) {
+            survival_damage_player(&app->player, damage);
+            app->player.hurt_t = PLAYER_HURT_WINDOW;
+            Vec3 k = mmath_vec3(app->player.pos.x - attacker->pos.x, 0.0f,
+                                app->player.pos.z - attacker->pos.z);
+            float kl = sqrtf(k.x * k.x + k.z * k.z);
+            if (kl > 1e-4f) {
+                player_apply_knockback(&app->player, k.x / kl * 4.0f, 2.0f, k.z / kl * 4.0f);
+            }
+        }
+    } else {
+        app_pvp_host_hit_remote(app, victim, victim_id, damage, event->peer_id);
+    }
+    {
+        uint8_t out[LAN_MSG_DAMAGE_SIZE];
+        lan_damage_encode(out, victim_id, damage, event->peer_id);
         (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
     }
 }
@@ -1740,11 +1914,11 @@ static void app_lan_handle_attack(AppContext *app, const LanEvent *event)
  * blocks multi-hit within a swing and TCP delivers each frame once. */
 static void app_lan_handle_damage(AppContext *app, const LanEvent *event)
 {
-    if (app == NULL || event == NULL || event->payload[0] != APP_LAN_MSG_DAMAGE ||
+    if (app == NULL || event == NULL || event->payload[0] != LAN_MSG_DAMAGE ||
         !app->world_open) {
         return;
     }
-    if (event->size != 13) {
+    if (event->size != LAN_MSG_DAMAGE_SIZE) {
         return;
     }
     bool is_host = app->lan_host;
@@ -1754,8 +1928,11 @@ static void app_lan_handle_damage(AppContext *app, const LanEvent *event)
     if (is_host) {
         return; /* Host applied authoritatively in handle_attack. */
     }
-    uint32_t victim_id = app_net_read_u32(event->payload + 1);
-    float damage = app_net_read_f32(event->payload + 5);
+    uint32_t victim_id = 0;
+    float damage = 0.0f;
+    if (!lan_damage_decode(event->payload, event->size, &victim_id, &damage, NULL)) {
+        return;
+    }
     damage = pvp_clamp_damage(damage);
     if (!(damage > 0.0f)) {
         return;
@@ -1797,27 +1974,34 @@ static void app_lan_handle_welcome(AppContext *app, const LanEvent *event)
     }
     if (!app_lan_open_client_world(app, event)) {
         snprintf(app->menu.error, sizeof(app->menu.error),
-                 "Host sent invalid world data or the local copy could not be created.");
+                 "Host sent invalid world data, an unsupported version (need v%d), or the local copy "
+                 "could not be created.",
+                 LAN_PROTOCOL_VERSION);
         app_lan_disconnect(app);
     }
 }
 
-static void app_lan_handle_message(AppContext *app, const LanEvent *event)
+void app_lan_handle_message(AppContext *app, const LanEvent *event)
 {
     if (app == NULL || event == NULL || event->size == 0) {
         return;
     }
-    if (app->lan_host && event->payload[0] != APP_LAN_MSG_HELLO &&
+    if (app->lan_host && event->payload[0] != LAN_MSG_HELLO &&
         app_lan_find_player(app, event->peer_id, false) == NULL) {
         (void)lan_disconnect_peer(app->lan, event->peer_id);
         return;
     }
     switch (event->payload[0]) {
-    case APP_LAN_MSG_HELLO: {
+    case LAN_MSG_HELLO: {
         if (!app->lan_host) {
             return;
         }
-        if (event->size < 3 || event->payload[1] != APP_LAN_PROTOCOL_VERSION) {
+        if (event->size < 3 || !lan_version_supported(event->payload[1])) {
+            /* Version mismatch (e.g. v3 without combat replication): refuse
+             * outright so old peers never play a silently inconsistent
+             * session (ghost players, one-sided god-mode). */
+            LOG_INFO("LAN: rejecting peer %u with unsupported protocol version %u (need v%d)",
+                     (unsigned)event->peer_id, (unsigned)event->payload[1], LAN_PROTOCOL_VERSION);
             (void)lan_disconnect_peer(app->lan, event->peer_id);
             return;
         }
@@ -1846,46 +2030,56 @@ static void app_lan_handle_message(AppContext *app, const LanEvent *event)
         }
         memcpy(remote->username, name, name_len + 1);
         remote->pos = app->player.pos;
+        remote->rpos = app->player.pos;
+        remote->ryaw = app->player.yaw;
+        remote->rpitch = app->player.pitch;
+        remote->has_render = true;
         (void)app_lan_send_welcome(app, event->peer_id);
         app_lan_send_current_players(app, event->peer_id);
         app_chat_add(app, name, "joined the LAN world");
         break;
     }
-    case APP_LAN_MSG_WELCOME:
+    case LAN_MSG_WELCOME:
         app_lan_handle_welcome(app, event);
         break;
-    case APP_LAN_MSG_PLAYER:
+    case LAN_MSG_PLAYER:
         (void)app_lan_parse_player(app, event);
         break;
-    case APP_LAN_MSG_CHAT:
+    case LAN_MSG_CHAT:
         app_lan_handle_chat(app, event);
         break;
-    case APP_LAN_MSG_BLOCK:
+    case LAN_MSG_BLOCK:
         app_lan_handle_block(app, event);
         break;
-    case APP_LAN_MSG_GRAVITY_START:
-    case APP_LAN_MSG_GRAVITY_LAND:
+    case LAN_MSG_GRAVITY_START:
+    case LAN_MSG_GRAVITY_LAND:
         app_lan_handle_gravity(app, event);
         break;
-    case APP_LAN_MSG_ATTACK:
+    case LAN_MSG_ATTACK:
         app_lan_handle_attack(app, event);
         break;
-    case APP_LAN_MSG_DAMAGE:
+    case LAN_MSG_ATTACK_RANGED:
+        app_lan_handle_attack_ranged(app, event);
+        break;
+    case LAN_MSG_DAMAGE:
         app_lan_handle_damage(app, event);
         break;
-    case APP_LAN_MSG_HEALTH:
+    case LAN_MSG_HEALTH:
         app_lan_handle_health(app, event);
         break;
-    case APP_LAN_MSG_RESPAWN:
+    case LAN_MSG_RESPAWN:
         app_lan_handle_respawn(app, event);
         break;
-    case APP_LAN_MSG_RULES:
+    case LAN_MSG_RULES:
         app_lan_handle_rules(app, event);
         break;
-    case APP_LAN_MSG_HELD:
+    case LAN_MSG_RULES_SET:
+        app_lan_handle_rules_set(app, event);
+        break;
+    case LAN_MSG_HELD:
         app_lan_handle_held(app, event);
         break;
-    case APP_LAN_MSG_PLAYER_LEFT:
+    case LAN_MSG_PLAYER_LEFT:
         if (app->lan_client && event->size == 5) {
             app_lan_remove_player(app, app_net_read_u32(event->payload + 1));
         }
@@ -1902,7 +2096,10 @@ static void app_lan_client_disconnected(AppContext *app)
     }
     bool was_joining = app->lan_join_pending;
     if (was_joining) {
-        snprintf(app->menu.error, sizeof(app->menu.error), "Could not connect to that LAN world.");
+        snprintf(app->menu.error, sizeof(app->menu.error),
+                 "Could not connect to that LAN world (check the address and that all players run "
+                 "TerraCraft protocol v%d).",
+                 LAN_PROTOCOL_VERSION);
         app_lan_disconnect(app);
         return;
     }
@@ -1918,7 +2115,7 @@ static void app_lan_client_disconnected(AppContext *app)
     }
 }
 
-static void app_lan_update(AppContext *app, double dt)
+void app_lan_update(AppContext *app, double dt)
 {
     if (app == NULL || app->lan == NULL) {
         return;
@@ -1938,8 +2135,8 @@ static void app_lan_update(AppContext *app, double dt)
             if (app->lan_client && event.peer_id == LAN_SERVER_PEER_ID) {
                 size_t name_len = strlen(app->username);
                 uint8_t hello[3 + PROFILE_NAME_MAX_LEN];
-                hello[0] = APP_LAN_MSG_HELLO;
-                hello[1] = APP_LAN_PROTOCOL_VERSION;
+                hello[0] = LAN_MSG_HELLO;
+                hello[1] = LAN_PROTOCOL_VERSION;
                 hello[2] = (uint8_t)name_len;
                 memcpy(hello + 3, app->username, name_len);
                 if (!lan_send(app->lan, LAN_SERVER_PEER_ID, hello, 3 + name_len)) {
@@ -1950,7 +2147,7 @@ static void app_lan_update(AppContext *app, double dt)
         case LAN_EVENT_PEER_DISCONNECTED:
             if (app->lan_host) {
                 app_lan_remove_player(app, event.peer_id);
-                uint8_t left[5] = {APP_LAN_MSG_PLAYER_LEFT, 0, 0, 0, 0};
+                uint8_t left[5] = {LAN_MSG_PLAYER_LEFT, 0, 0, 0, 0};
                 app_net_write_u32(left + 1, event.peer_id);
                 (void)lan_send(app->lan, LAN_BROADCAST_PEER, left, sizeof(left));
             } else if (app->lan_client && event.peer_id == LAN_SERVER_PEER_ID) {
@@ -2011,6 +2208,28 @@ static void app_lan_update(AppContext *app, double dt)
     if (!app->world_open || app->state != GAME_STATE_PLAYING || !lan_is_connected(app->lan)) {
         return;
     }
+    /* Render interpolation: ease drawn poses toward authoritative ones so
+     * 10 Hz snapshots don't visibly jump. Collision and aim keep using
+     * the authoritative pos (never the smoothed copy). */
+    {
+        float blend = (float)dt * 10.0f;
+        if (blend > 1.0f) {
+            blend = 1.0f;
+        } else if (!(blend > 0.0f)) {
+            blend = 0.0f;
+        }
+        for (size_t li = 0; li < MINEC_LAN_MAX_PLAYERS; ++li) {
+            LanRemotePlayer *rp = &app->lan_players[li];
+            if (!rp->active || !rp->has_render || rp->dead) {
+                continue;
+            }
+            rp->rpos.x += (rp->pos.x - rp->rpos.x) * blend;
+            rp->rpos.y += (rp->pos.y - rp->rpos.y) * blend;
+            rp->rpos.z += (rp->pos.z - rp->rpos.z) * blend;
+            rp->ryaw = pvp_lerp_angle(rp->ryaw, rp->yaw, blend);
+            rp->rpitch = pvp_lerp_angle(rp->rpitch, rp->pitch, blend);
+        }
+    }
     app->lan_player_send_timer += dt;
     app->lan_health_send_timer += dt;
     /* Health snapshots: on change or at 1 Hz (death/respawn converge even
@@ -2021,7 +2240,7 @@ static void app_lan_update(AppContext *app, double dt)
     if (app->lan_health_send_timer >= 1.0 || (health_dirty && app->lan_health_send_timer >= 0.15)) {
         uint32_t htarget = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
         if (app_lan_send_health(app, htarget, app->lan_local_player_id, app->player.health,
-                                app->player.dead)) {
+                                app->player.dead, app_lan_self_creative(app))) {
             app->lan_last_sent_health = app->player.health;
             app->lan_last_sent_dead = app->player.dead;
             app->lan_health_send_timer = 0.0;
@@ -2411,6 +2630,11 @@ static bool app_aim_remote_player(AppContext *app, uint32_t *out_victim, float *
         if (!remote->active || remote->username[0] == '\0' || remote->dead) {
             continue;
         }
+        /* Known-creative victims are immune (the host rejects these
+         * strikes authoritatively); unknown modes still try. */
+        if (remote->has_health && remote->creative) {
+            continue;
+        }
         float h = remote->sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
         float d = 0.0f;
         if (!pvp_ray_hits_player(eye, dir, PVP_REACH, remote->pos, PVP_TARGET_WIDTH, h, &d)) {
@@ -2437,6 +2661,69 @@ static bool app_aim_remote_player(AppContext *app, uint32_t *out_victim, float *
     return true;
 }
 
+/* Resolve a host-side remote victim record (liveness + hitbox origin).
+ * Returns false for unknown victims (stale/invalid IDs never touch state). */
+static bool app_pvp_host_victim(AppContext *app, uint32_t victim_id, LanRemotePlayer **out_victim,
+                                Vec3 *out_pos, float *out_h, bool *out_alive)
+{
+    if (app == NULL || out_victim == NULL || out_pos == NULL || out_h == NULL || out_alive == NULL) {
+        return false;
+    }
+    LanRemotePlayer *victim = app_lan_find_player(app, victim_id, false);
+    if (victim == NULL) {
+        return false;
+    }
+    *out_victim = victim;
+    *out_pos = victim->pos;
+    *out_h = victim->sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+    *out_alive = !victim->dead;
+    return true;
+}
+
+/* Host-side optimistic cache nudge + authoritative DAMAGE broadcast for a
+ * validated strike on a remote victim (victim gates on hurt_t; HEALTH
+ * corrects the cache — same discipline as melee). */
+static void app_pvp_host_hit_remote(AppContext *app, LanRemotePlayer *victim, uint32_t victim_id,
+                                    float damage, uint32_t attacker_id)
+{
+    float next = victim->has_health ? victim->health - damage : 20.0f - damage;
+    if (next < 0.0f) {
+        next = 0.0f;
+    }
+    victim->health = next;
+    victim->has_health = true;
+    if (next <= 0.0f) {
+        victim->dead = true;
+    }
+    uint8_t out[LAN_MSG_DAMAGE_SIZE];
+    lan_damage_encode(out, victim_id, damage, attacker_id);
+    (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+}
+
+/* Next outgoing strike sequence number (shared melee/arrow counter, so the
+ * host sees one strictly-increasing stream per attacker; 0 is skipped). */
+static uint32_t app_pvp_next_seq(AppContext *app)
+{
+    app->lan_attack_seq++;
+    if (app->lan_attack_seq == 0) {
+        app->lan_attack_seq = 1;
+    }
+    return app->lan_attack_seq;
+}
+
+/* Solid-block line-of-sight from eye along (yaw,pitch) within max_dist.
+ * Plants/torches pass (same shield rule as melee); only solid blocks stop. */
+static bool app_pvp_los_clear(AppContext *app, Vec3 eye, float yaw, float pitch, float max_dist)
+{
+    if (app == NULL || app->world == NULL || !(max_dist > 0.0f)) {
+        return false;
+    }
+    HitResult hit = raycast_from_eye(eye, yaw, pitch, app->world, max_dist);
+    return !(hit.hit &&
+             mob_block_shields(world_get_block(app->world, hit.block[0], hit.block[1],
+                                               hit.block[2])));
+}
+
 /* Send a PvP strike request (clients) or apply directly (host/single-player
  * has no remote victim; host validates remote strikes in handle_attack).
  * Host attackers apply locally-validated damage immediately AND broadcast
@@ -2454,62 +2741,99 @@ static void app_pvp_strike_remote(AppContext *app, uint32_t victim_id, float dam
         /* Host path: validate like an incoming ATTACK (range/LOS/rules),
          * then apply + broadcast. Reuses handle_attack policy by
          * synthesizing the check inline (no network round-trip). */
-        LanRemotePlayer *victim = app_lan_find_player(app, victim_id, false);
-        if (victim == NULL || victim->dead) {
+        LanRemotePlayer *victim = NULL;
+        Vec3 vpos = mmath_vec3(0.0f, 0.0f, 0.0f);
+        float h = PVP_TARGET_HEIGHT_STAND;
+        bool alive = false;
+        if (!app_pvp_host_victim(app, victim_id, &victim, &vpos, &h, &alive) || !alive) {
             return;
         }
         const GameRules *rules = app_world_rules(app);
-        if (!rules->pvp || app->player.dead || survival_is_creative(&app->player)) {
+        /* Creative attackers still deal damage (creative grants immunity,
+         * not harmlessness — matches the remote-attacker handler below). */
+        if (!rules->pvp || app->player.dead) {
             return;
         }
-        float h = victim->sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+        if (victim->has_health && victim->creative) {
+            return;
+        }
         Vec3 eye = player_eye_pos(&app->player);
         float cp = cosf(app->player.pitch);
         Vec3 dir = mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch),
                               -cosf(app->player.yaw) * cp);
         float edist = 0.0f;
-        if (!pvp_ray_hits_player(eye, dir, PVP_REACH, victim->pos, PVP_TARGET_WIDTH, h, &edist)) {
+        if (!pvp_ray_hits_player(eye, dir, PVP_REACH, vpos, PVP_TARGET_WIDTH, h, &edist)) {
             return;
         }
-        HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world, edist);
-        if (hit.hit && hit.dist < edist &&
-            mob_block_shields(world_get_block(app->world, hit.block[0], hit.block[1],
-                                              hit.block[2]))) {
+        if (!app_pvp_los_clear(app, eye, app->player.yaw, app->player.pitch, edist)) {
             return;
         }
-        /* Victim-side hurt window lives on the victim client; the host
-         * tracks nothing per-victim here (victim gates on hurt_t). Update
-         * the display cache optimistically; HEALTH will correct it. */
-        float next = victim->has_health ? victim->health - damage : 20.0f - damage;
-        if (next < 0.0f) {
-            next = 0.0f;
-        }
-        victim->health = next;
-        victim->has_health = true;
-        if (next <= 0.0f) {
-            victim->dead = true;
-        }
-        uint8_t out[13];
-        out[0] = APP_LAN_MSG_DAMAGE;
-        app_net_write_u32(out + 1, victim_id);
-        app_net_write_f32(out + 5, damage);
-        app_net_write_u32(out + 9, app->lan_local_player_id);
-        (void)lan_send(app->lan, LAN_BROADCAST_PEER, out, sizeof(out));
+        app_pvp_host_hit_remote(app, victim, victim_id, damage, app->lan_local_player_id);
         return;
     }
     /* Client path: request host validation (seq-guarded). */
     if (!app->lan_client) {
         return;
     }
-    app->lan_attack_seq++;
-    if (app->lan_attack_seq == 0) {
-        app->lan_attack_seq = 1;
+    uint8_t out[LAN_MSG_ATTACK_SIZE];
+    lan_attack_encode(out, victim_id, damage, app_pvp_next_seq(app));
+    (void)lan_send(app->lan, LAN_SERVER_PEER_ID, out, sizeof(out));
+}
+
+/* Player-fired arrow strike on a remote peer (collision already resolved
+ * client-side by projectile_update_ex; the host re-validates range, solid
+ * LOS, rules, liveness, and sequence — trajectory itself rides the
+ * trusted-LAN model like movement does). */
+static void app_pvp_strike_remote_ranged(AppContext *app, uint32_t victim_id, float damage)
+{
+    if (app == NULL || app->lan == NULL) {
+        return;
     }
-    uint8_t out[13];
-    out[0] = APP_LAN_MSG_ATTACK;
-    app_net_write_u32(out + 1, victim_id);
-    app_net_write_f32(out + 5, damage);
-    app_net_write_u32(out + 9, app->lan_attack_seq);
+    damage = pvp_clamp_arrow_damage(damage);
+    if (!(damage > 0.0f)) {
+        return;
+    }
+    if (app->lan_host) {
+        LanRemotePlayer *victim = NULL;
+        Vec3 vpos = mmath_vec3(0.0f, 0.0f, 0.0f);
+        float h = PVP_TARGET_HEIGHT_STAND;
+        bool alive = false;
+        if (!app_pvp_host_victim(app, victim_id, &victim, &vpos, &h, &alive) || !alive) {
+            return;
+        }
+        const GameRules *rules = app_world_rules(app);
+        if (!rules->pvp || app->player.dead) {
+            return;
+        }
+        if (victim->has_health && victim->creative) {
+            return;
+        }
+        Vec3 eye = player_eye_pos(&app->player);
+        float dx = (vpos.x - eye.x);
+        float dy = (vpos.y + h * 0.5f - eye.y);
+        float dz = (vpos.z - eye.z);
+        float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+        if (!(dist <= LAN_ARROW_VALIDATE_RANGE)) {
+            return;
+        }
+        float yaw = atan2f(-dx, -dz);
+        float clamped = dy / (dist > 1e-6f ? dist : 1.0f);
+        if (clamped > 1.0f) {
+            clamped = 1.0f;
+        } else if (clamped < -1.0f) {
+            clamped = -1.0f;
+        }
+        if (!app_pvp_los_clear(app, eye, yaw, asinf(clamped), dist)) {
+            return;
+        }
+        app_pvp_host_hit_remote(app, victim, victim_id, damage, app->lan_local_player_id);
+        return;
+    }
+    if (!app->lan_client) {
+        return;
+    }
+    uint8_t out[LAN_MSG_ATTACK_RANGED_SIZE];
+    lan_attack_ranged_encode(out, victim_id, damage, app_pvp_next_seq(app));
     (void)lan_send(app->lan, LAN_SERVER_PEER_ID, out, sizeof(out));
 }
 
@@ -3029,9 +3353,10 @@ void app_respawn_player(AppContext *app)
      * corpse position (prevents ghost entities at the death site). */
     if (app->lan != NULL && (app->lan_host || app->lan_client) && lan_is_connected(app->lan)) {
         uint32_t target = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
-        (void)app_lan_send_respawn(app, target, app->lan_local_player_id, spawn);
+        (void)app_lan_send_respawn(app, target, app->lan_local_player_id, spawn,
+                                   app->player.health);
         (void)app_lan_send_health(app, target, app->lan_local_player_id, app->player.health,
-                                  app->player.dead);
+                                  app->player.dead, app_lan_self_creative(app));
         app->lan_last_sent_health = app->player.health;
         app->lan_last_sent_dead = app->player.dead;
         app->lan_health_send_timer = 0.0;
@@ -3261,7 +3586,7 @@ static void app_tick_playing(AppContext *app, float dt)
     /* Activity strain (survival only): sprinting while moving and jump
      * takeoffs accumulate exhaustion (burned into hunger by the policy). */
     if (!creative && controllable) {
-        if (in.sprint && (in.fwd != 0.0f || in.strafe != 0.0f)) {
+        if (app->player.sprinting) {
             survival_add_exhaustion(&app->player, SURVIVAL_EXHAUST_SPRINT * dt);
         }
         if (in.jump && !app->prev_jump && was_grounded) {
@@ -3298,6 +3623,7 @@ static void app_tick_playing(AppContext *app, float dt)
         pai.grounded = app->player.grounded;
         pai.sneaking = app->player.sneaking;
         pai.use_hold = app->player.eat_active || app->player.bow_drawing;
+        pai.water = app->player.water_contact;
         player_anim_update(&app->panim, &pai, dt);
     }
 
@@ -3414,7 +3740,9 @@ bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
     }
 
     /* Projectiles simulate (both modes): swept collision, damage through
-     * the M8 APIs, embed/decay/despawn. Player hits gate on hurt_t. */
+     * the M8 APIs, embed/decay/despawn. Player hits gate on hurt_t.
+     * Player-owned arrows additionally test remote peers (LAN PvP) and
+     * route through the host-validated strike path like melee. */
     {
         ProjectilePlayer pp;
         pp.pos = app->player.pos;
@@ -3422,8 +3750,37 @@ bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
         pp.width = app->player.width;
         pp.alive = !app->player.dead;
         pp.creative = creative;
+        ProjectileRemote premotes[MINEC_LAN_MAX_PLAYERS];
+        size_t npremotes = 0;
+        if ((app->lan_host || app->lan_client) && app->lan != NULL && tick_rules->pvp &&
+            !app->player.dead) {
+            for (size_t ri = 0; ri < MINEC_LAN_MAX_PLAYERS; ++ri) {
+                const LanRemotePlayer *rp = &app->lan_players[ri];
+                if (!rp->active || rp->username[0] == '\0' || rp->dead) {
+                    continue;
+                }
+                ProjectileRemote *dst = &premotes[npremotes++];
+                dst->id = rp->peer_id;
+                dst->pos = rp->pos;
+                dst->height =
+                    rp->sneaking ? PVP_TARGET_HEIGHT_SNEAK : PVP_TARGET_HEIGHT_STAND;
+                dst->width = PVP_TARGET_WIDTH;
+                dst->alive = true;
+                /* Known-creative remotes are skipped by the scan (arrows fly
+                 * through to whatever stands behind); unknown modes still
+                 * test, and the host + victim gates enforce immunity. */
+                dst->creative = rp->has_health && rp->creative;
+            }
+        }
         ProjectileFrameEvents pev;
-        projectile_update(&app->projectiles, &app->mobs, &app->entities, app->world, &pp, dt, &pev);
+        projectile_update_ex(&app->projectiles, &app->mobs, &app->entities, app->world, &pp,
+                             npremotes > 0 ? premotes : NULL, npremotes, dt, &pev);
+        for (int ri = 0; ri < pev.remote_hits; ++ri) {
+            app_pvp_strike_remote_ranged(app, pev.remote_ids[ri], pev.remote_damage[ri]);
+        }
+        if (pev.remote_hits_dropped > 0) {
+            LOG_WARN("projectiles: %d remote hit(s) dropped past the cap", pev.remote_hits_dropped);
+        }
         if (pev.player_hits > 0 && !app->player.dead && !creative && app->player.hurt_t <= 0.0f) {
             survival_damage_player(&app->player, pev.player_damage);
             player_anim_notify_hurt(&app->panim);
@@ -3510,7 +3867,7 @@ bool splashed = player_water_contact(app->world, &app->player) > 0.0f;
         if (app->lan != NULL && (app->lan_host || app->lan_client) && lan_is_connected(app->lan)) {
             uint32_t target = app->lan_host ? LAN_BROADCAST_PEER : LAN_SERVER_PEER_ID;
             (void)app_lan_send_health(app, target, app->lan_local_player_id, app->player.health,
-                                      true);
+                                      true, app_lan_self_creative(app));
             app->lan_last_sent_health = app->player.health;
             app->lan_last_sent_dead = true;
             app->lan_health_send_timer = 0.0;
@@ -3540,14 +3897,23 @@ static void app_draw_remote_players(AppContext *app, float aspect)
             continue;
         }
         Player avatar = app->player;
-        avatar.pos = remote->pos;
-        avatar.render_pos = remote->pos;
-        avatar.yaw = remote->yaw;
-        avatar.pitch = remote->pitch;
+        /* Draw the interpolated pose; gameplay (aim, collision) uses the
+         * authoritative remote->pos elsewhere. */
+        Vec3 draw_pos = remote->has_render ? remote->rpos : remote->pos;
+        avatar.pos = draw_pos;
+        avatar.render_pos = draw_pos;
+        avatar.yaw = remote->has_render ? remote->ryaw : remote->yaw;
+        avatar.pitch = remote->has_render ? remote->rpitch : remote->pitch;
         avatar.walk_phase = remote->walk_phase;
         avatar.sneaking = remote->sneaking;
+        avatar.sprinting = false;
+        avatar.grounded = true;
+        avatar.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
+        avatar.water_contact = 0.0f;
+        avatar.eat_active = false;
+        avatar.bow_drawing = false;
         renderer_draw_player(app->renderer, app->camera, aspect, &app->clock, &avatar,
-                             remote->moving ? 0.9f : 0.0f);
+                             remote->moving ? 0.9f : 0.0f, NULL);
     }
 }
 
@@ -3680,7 +4046,8 @@ static void app_draw_player_third(AppContext *app, float aspect)
     if (blend > 1.0f) {
         blend = 1.0f;
     }
-    renderer_draw_player(app->renderer, app->camera, aspect, &app->clock, &app->player, blend);
+    renderer_draw_player(app->renderer, app->camera, aspect, &app->clock, &app->player, blend,
+                         &app->panim);
 }
 
 static void app_prepare_world_render(AppContext *app)

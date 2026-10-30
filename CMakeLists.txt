@@ -257,3 +257,11 @@ if(WIN32 AND MINEC_SDL2_DLL)
   add_custom_command(TARGET worldgen_probe POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINEC_SDL2_DLL}" $<TARGET_FILE_DIR:worldgen_probe>)
 endif()
+# Headless instrumented LAN host for live two-client verification with a
+# real graphical peer (manual runs only, not part of ctest).
+add_executable(lan_headless_host tools/lan_headless_host.c)
+target_link_libraries(lan_headless_host PRIVATE terracraft_core)
+if(WIN32 AND MINEC_SDL2_DLL)
+  add_custom_command(TARGET lan_headless_host POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINEC_SDL2_DLL}" $<TARGET_FILE_DIR:lan_headless_host>)
+endif()

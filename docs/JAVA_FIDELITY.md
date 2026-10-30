@@ -71,8 +71,9 @@ and rendering all affect what a player observes.
   protection clips per-axis moves with no 1-below support plus a diagonal
   corner-cut guard (`player_has_support`, `player_has_support_at` in
   `src/game/player.c`, traced from 1.5-era `Entity.moveEntity`). Automatic
-  player step-up for dry ledges/shores is gated on `auto_jump` (default
-  OFF).
+  player step-up for dry ledges is gated on `auto_jump` (default OFF);
+  climbing out of water onto a shore is always available so `auto_jump`
+  can never trap the player in water.
 - The camera follows the current player eye and rotation, plus gentle
   distance-driven first-person bob from `walk_phase`/`bob_amp`
   (`player_view_bob_offset`, `app_position_camera` in `src/core/app.c`,
@@ -165,15 +166,22 @@ and rendering all affect what a player observes.
   simulation positions each frame so movement and targeting stay aligned. The
   first-person view draws a Steve-sourced sleeve and hand (converter crops,
   procedural fallback), a held-item sprite or block cube, and a controller
-  with idle/walk/sprint/air/land/attack/use/hurt/sneak states. F5 switches
-  to a third-person chase camera rendering the articulated Steve body
-  (verified in-game by screenshot).
+  with idle/walk/sprint/air/swim/land/attack/use/hurt/sneak states. F5 switches
+  to a third-person chase camera rendering the articulated Steve body.
+- The third-person body derives one pose from locomotion, water contact,
+  look pitch, and one-shot attack/hurt/landing weights: hips pivot the torso
+  lean (sneak 0.58 rad, sprint 0.14, swim near-prone), shoulders and head ride
+  that lean, arms counter-swing their opposite legs, legs flutter in water and
+  tuck in the air, feet stay planted, and idle adds breathing bob. The local
+  avatar's held block/sprite follows the right hand (remote hotbars are not
+  replicated, so remotes draw empty-handed).
 - The first-person arm stays in camera-local coordinates; its held item shares
   the arm pivot and rotations. Walking and sprinting add wrist/forearm motion,
   and attack, landing, and hurt poses animate joints as well as camera-space
-  position. The camera-facing face uses Steve's front-arm UVs. Headless tests
-  cover pose motion and UV selection; final appearance still needs an in-game
-  view at several movement and camera angles.
+  position; use raises the hand and breathing offsets the rest pose. The
+  camera-facing face uses Steve's front-arm UVs. Headless tests cover pose
+  motion and UV selection; final appearance still needs an in-game view at
+  several movement and camera angles.
 - Lighting uses a global day/night value, a per-column occlusion heuristic,
   and ambient occlusion. It has no separate propagated sky-light and
   block-light channels, cross-chunk light queue, or torch emission.
@@ -218,9 +226,11 @@ and rendering all affect what a player observes.
    every frame; render positions track the sim exactly (no smoothing
    lag). Discrete toggles and hotbar changes still process after
    each event drain rather than inside a world tick.
-2. Direct-velocity movement, no acceleration/friction model; sneak posture,
-   headroom, edge protection (per-axis + corner guard), and view bobbing
-   are implemented, step-up remains gated on `auto_jump`.
+2. Movement now eases toward walk/sprint speeds with ground/air/water
+   control and MC-derived friction (sprint needs forward input); sneak
+   posture, headroom, edge protection (per-axis + corner guard), and view
+   bobbing are implemented, dry step-up remains gated on `auto_jump` (water
+   escape is always enabled).
 3. Hunger has no saturation, and sprint hunger gating is absent.
 4. Lighting has no propagated sky/block channels. Fluid timing and player
    buoyancy are simplified, and underwater breathing/drowning are absent.

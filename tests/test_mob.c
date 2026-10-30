@@ -1542,6 +1542,12 @@ int test_player_anim_states(void)
     player_anim_update(&a, &air, 1.0f / 60.0f);
     TEST_ASSERT(a.state == PLAYER_ANIM_AIR);
 
+    /* Water contact outranks the airborne base state (swimming). */
+    PlayerAnimInput swim = {true, false, false, false, false, 0.8f};
+    player_anim_update(&a, &swim, 1.0f / 60.0f);
+    TEST_ASSERT(a.state == PLAYER_ANIM_SWIM);
+    TEST_ASSERT_FLOAT_EQ(player_anim_pose(&a).dip, 0.035f, 1e-6f);
+
     /* Small hop settles straight to base (no dip theatre). */
     player_anim_notify_landed(&a, 0.5f);
     player_anim_update(&a, &walk, 1.0f / 60.0f);
@@ -1601,7 +1607,7 @@ int test_player_anim_states(void)
     PlayerAnimInput use = {false, false, true, false, true};
     player_anim_update(&a, &use, 1.0f / 60.0f);
     TEST_ASSERT(a.state == PLAYER_ANIM_USE);
-    TEST_ASSERT_FLOAT_EQ(player_anim_pose(&a).raise, 0.10f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(player_anim_pose(&a).raise, PLAYER_ANIM_USE_RAISE, 1e-6f);
     PlayerAnimInput sneak_idle = {false, false, true, true, false};
     player_anim_update(&a, &sneak_idle, 1.0f / 60.0f);
     TEST_ASSERT(a.state == PLAYER_ANIM_IDLE);
@@ -1673,6 +1679,87 @@ int test_player_body_model(void)
         TEST_ASSERT(vm->faces[5].x == 52 && vm->faces[5].y == 20);
         TEST_ASSERT(vm->faces[4].w == 4 && vm->faces[4].h == 12);
     }
+    return failures;
+}
+
+/* Test: third-person articulated body pose: opposite limb pairing,
+ * sneak/swim/attack/landing expression, and planted feet.
+ *
+ * Returns: failure count.
+ */
+int test_player_body_pose(void)
+{
+    int failures = 0;
+    PlayerBodyPartPose pose[PLAYER_PART_COUNT];
+    PlayerBodyAnimInput in;
+    memset(&in, 0, sizeof(in));
+    in.grounded = true;
+    player_body_pose(&in, pose);
+    for (int i = 0; i < PLAYER_PART_COUNT; ++i) {
+        TEST_ASSERT_FLOAT_EQ(pose[i].pitch, 0.0f, 1e-6f);
+        TEST_ASSERT_FLOAT_EQ(pose[i].offset.x, 0.0f, 1e-6f);
+        TEST_ASSERT_FLOAT_EQ(pose[i].offset.y, 0.0f, 1e-6f);
+        TEST_ASSERT_FLOAT_EQ(pose[i].offset.z, 0.0f, 1e-6f);
+    }
+
+    /* Walk stride (quarter cycle): leg L forward, leg R back; arms
+     * counter-swing (arm L matches leg R, arm R matches leg L). */
+    in.walk_phase = 1.5707963f;
+    in.move_blend = 1.0f;
+    in.grounded = true;
+    player_body_pose(&in, pose);
+    TEST_ASSERT(pose[PLAYER_PART_LEG_L].pitch > 0.4f);
+    TEST_ASSERT(pose[PLAYER_PART_LEG_R].pitch < -0.4f);
+    TEST_ASSERT(pose[PLAYER_PART_ARM_L].pitch < 0.0f);
+    TEST_ASSERT(pose[PLAYER_PART_ARM_R].pitch > 0.0f);
+    TEST_ASSERT(pose[PLAYER_PART_ARM_L].pitch * pose[PLAYER_PART_LEG_R].pitch > 0.0f);
+    TEST_ASSERT(fabsf(pose[PLAYER_PART_ARM_L].pitch) < 0.5f);
+
+    /* Sneak hunches the upper body down/forward while feet stay planted. */
+    memset(&in, 0, sizeof(in));
+    in.grounded = true;
+    in.sneaking = true;
+    player_body_pose(&in, pose);
+    TEST_ASSERT(pose[PLAYER_PART_TORSO].pitch > 0.4f);
+    TEST_ASSERT(pose[PLAYER_PART_HEAD].offset.y < -0.1f);
+    TEST_ASSERT(pose[PLAYER_PART_HEAD].offset.z > 0.2f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_LEG_L].offset.y, 0.0f, 1e-6f);
+
+    /* Swim: near-prone torso, alternating stroke, flutter kick. */
+    memset(&in, 0, sizeof(in));
+    in.water_contact = 1.0f;
+    in.walk_phase = 1.5707963f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT(pose[PLAYER_PART_TORSO].pitch > 0.7f);
+    TEST_ASSERT(pose[PLAYER_PART_ARM_R].pitch < -1.0f);
+    TEST_ASSERT(pose[PLAYER_PART_LEG_L].pitch != pose[PLAYER_PART_LEG_R].pitch);
+
+    /* Attack: right jab reaches forward, left counterbalances. */
+    memset(&in, 0, sizeof(in));
+    in.grounded = true;
+    in.attack_weight = 1.0f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT(pose[PLAYER_PART_ARM_R].pitch < -1.0f);
+    TEST_ASSERT(pose[PLAYER_PART_ARM_L].pitch < 0.0f);
+
+    /* Landing absorbs through the torso instead of sinking the model. */
+    memset(&in, 0, sizeof(in));
+    in.grounded = true;
+    in.land_weight = 1.0f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT(pose[PLAYER_PART_TORSO].pitch > 0.1f);
+    TEST_ASSERT(pose[PLAYER_PART_HEAD].offset.y < -0.05f);
+
+    /* Head tracks look pitch and stays clamped. */
+    memset(&in, 0, sizeof(in));
+    in.pitch = 2.5f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_HEAD].pitch, -1.55334306f, 1e-5f);
+
+    /* Bad args never crash. */
+    player_body_pose(NULL, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_TORSO].pitch, 0.0f, 1e-6f);
+    player_body_pose(&in, NULL);
     return failures;
 }
 

@@ -29,8 +29,8 @@
 /* Simultaneous one-shot voices (oldest stolen when exhausted). */
 #define AUDIO_MAX_VOICES 8
 
-/* Variants per sound set (round-robin: dig1..4 and friends). */
-#define AUDIO_MAX_VARIANTS 4
+/* Variants per sound set (round-robin: dig1..4, step1..6 and friends). */
+#define AUDIO_MAX_VARIANTS 6
 
 /* Block material classes for break/place/step sounds. */
 typedef enum AudioMaterial {
@@ -65,13 +65,13 @@ typedef struct AudioVoice {
     float vol;           /* Per-voice gain (event base volume). */
 } AudioVoice;
 
-/* One variant set: up to 4 PCM blobs played round-robin (e.g. dig1..4).
- * Empty sets are silent (play skips them).
+/* One variant set: up to 6 PCM blobs played round-robin (e.g. dig1..4,
+ * step1..6). Empty sets are silent (play skips them).
  */
 typedef struct AudioSet {
     int16_t *pcm[AUDIO_MAX_VARIANTS];    /* Owned PCM per variant (or NULL). */
     size_t frames[AUDIO_MAX_VARIANTS];  /* Frames per variant. */
-    int count;                           /* Loaded variants (0..4). */
+    int count;                           /* Loaded variants (0..6). */
     unsigned int rr;                     /* Round-robin cursor. */
 } AudioSet;
 
@@ -176,7 +176,7 @@ int audio_load_pack(AudioSystem *sys, const char *pack);
 
 /* Apply an owner-converted sound directory (same layout as the pack
  * sounds/ dir, but with per-material/per-variant names:
- * {break,place,step}_{stone,grass,gravel,wood,sand,glass}1..4 plus
+ * {break,place,step}_{stone,grass,gravel,wood,sand,glass,snow}1..6 plus
  * pickup, hurt1..3, die, click, tool_break, eat1..3, craft). Missing
  * files keep lower layers. Headless-testable (no device needed).
  *

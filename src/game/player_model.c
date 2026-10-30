@@ -3,14 +3,15 @@
 #include "render/texture_atlas.h"
 
 #include <math.h>
+#include <string.h>
 
 /* Player body (feet origin, 1.8 m tall, 0.6 m collision width; arms
  * swing clear outside the body). Tiles are the fallback path when the
  * Steve skin file is missing (e.g. CI without mcassets/).
  */
 static const MobModelPart PLAYER_PARTS[] = {
-    /* Torso. */
-    {{-0.25f, 0.675f, -0.125f}, {0.50f, 0.675f, 0.25f}, TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE},
+    /* Torso (pivots at the hips so sneak/sprint lean bends the upper body). */
+    {{-0.25f, 0.675f, -0.125f}, {0.50f, 0.675f, 0.25f}, TILE_PLAYER_SKIN, -1, 0.675f, MOB_ANIM_NONE},
     /* Head. */
     {{-0.25f, 1.35f, -0.225f}, {0.50f, 0.45f, 0.45f}, TILE_PLAYER_SKIN, -1, 1.35f, MOB_ANIM_NONE},
     /* Arm L (model's left = +X when facing +Z; mirrors arm R faces). */
@@ -62,6 +63,150 @@ const MobSkin *player_body_skin(void)
 const MobSkinPart *player_viewmodel_arm_skin_part(void)
 {
     return &PLAYER_VIEWMODEL_ARM;
+}
+
+/* Clamp a scalar into 0..1 (NaN reads as 0). */
+static float body_clamp01(float v)
+{
+    if (!isfinite(v) || v <= 0.0f) {
+        return 0.0f;
+    }
+    return v < 1.0f ? v : 1.0f;
+}
+
+/* Clamp a scalar into -1..1 (NaN reads as 0). */
+static float body_clamp_pm1(float v)
+{
+    if (!isfinite(v)) {
+        return 0.0f;
+    }
+    if (v < -1.0f) {
+        return -1.0f;
+    }
+    return v > 1.0f ? 1.0f : v;
+}
+
+void player_body_pose(const PlayerBodyAnimInput *in, PlayerBodyPartPose out[PLAYER_PART_COUNT])
+{
+    if (out == NULL) {
+        return;
+    }
+    memset(out, 0, sizeof(PlayerBodyPartPose) * (size_t)PLAYER_PART_COUNT);
+    if (in == NULL) {
+        return;
+    }
+    const float pi = 3.14159265358979323846f;
+    const float hip_y = 0.675f;
+    float blend = body_clamp01(in->move_blend);
+    bool moving = blend > 0.02f;
+    float stride = isfinite(in->walk_phase) ? in->walk_phase : 0.0f;
+    float water = body_clamp01(in->water_contact);
+    bool swim = water > 0.3f;
+    bool air = !in->grounded && !swim;
+    float attack = body_clamp01(in->attack_weight);
+    float hurt = body_clamp01(in->hurt_weight);
+    float land = body_clamp01(in->land_weight);
+
+    float amp_leg = (in->sprinting ? 0.85f : 0.55f) * blend;
+    float amp_arm = (in->sprinting ? 0.75f : 0.45f) * blend;
+
+    /* Base upper-body lean: prone while swimming, hunched while sneaking,
+     * a slight forward drive while sprinting. */
+    float torso_pitch = 0.0f;
+    Vec3 upper = mmath_vec3(0.0f, 0.0f, 0.0f);
+    if (swim) {
+        torso_pitch = 0.95f * (0.5f + 0.5f * water);
+        upper.y = -0.06f;
+        amp_leg = 0.25f;
+        amp_arm = 0.0f;
+    } else if (in->sneaking) {
+        torso_pitch = 0.58f;
+        upper.y = -0.15f;
+        amp_leg *= 0.70f;
+        amp_arm *= 0.60f;
+    } else if (in->sprinting && moving) {
+        torso_pitch = 0.14f * blend;
+    }
+
+    /* Idle breathing (calmer while walking), plus flinch/absorb/attack
+     * contributions to the torso. */
+    float breathe_amt = moving ? 0.25f : 1.0f;
+    float breathe = sinf(isfinite(in->idle_time) ? in->idle_time * 1.9f : 0.0f);
+    torso_pitch += 0.010f * breathe * breathe_amt;
+    torso_pitch += -0.12f * hurt + 0.20f * land - 0.06f * attack;
+    upper.y -= 0.075f * land;
+    upper.y += 0.002f * (1.0f - cosf(isfinite(in->idle_time) ? in->idle_time * 1.9f : 0.0f)) *
+               breathe_amt;
+
+    /* Shoulders/head ride the hip-pivoted torso lean. Arms hang from the
+     * leaned shoulders instead of folding with the chest. */
+    float c = cosf(torso_pitch);
+    float s = sinf(torso_pitch);
+    upper.y += -hip_y * (1.0f - c);
+    upper.z += hip_y * s;
+
+    float head_pitch = isfinite(in->pitch) ? in->pitch : 0.0f;
+    if (head_pitch > 1.55334306f) {
+        head_pitch = 1.55334306f;
+    } else if (head_pitch < -1.55334306f) {
+        head_pitch = -1.55334306f;
+    }
+    out[PLAYER_PART_TORSO].pitch = torso_pitch;
+    out[PLAYER_PART_HEAD].pitch = -head_pitch;
+    out[PLAYER_PART_HEAD].offset = upper;
+    out[PLAYER_PART_ARM_L].offset = upper;
+    out[PLAYER_PART_ARM_R].offset = upper;
+
+    /* Legs: opposite-phase stride on foot, flutter kick in water, a
+     * tucked/split pose in the air. */
+    if (swim) {
+        out[PLAYER_PART_LEG_L].pitch = 0.30f * sinf(stride * 1.6f);
+        out[PLAYER_PART_LEG_R].pitch = 0.30f * sinf(stride * 1.6f + pi);
+    } else if (air) {
+        float rise = body_clamp_pm1(in->vertical_speed / 8.0f);
+        float split = 0.26f - 0.10f * rise;
+        out[PLAYER_PART_LEG_L].pitch = split;
+        out[PLAYER_PART_LEG_R].pitch = -split * 0.8f;
+    } else {
+        out[PLAYER_PART_LEG_L].pitch = sinf(stride) * amp_leg;
+        out[PLAYER_PART_LEG_R].pitch = sinf(stride + pi) * amp_leg;
+    }
+
+    /* Arms counter-swing each same-side leg (arm L matches leg R). */
+    if (swim) {
+        out[PLAYER_PART_ARM_L].pitch = -1.05f + 0.75f * sinf(stride);
+        out[PLAYER_PART_ARM_R].pitch = -1.05f + 0.75f * sinf(stride + pi);
+    } else {
+        float arm_l = sinf(stride + pi) * amp_arm;
+        float arm_r = sinf(stride) * amp_arm;
+        float drive = (in->sprinting && moving) ? -0.12f : 0.0f;
+        arm_l += drive;
+        arm_r += drive;
+        if (air) {
+            float drift = 0.05f * sinf(isfinite(in->idle_time) ? in->idle_time : 0.0f);
+            arm_l = -0.22f + drift;
+            arm_r = -0.22f - drift;
+        }
+        if (land > 0.0f) {
+            arm_l += 0.25f * land;
+            arm_r += 0.25f * land;
+        }
+        if (in->use_hold && attack <= 0.0f) {
+            arm_r = -0.90f;
+            arm_l = -0.20f;
+        }
+        if (attack > 0.0f) {
+            /* Right-hand jab: wind back, then swipe forward. */
+            arm_r = 0.35f - 1.95f * attack;
+            arm_l -= 0.25f * attack;
+        }
+        if (hurt > 0.0f) {
+            arm_l += 0.30f * hurt;
+            arm_r += 0.30f * hurt;
+        }
+        out[PLAYER_PART_ARM_L].pitch = arm_l;
+        out[PLAYER_PART_ARM_R].pitch = arm_r;
+    }
 }
 
 PlayerViewmodelPose player_viewmodel_pose(const PlayerAnimPose *pose, float fallback_punch,

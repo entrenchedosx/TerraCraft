@@ -112,6 +112,23 @@ typedef struct ProjectilePlayer {
     bool creative; /* Creative players are never hit. */
 } ProjectilePlayer;
 
+/* Remote-player collision snapshot for LAN PvP arrows. Only
+ * player-owned arrows (owner == ENTITY_PLAYER_ID) test remotes;
+ * mob-fired arrows keep their local-player-only behaviour (every peer
+ * simulates its own skeleton shots against itself).
+ */
+typedef struct ProjectileRemote {
+    uint32_t id;   /* Game player ID (reported back on a hit). */
+    Vec3 pos;      /* Victim feet position. */
+    float height;  /* Victim collision height. */
+    float width;   /* Victim collision width. */
+    bool alive;    /* Dead remotes are never hit. */
+    bool creative; /* Creative remotes are never hit. */
+} ProjectileRemote;
+
+/* Remote hits reported per update (bounded; extras drop loudly). */
+#define PROJECTILE_MAX_REMOTE_HITS 8
+
 /* Per-update projectile-side effects for the app to realize (sounds,
  * particles, player damage application — projectile.c stays headless
  * and audio-free, exactly like the MobFrameEvents pattern).
@@ -120,6 +137,10 @@ typedef struct ProjectileFrameEvents {
     int player_hits;      /* Arrow strikes on the player this update. */
     float player_damage;  /* Total player damage to apply (hurt-gated). */
     Vec3 player_knock;    /* Knockback impulse for the player (may be zero). */
+    int remote_hits;      /* Player-arrow strikes on remote peers (0 without remotes). */
+    uint32_t remote_ids[PROJECTILE_MAX_REMOTE_HITS]; /* Victim game IDs (hit order). */
+    float remote_damage[PROJECTILE_MAX_REMOTE_HITS]; /* Per-hit damage. */
+    int remote_hits_dropped; /* Remote hits dropped past the cap (never expected). */
     int mobs_hit;         /* Non-lethal mob strikes this update. */
     int mobs_died;        /* Lethal mob strikes (drops already spawned). */
     Vec3 last_death_pos;  /* Feet position of the last death (FX anchor). */
@@ -207,4 +228,17 @@ void projectile_remove(ProjectilePool *pool, int index);
  *   ev: receives frame effects, cleared first (must not be NULL).
  */
 void projectile_update(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, World *w,
-                       const ProjectilePlayer *player, float dt, ProjectileFrameEvents *ev);
+                        const ProjectilePlayer *player, float dt, ProjectileFrameEvents *ev);
+
+/* Extended simulation with remote-player collision (NULL remotes or 0
+ * count reads as no remote peers; otherwise identical to
+ * projectile_update, plus remote hit reporting for player-owned arrows).
+ *
+ * Args:
+ *   pool, mobs, drops, w, player, dt, ev: as projectile_update.
+ *   remotes: victim snapshots (may be NULL when nremotes is 0).
+ *   nremotes: snapshot count.
+ */
+void projectile_update_ex(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, World *w,
+                          const ProjectilePlayer *player, const ProjectileRemote *remotes,
+                          size_t nremotes, float dt, ProjectileFrameEvents *ev);

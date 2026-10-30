@@ -16,9 +16,9 @@ Vorbis code in the C build); missing outputs fall back to procedural art
 and synthesized sound. Idempotent: outputs rewrite deterministically.
 
 Tile stems match texture_atlas_tile_file(); sound names match the audio
-bank convention: {break,place,step}_{stone,grass,gravel,wood,sand,glass}
-numbered 1..N, plus pickup, hurt1..3, die, click, tool_break, eat1..3,
-craft. Mob skin names match mob_skin_file(). Requires: pillow,
+bank convention: {break,place,step}_{stone,grass,gravel,wood,sand,glass,
+snow} numbered 1..N, plus pickup, hurt1..3, die, click, tool_break,
+eat1..3, craft. Mob skin names match mob_skin_file(). Requires: pillow,
 soundfile, numpy.
 """
 
@@ -139,16 +139,34 @@ PLAYER_ARM_CROPS = {
 def _dig(mat, variants):
     return [("dig/%s%d.ogg" % (mat, i)) for i in variants]
 
+
+# Per material: engine stem, dig/ source stem, break variants, place
+# variants, step variants. Mirrors mcassets/assets/minecraft/sounds.json:
+# break/place come from dig/, footsteps from step/; glass breaks with the
+# shatter bank (random/glass) but places and steps with stone.
+MATERIALS = (
+    ("stone", "stone", 4, 4, 6),
+    ("grass", "grass", 4, 4, 6),
+    ("gravel", "gravel", 4, 4, 4),
+    ("wood", "wood", 4, 4, 6),
+    ("sand", "sand", 4, 4, 5),
+    ("glass", "glass", 3, 4, 6),
+    ("snow", "snow", 4, 4, 4),
+)
+
 SOUNDS = {}
-for _ev in ("break", "place", "step"):
-    for _mat, _stem, _n in (("stone", "stone", 4), ("grass", "grass", 4),
-                            ("gravel", "gravel", 4), ("wood", "wood", 4),
-                            ("sand", "sand", 4), ("glass", "glass", 3),
-                            ("snow", "snow", 4)):
-        for _i, _src in zip(range(1, _n + 1), _dig(_stem, range(1, _n + 1))):
-            if _stem == "glass":
-                _src = "random/glass%d.ogg" % _i
-            SOUNDS["%s_%s%d" % (_ev, _mat, _i)] = _src
+for _mat, _stem, _nbreak, _nplace, _nstep in MATERIALS:
+    for _i in range(1, _nbreak + 1):
+        if _mat == "glass":
+            SOUNDS["break_%s%d" % (_mat, _i)] = "random/glass%d.ogg" % _i
+        else:
+            SOUNDS["break_%s%d" % (_mat, _i)] = "dig/%s%d.ogg" % (_stem, _i)
+    for _i in range(1, _nplace + 1):
+        _place_stem = "stone" if _mat == "glass" else _stem
+        SOUNDS["place_%s%d" % (_mat, _i)] = "dig/%s%d.ogg" % (_place_stem, _i)
+    for _i in range(1, _nstep + 1):
+        _step_stem = "stone" if _mat == "glass" else _stem
+        SOUNDS["step_%s%d" % (_mat, _i)] = "step/%s%d.ogg" % (_step_stem, _i)
 SOUNDS["pickup"] = "random/pop.ogg"
 for _i in range(1, 4):
     SOUNDS["hurt%d" % _i] = "damage/hit%d.ogg" % _i

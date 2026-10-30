@@ -816,8 +816,9 @@ static const char *MC_SIMPLE_COW_HURT[] = {"cow_hurt1", "cow_hurt2", "cow_hurt3"
 static const char *MC_SIMPLE_COW_DIE[] = {"cow_die", NULL};
 static const char *MC_SIMPLE_SPLASH[] = {"splash", NULL};
 
-/* Load owner-converted WAVs from a directory into one set (up to 4
- * variants, in list order). Returns variants loaded (0 keeps fallback).
+/* Load owner-converted WAVs from a directory into one set (up to
+ * AUDIO_MAX_VARIANTS variants, in list order). Returns variants loaded
+ * (0 keeps fallback).
  */
 static int audio_load_set_from_dir(AudioSet *set, const char *dir, const char * const *names)
 {

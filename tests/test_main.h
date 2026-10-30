@@ -112,9 +112,11 @@ int test_physics_fall_land(void);
 int test_physics_high_drop(void);
 int test_physics_wall_slide(void);
 int test_physics_jump(void);
+int test_physics_acceleration(void);
 int test_physics_water_motion(void);
 int test_physics_water_contact(void);
 int test_physics_water_step_up(void);
+int test_physics_water_escape_deep(void);
 int test_physics_water_fall_cushion(void);
 int test_physics_spawn(void);
 int test_physics_step_up_and_eject(void);
@@ -275,6 +277,7 @@ int test_mob_models(void);
 int test_player_swing_animation(void);
 int test_player_anim_states(void);
 int test_player_body_model(void);
+int test_player_body_pose(void);
 int test_mob_strike_pitch(void);
 int test_mob_water_cushion(void);
 
@@ -297,12 +300,26 @@ int test_bow_policy(void);
 int test_bow_slot_switch(void);
 int test_skeleton_ai(void);
 int test_skeleton_drops_save(void);
+int test_projectile_remote_hit(void);
+int test_projectile_remote_blocked(void);
+int test_projectile_remote_miss(void);
+int test_projectile_remote_dead_creative(void);
+int test_projectile_remote_mob_owner(void);
 
 /* LAN transport tests (defined in test_lan.c). */
 int test_lan_loopback_transport(void);
 int test_lan_local_address_filter(void);
 int test_lan_discover_codec(void);
 int test_lan_discover_scan(void);
+int test_lan_pvp_melee_handlers(void);
+int test_lan_pvp_death_respawn(void);
+int test_lan_version_reject(void);
+int test_lan_pvp_ranged_handlers(void);
+int test_lan_pvp_creative_handlers(void);
+int test_lan_rules_editing(void);
+int test_lan_late_join_snapshot(void);
+int test_lan_remote_interpolation(void);
+int test_lan_replication_handlers(void);
 
 /* PvP combat tests (defined in test_pvp.c). */
 int test_pvp_hit_in_range(void);
@@ -310,7 +327,10 @@ int test_pvp_miss_beyond_range(void);
 int test_pvp_miss_wrong_direction(void);
 int test_pvp_sneak_hitbox(void);
 int test_pvp_validate_strike(void);
+int test_pvp_seq_accept(void);
 int test_pvp_clamp_damage(void);
+int test_pvp_clamp_arrow(void);
+int test_pvp_lerp_angle(void);
 
 /* Game-rule / cheats tests (defined in test_gamerules.c). */
 int test_gamerules_defaults(void);
@@ -319,6 +339,8 @@ int test_gamerules_meta_roundtrip(void);
 int test_gamerules_meta_missing_defaults(void);
 int test_gamerules_session_create(void);
 int test_gamerules_lan_framing(void);
+int test_gamerules_codecs(void);
+int test_death_gate_states(void);
 int test_menu_background_granularity(void);
 
 /* Atlas tile tests (defined in test_texture.c). */

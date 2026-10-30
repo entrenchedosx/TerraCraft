@@ -87,6 +87,61 @@ float pvp_clamp_damage(float damage)
     return damage;
 }
 
+float pvp_clamp_arrow_damage(float damage)
+{
+    /* Bow damage range mirrors SURVIVAL_BOW_DMG_MAX (game/survival.h):
+     * kept literal here so game/pvp.h stays light (no item dependency). */
+    if (!(damage > 0.0f)) {
+        return 0.0f;
+    }
+    if (damage > 6.0f) {
+        return 6.0f;
+    }
+    return damage;
+}
+
+float pvp_lerp_angle(float from, float to, float t)
+{
+    if (!(t > 0.0f)) {
+        return from;
+    }
+    if (!(t < 1.0f)) {
+        return to;
+    }
+    float d = to - from;
+    const float pi = 3.14159265358979323846f;
+    while (d > pi) {
+        d -= 2.0f * pi;
+    }
+    while (d < -pi) {
+        d += 2.0f * pi;
+    }
+    float out = from + d * t;
+    while (out > pi) {
+        out -= 2.0f * pi;
+    }
+    while (out < -pi) {
+        out += 2.0f * pi;
+    }
+    return out;
+}
+
+bool pvp_seq_accept(uint32_t seq, uint32_t *last_seq)
+{
+    if (last_seq == NULL) {
+        return seq != 0;
+    }
+    /* Sequence 0 is never sent (the counter skips it on wrap): it marks
+     * the initial empty state, so only seq >= 1 is acceptable, strictly
+     * increasing (retransmits/duplicates rejected). Epoch rollover past
+     * UINT32_MAX is owned by the caller (reset to 0). */
+    if (seq == 0 || seq <= *last_seq) {
+        return false;
+    }
+    *last_seq = seq;
+    return true;
+}
+
 bool pvp_validate_strike(bool pvp_enabled, bool attacker_alive, bool victim_alive, uint32_t attacker_id,
                          uint32_t victim_id, float damage, float distance, uint32_t seq,
                          uint32_t *last_seq)
@@ -103,18 +158,5 @@ bool pvp_validate_strike(bool pvp_enabled, bool attacker_alive, bool victim_aliv
     if (!(damage > 0.0f) || !(distance >= 0.0f) || !(distance <= PVP_REACH + 0.5f)) {
         return false;
     }
-    if (last_seq != NULL) {
-        /* Sequence 0 is the initial state (no strike applied yet): the
-         * first valid request must carry seq >= 1. Later requests must
-         * strictly increase (retransmits/duplicates rejected). Wrap is
-         * rejected rather than accepted (client reconnects reset via
-         * HELLO/WELCOME, which clears the tracking). */
-        if (seq == 0 || seq <= *last_seq) {
-            /* Allow the unordered-but-fresh case where *last_seq is still
-             * 0 and seq is the very first strike. */
-            return false;
-        }
-        *last_seq = seq;
-    }
-    return true;
+    return pvp_seq_accept(seq, last_seq);
 }

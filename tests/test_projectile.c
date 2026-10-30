@@ -922,3 +922,225 @@ int test_skeleton_drops_save(void)
     path_remove_dir(dir);
     return failures;
 }
+
+/* Remote-step accumulator (mirrors proj_step, plus remote totals). */
+static void proj_step_ex(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, World *w,
+                         ProjectilePlayer *pp, const ProjectileRemote *remotes, size_t nremotes,
+                         float seconds, ProjectileFrameEvents *ev)
+{
+    ProjectileFrameEvents total;
+    memset(&total, 0, sizeof(total));
+    int n = (int)(seconds * 60.0f + 0.5f);
+    for (int i = 0; i < n; ++i) {
+        ProjectileFrameEvents one;
+        projectile_update_ex(pool, mobs, drops, w, pp, remotes, nremotes, 1.0f / 60.0f, &one);
+        total.player_hits += one.player_hits;
+        total.player_damage += one.player_damage;
+        total.mobs_hit += one.mobs_hit;
+        total.mobs_died += one.mobs_died;
+        total.blocks_hit += one.blocks_hit;
+        if (one.blocks_hit > 0) {
+            total.last_block_pos = one.last_block_pos;
+        }
+        for (int r = 0; r < one.remote_hits && total.remote_hits < PROJECTILE_MAX_REMOTE_HITS;
+             ++r) {
+            total.remote_ids[total.remote_hits] = one.remote_ids[r];
+            total.remote_damage[total.remote_hits] = one.remote_damage[r];
+            total.remote_hits++;
+        }
+        total.remote_hits_dropped += one.remote_hits_dropped;
+    }
+    *ev = total;
+}
+
+static void proj_remote_make(ProjectileRemote *r, uint32_t id, float x, float y, float z)
+{
+    r->id = id;
+    r->pos = mmath_vec3(x, y, z);
+    r->height = 1.8f;
+    r->width = 0.6f;
+    r->alive = true;
+    r->creative = false;
+}
+
+/* Test: player-owned arrow strikes a remote peer exactly once.
+ *
+ * Returns: failure count.
+ */
+int test_projectile_remote_hit(void)
+{
+    int failures = 0;
+    World *w = make_proj_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    MobPool mobs;
+    mob_pool_init(&mobs, 81u);
+    EntityPool drops;
+    entity_pool_clear(&drops);
+    ProjectilePlayer pp;
+    proj_player_far(&pp);
+    ProjectileRemote remote;
+    proj_remote_make(&remote, 7, 10.5f, 65.0f, 8.5f);
+    ProjectilePool pool;
+    projectile_pool_clear(&pool);
+    /* Flat fast shot down the lane (drop over 4 blocks is ~0.26 m). */
+    TEST_ASSERT(projectile_fire(&pool, PROJECTILE_ARROW, mmath_vec3(6.5f, 66.0f, 8.5f),
+                                mmath_vec3(1.0f, 0.0f, 0.0f), 25.0f, 4.0f, 5.0f,
+                                (ProjectileOwnerId)ENTITY_PLAYER_ID) == true);
+    ProjectileFrameEvents ev;
+    proj_step_ex(&pool, &mobs, &drops, w, &pp, &remote, 1, 0.5f, &ev);
+    TEST_ASSERT(ev.remote_hits == 1);
+    TEST_ASSERT(ev.remote_ids[0] == 7);
+    TEST_ASSERT_FLOAT_EQ(ev.remote_damage[0], 4.0f, 1e-4f);
+    TEST_ASSERT(ev.player_hits == 0 && ev.mobs_hit == 0 && ev.mobs_died == 0);
+    TEST_ASSERT(ev.blocks_hit == 0);
+    TEST_ASSERT(projectile_active_count(&pool) == 0); /* Consumed, never penetrates. */
+    TEST_ASSERT(ev.remote_hits_dropped == 0);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: a solid wall between shooter and remote stops the arrow
+ * (block wins; no remote hit is reported).
+ *
+ * Returns: failure count.
+ */
+int test_projectile_remote_blocked(void)
+{
+    int failures = 0;
+    World *w = make_proj_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Chunk *c = world_get_chunk(w, 0, 0);
+    TEST_ASSERT(c != NULL);
+    for (int y = 65; y <= 67; ++y) {
+        chunk_set_block(c, 8, y, 8, BLOCK_STONE);
+    }
+    MobPool mobs;
+    mob_pool_init(&mobs, 82u);
+    EntityPool drops;
+    entity_pool_clear(&drops);
+    ProjectilePlayer pp;
+    proj_player_far(&pp);
+    ProjectileRemote remote;
+    proj_remote_make(&remote, 7, 10.5f, 65.0f, 8.5f);
+    ProjectilePool pool;
+    projectile_pool_clear(&pool);
+    TEST_ASSERT(projectile_fire(&pool, PROJECTILE_ARROW, mmath_vec3(6.5f, 66.0f, 8.5f),
+                                mmath_vec3(1.0f, 0.0f, 0.0f), 25.0f, 4.0f, 5.0f,
+                                (ProjectileOwnerId)ENTITY_PLAYER_ID) == true);
+    ProjectileFrameEvents ev;
+    proj_step_ex(&pool, &mobs, &drops, w, &pp, &remote, 1, 0.5f, &ev);
+    TEST_ASSERT(ev.remote_hits == 0);
+    TEST_ASSERT(ev.blocks_hit >= 1);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: clean miss beside the remote keeps flying (no false positive).
+ *
+ * Returns: failure count.
+ */
+int test_projectile_remote_miss(void)
+{
+    int failures = 0;
+    World *w = make_proj_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    MobPool mobs;
+    mob_pool_init(&mobs, 83u);
+    EntityPool drops;
+    entity_pool_clear(&drops);
+    ProjectilePlayer pp;
+    proj_player_far(&pp);
+    ProjectileRemote remote;
+    proj_remote_make(&remote, 7, 10.5f, 65.0f, 13.5f); /* 5 blocks off-lane. */
+    ProjectilePool pool;
+    projectile_pool_clear(&pool);
+    TEST_ASSERT(projectile_fire(&pool, PROJECTILE_ARROW, mmath_vec3(6.5f, 66.0f, 8.5f),
+                                mmath_vec3(1.0f, 0.0f, 0.0f), 25.0f, 4.0f, 5.0f,
+                                (ProjectileOwnerId)ENTITY_PLAYER_ID) == true);
+    ProjectileFrameEvents ev;
+    proj_step_ex(&pool, &mobs, &drops, w, &pp, &remote, 1, 0.3f, &ev);
+    TEST_ASSERT(ev.remote_hits == 0);
+    TEST_ASSERT(ev.blocks_hit == 0);
+    TEST_ASSERT(projectile_active_count(&pool) == 1); /* Still flying. */
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: dead and creative remotes are skipped (shot flies through).
+ *
+ * Returns: failure count.
+ */
+int test_projectile_remote_dead_creative(void)
+{
+    int failures = 0;
+    World *w = make_proj_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    MobPool mobs;
+    mob_pool_init(&mobs, 84u);
+    EntityPool drops;
+    entity_pool_clear(&drops);
+    ProjectilePlayer pp;
+    proj_player_far(&pp);
+    ProjectileRemote remotes[2];
+    proj_remote_make(&remotes[0], 7, 10.5f, 65.0f, 8.5f);
+    remotes[0].alive = false;
+    proj_remote_make(&remotes[1], 8, 12.5f, 65.0f, 8.5f);
+    remotes[1].creative = true;
+    ProjectilePool pool;
+    projectile_pool_clear(&pool);
+    TEST_ASSERT(projectile_fire(&pool, PROJECTILE_ARROW, mmath_vec3(6.5f, 66.0f, 8.5f),
+                                mmath_vec3(1.0f, 0.0f, 0.0f), 25.0f, 4.0f, 5.0f,
+                                (ProjectileOwnerId)ENTITY_PLAYER_ID) == true);
+    ProjectileFrameEvents ev;
+    proj_step_ex(&pool, &mobs, &drops, w, &pp, remotes, 2, 0.6f, &ev);
+    TEST_ASSERT(ev.remote_hits == 0);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: mob-fired arrows never test remotes (every peer simulates its
+ * own skeleton shots against itself only).
+ *
+ * Returns: failure count.
+ */
+int test_projectile_remote_mob_owner(void)
+{
+    int failures = 0;
+    World *w = make_proj_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    MobPool mobs;
+    mob_pool_init(&mobs, 85u);
+    EntityPool drops;
+    entity_pool_clear(&drops);
+    ProjectilePlayer pp;
+    proj_player_far(&pp);
+    ProjectileRemote remote;
+    proj_remote_make(&remote, 7, 10.5f, 65.0f, 8.5f);
+    EntityId shooter = mob_spawn(&mobs, ENTITY_SKELETON, mmath_vec3(4.5f, 65.0f, 8.5f), 0.0f);
+    TEST_ASSERT(shooter != ENTITY_ID_NULL);
+    ProjectilePool pool;
+    projectile_pool_clear(&pool);
+    TEST_ASSERT(projectile_fire(&pool, PROJECTILE_ARROW, mmath_vec3(6.5f, 66.0f, 8.5f),
+                                mmath_vec3(1.0f, 0.0f, 0.0f), 25.0f, 4.0f, 5.0f,
+                                (ProjectileOwnerId)shooter) == true);
+    ProjectileFrameEvents ev;
+    proj_step_ex(&pool, &mobs, &drops, w, &pp, &remote, 1, 0.5f, &ev);
+    TEST_ASSERT(ev.remote_hits == 0);
+    world_destroy(w);
+    return failures;
+}

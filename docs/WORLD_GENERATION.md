@@ -203,9 +203,12 @@ state in generation. Salted hashes and feature streams depend only on the
 seed, world coordinates and frozen profile settings. The save writer keeps
 profile 4 rather than clamping it back to profile 3. New material IDs are
 appended after existing IDs; existing IDs are unchanged.
-The application LAN handshake is version 3, so peers using the older block
-registry are rejected rather than accepting updates they cannot render.
-Use the same updated game build on both LAN machines.
+The application LAN handshake is version 4, so peers using the older block
+registry or the pre-combat protocol are rejected rather than accepting
+updates they cannot render. Version 3 clients would silently miss deaths,
+health, and world rules, so the mismatch disconnects instead of playing
+an inconsistent session. Use the same updated game build on both LAN
+machines.
 
 The existing seed interface uses `long` and a 32-bit hash seed. On Windows,
 numeric entry remains limited to the existing signed 32-bit seed range;

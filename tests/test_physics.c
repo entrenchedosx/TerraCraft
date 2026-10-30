@@ -193,6 +193,117 @@ int test_physics_jump(void)
     return failures;
 }
 
+/* Test: horizontal control eases toward the wish velocity instead of
+ * snapping; ground accel/stop are quick, air control is weaker, and
+ * reversing direction carries momentum for a few steps.
+ *
+ * Returns: failure count.
+ */
+int test_physics_acceleration(void)
+{
+    int failures = 0;
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    p.grounded = true;
+    PlayerInput in = no_input();
+    in.fwd = 1.0f;
+    player_update(&p, &in, w, PLAYER_STEP_DT);
+    float first = fabsf(p.vel.z);
+    TEST_ASSERT(first > 0.0f);
+    TEST_ASSERT(first < p.walk_speed * 0.25f);
+
+    Player g;
+    player_init(&g);
+    g.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    g.grounded = true;
+    for (int i = 0; i < 30; ++i) {
+        player_update(&g, &in, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(fabsf(fabsf(g.vel.z) - g.walk_speed) < g.walk_speed * 0.02f);
+
+    /* Release: one step keeps most of the speed, then friction settles it. */
+    PlayerInput stop = no_input();
+    float before = fabsf(g.vel.z);
+    player_update(&g, &stop, w, PLAYER_STEP_DT);
+    TEST_ASSERT(fabsf(g.vel.z) > before * 0.7f);
+    for (int i = 0; i < 60; ++i) {
+        player_update(&g, &stop, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(fabsf(g.vel.z) < 0.01f);
+
+    /* Air control accelerates more slowly and keeps momentum longer. */
+    Player ground;
+    player_init(&ground);
+    ground.pos = mmath_vec3(8.5f, 75.0f, 8.5f);
+    ground.grounded = true;
+    Player air;
+    player_init(&air);
+    air.pos = mmath_vec3(8.5f, 75.0f, 8.5f);
+    air.grounded = false;
+    for (int i = 0; i < 12; ++i) {
+        player_update(&ground, &in, NULL, PLAYER_STEP_DT);
+        player_update(&air, &in, NULL, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(fabsf(air.vel.z) < fabsf(ground.vel.z));
+    for (int i = 0; i < 12; ++i) {
+        player_update(&ground, &stop, NULL, PLAYER_STEP_DT);
+        player_update(&air, &stop, NULL, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(fabsf(air.vel.z) > fabsf(ground.vel.z));
+
+    /* Reversal is not instantaneous: one step after switching input the
+     * old direction still wins. */
+    Player r;
+    player_init(&r);
+    r.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    r.grounded = true;
+    for (int i = 0; i < 30; ++i) {
+        player_update(&r, &in, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(r.vel.z < 0.0f);
+    in.fwd = -1.0f;
+    player_update(&r, &in, w, PLAYER_STEP_DT);
+    TEST_ASSERT(r.vel.z < 0.0f);
+    TEST_ASSERT(fabsf(r.vel.z) < fabsf(-r.walk_speed));
+
+    /* Sprint needs forward input; pure strafing and sneaking use walk pace. */
+    Player sp, st, sn;
+    player_init(&sp);
+    player_init(&st);
+    player_init(&sn);
+    sp.pos = st.pos = sn.pos = mmath_vec3(8.5f, 75.0f, 8.5f);
+    sp.grounded = st.grounded = sn.grounded = true;
+    PlayerInput sprint_fwd = no_input();
+    sprint_fwd.fwd = 1.0f;
+    sprint_fwd.sprint = true;
+    PlayerInput sprint_strafe = no_input();
+    sprint_strafe.strafe = 1.0f;
+    sprint_strafe.sprint = true;
+    PlayerInput sprint_sneak = no_input();
+    sprint_sneak.fwd = 1.0f;
+    sprint_sneak.sprint = true;
+    sprint_sneak.sneak = true;
+    for (int i = 0; i < 60; ++i) {
+        player_update(&sp, &sprint_fwd, NULL, PLAYER_STEP_DT);
+        player_update(&st, &sprint_strafe, NULL, PLAYER_STEP_DT);
+        player_update(&sn, &sprint_sneak, NULL, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(sp.sprinting == true);
+    TEST_ASSERT(fabsf(fabsf(sp.vel.z) - sp.sprint_speed) < 0.02f);
+    TEST_ASSERT(st.sprinting == false);
+    TEST_ASSERT(fabsf(fabsf(st.vel.x) - st.walk_speed) < 0.02f);
+    TEST_ASSERT(sn.sprinting == false);
+    TEST_ASSERT(fabsf(fabsf(sn.vel.z) - sn.walk_speed * 0.3f) < 0.02f);
+    world_destroy(w);
+    return failures;
+}
+
 /* Test: water reduces horizontal movement and jump adds buoyancy. */
 int test_physics_water_motion(void)
 {
@@ -222,22 +333,45 @@ int test_physics_water_motion(void)
     dry_player.grounded = wet_player.grounded = partial_player.grounded = shallow_player.grounded = true;
     PlayerInput in = no_input();
     in.fwd = 1.0f;
-    in.jump = true;
-    player_update(&dry_player, &in, dry, PLAYER_STEP_DT);
-    player_update(&wet_player, &in, wet, PLAYER_STEP_DT);
-    player_update(&partial_player, &in, partial, PLAYER_STEP_DT);
-    player_update(&shallow_player, &in, shallow, PLAYER_STEP_DT);
+    /* Horizontal: run to the accelerated steady state (no jump, so the
+     * buoyancy impulse does not disturb the comparison). */
+    for (int i = 0; i < 300; ++i) {
+        /* Keep each player inside its one-cell water fixture while the
+         * horizontal velocity converges. */
+        dry_player.pos = wet_player.pos = partial_player.pos = shallow_player.pos =
+            mmath_vec3(8.5f, 65.0f, 8.5f);
+        player_update(&dry_player, &in, dry, PLAYER_STEP_DT);
+        player_update(&wet_player, &in, wet, PLAYER_STEP_DT);
+        player_update(&partial_player, &in, partial, PLAYER_STEP_DT);
+        player_update(&shallow_player, &in, shallow, PLAYER_STEP_DT);
+    }
     TEST_ASSERT(fabsf(wet_player.vel.z) < fabsf(dry_player.vel.z));
-    TEST_ASSERT_FLOAT_EQ(wet_player.vel.z, -wet_player.walk_speed * 0.55f * 0.92f, 1e-5f);
-    TEST_ASSERT_FLOAT_EQ(wet_player.vel.y, 2.4f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(wet_player.vel.z, -wet_player.walk_speed * 0.55f, 1e-3f);
     /* A single source at the feet wets only part of the 1.8-block player;
      * a shallow flow wets less still. */
     TEST_ASSERT(fabsf(partial_player.vel.z) > fabsf(wet_player.vel.z));
     TEST_ASSERT(fabsf(partial_player.vel.z) < fabsf(dry_player.vel.z));
-    TEST_ASSERT(partial_player.vel.y > wet_player.vel.y);
     TEST_ASSERT(fabsf(shallow_player.vel.z) > fabsf(partial_player.vel.z));
     TEST_ASSERT(fabsf(shallow_player.vel.z) < fabsf(dry_player.vel.z));
-    TEST_ASSERT(shallow_player.vel.y > partial_player.vel.y);
+
+    /* Vertical: one jump step from rest; full contact clamps the impulse
+     * to the swim-up speed, partial/shallow contact stays faster. */
+    Player dry_jump, wet_jump, partial_jump, shallow_jump;
+    player_init(&dry_jump);
+    player_init(&wet_jump);
+    player_init(&partial_jump);
+    player_init(&shallow_jump);
+    dry_jump.pos = wet_jump.pos = partial_jump.pos = shallow_jump.pos =
+        mmath_vec3(8.5f, 65.0f, 8.5f);
+    dry_jump.grounded = wet_jump.grounded = partial_jump.grounded = shallow_jump.grounded = true;
+    in.jump = true;
+    player_update(&dry_jump, &in, dry, PLAYER_STEP_DT);
+    player_update(&wet_jump, &in, wet, PLAYER_STEP_DT);
+    player_update(&partial_jump, &in, partial, PLAYER_STEP_DT);
+    player_update(&shallow_jump, &in, shallow, PLAYER_STEP_DT);
+    TEST_ASSERT_FLOAT_EQ(wet_jump.vel.y, 2.4f, 1e-5f);
+    TEST_ASSERT(partial_jump.vel.y > wet_jump.vel.y);
+    TEST_ASSERT(shallow_jump.vel.y > partial_jump.vel.y);
 
     /* A shallow fluid surface below the player's feet is not contact. */
     Player dry_above, shallow_above;
@@ -341,8 +475,9 @@ int test_physics_step_up_and_eject(void)
     return failures;
 }
 
-/* Test: autoJump OFF (MC default) disables both step-ups: a 1-block
- * ledge blocks dry walking, and a shore blocks swimming out.
+/* Test: autoJump OFF (MC default) disables the dry 1-block auto-step but
+ * never water escape: a dry ledge blocks walking, while swimming into a
+ * shore still climbs out.
  *
  * Returns: failure count.
  */
@@ -371,7 +506,8 @@ int test_physics_auto_jump_off(void)
     TEST_ASSERT(p.pos.x < 10.0f);
     world_destroy(w);
 
-    /* Shore clamber is gated too: swimming into the bank stalls. */
+    /* Water escape is independent of autoJump: swimming into the bank
+     * still climbs out onto the shore. */
     World *pool = make_pool_world();
     TEST_ASSERT(pool != NULL);
     if (pool == NULL) {
@@ -384,11 +520,16 @@ int test_physics_auto_jump_off(void)
     PlayerInput swim = no_input();
     swim.fwd = 1.0f;
     swim.auto_jump = false;
+    bool escaped = false;
     for (int i = 0; i < 120; ++i) {
         player_update(&s, &swim, pool, 1.0f / 60.0f);
+        if (s.grounded && s.pos.y >= 64.0f) {
+            escaped = true;
+            break;
+        }
     }
-    TEST_ASSERT(s.pos.y < 63.5f);
-    TEST_ASSERT(player_water_contact(pool, &s) > 0.0f);
+    TEST_ASSERT(escaped == true);
+    TEST_ASSERT(player_water_contact(pool, &s) < 0.05f);
     world_destroy(pool);
     return failures;
 }
@@ -709,6 +850,8 @@ int test_physics_water_contact(void)
 }
 
 /* Test: swimming into a 1-high shore climbs out instead of grinding.
+ * Water escape is basic movement, so this must work with the autoJump
+ * setting OFF (MC default).
  *
  * Returns: failure count.
  */
@@ -726,7 +869,7 @@ int test_physics_water_step_up(void)
     p.yaw = -1.5707963f; /* Face +X (toward the x=8 shore). */
     PlayerInput in = no_input();
     in.fwd = 1.0f;
-    in.auto_jump = true;
+    in.auto_jump = false;
     bool climbed = false;
     for (int i = 0; i < 120; ++i) {
         player_update(&p, &in, w, 1.0f / 60.0f);
@@ -742,6 +885,42 @@ int test_physics_water_step_up(void)
     TEST_ASSERT(p.grounded == true);
     /* Essentially dry (a toe may still touch the waterline). */
     TEST_ASSERT(player_water_contact(w, &p) < 0.05f);
+    world_destroy(w);
+    return failures;
+}
+
+/* Test: escaping deep water from a fully submerged start with
+ * autoJump OFF: swim up with jump and hold forward into the shore.
+ *
+ * Returns: failure count.
+ */
+int test_physics_water_escape_deep(void)
+{
+    int failures = 0;
+    World *w = make_pool_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player p;
+    player_init(&p);
+    p.pos = mmath_vec3(3.5f, 64.0f, 8.5f); /* Fully submerged deep end. */
+    p.yaw = -1.5707963f;                   /* Face +X (toward the shore). */
+    TEST_ASSERT(player_water_contact(w, &p) > 0.9f);
+    PlayerInput in = no_input();
+    in.fwd = 1.0f;
+    in.jump = true;
+    in.auto_jump = false;
+    bool escaped = false;
+    for (int i = 0; i < 600; ++i) {
+        player_update(&p, &in, w, 1.0f / 60.0f);
+        if (p.grounded && p.pos.y >= 64.0f && player_water_contact(w, &p) < 0.05f) {
+            escaped = true;
+            break;
+        }
+    }
+    TEST_ASSERT(escaped == true);
+    TEST_ASSERT(p.pos.x > 7.0f);
     world_destroy(w);
     return failures;
 }

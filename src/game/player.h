@@ -4,9 +4,11 @@
  * axis-separated collision vs the voxel grid. Pure CPU, headless-testable.
  *
  * Conventions: pos is the FEET position. Yaw=0 faces -Z (matches camera).
- * Horizontal velocity is input-driven (arcade); vertical integrates gravity.
- * drag_air/drag_ground are per-physics-step velocity retention applied when
- * no move input is present (MC-style multipliers at 60 Hz).
+ * Horizontal velocity eases toward the wish velocity (ground/air/water time
+ * constants) and retains momentum when input stops; vertical integrates
+ * gravity. drag_air/drag_ground are per-physics-step retention applied when
+ * no move input is present, derived from MC's 20 Hz friction (0.91 airborne,
+ * 0.6*0.91 on the ground) converted to the 60 Hz fixed step.
  */
 
 #include "math/mmath.h"
@@ -44,6 +46,15 @@ typedef struct World World;
 #define PLAYER_BOB_AMP_WALK 0.1f
 #define PLAYER_BOB_AMP_SNEAK 0.05f
 
+/* Horizontal control smoothing (exponential time constants, seconds).
+ * Ground is responsive; airborne control/decay is deliberately floatier;
+ * water sits between them. */
+#define PLAYER_ACCEL_GROUND_TAU 0.12f
+#define PLAYER_ACCEL_AIR_TAU 0.50f
+#define PLAYER_ACCEL_WATER_TAU 0.35f
+/* MC water drag (0.8 per 20 Hz tick) converted to one 60 Hz step. */
+#define PLAYER_WATER_DRAG 0.93f
+
 /* Per-frame input snapshot consumed by player_update. */
 typedef struct PlayerInput {
     float fwd;    /* Forward input -1..1 (W positive). */
@@ -76,8 +87,8 @@ typedef struct Player {
     float fly_speed;    /* 10.0 */
     float jump_vel;     /* 8.8 (~1.2 blocks with gravity 32). */
     float gravity;      /* 32.0 */
-    float drag_air;     /* 0.91 retention/step with no input (airborne). */
-    float drag_ground;  /* 0.6 retention/step with no input (grounded). */
+    float drag_air;     /* 0.969 retention/step with no input (airborne). */
+    float drag_ground;  /* 0.817 retention/step with no input (grounded). */
     float step_accum;   /* Fixed-step time accumulator (internal). */
     int mode;           /* WorldMode value (0 survival, 1 creative). */
     Inventory inv;      /* 36 slots; slots 0..8 are the hotbar. */
@@ -103,6 +114,8 @@ typedef struct Player {
     float last_fall;    /* Fall distance of the last landing (<0 = none). */
     float walk_phase;   /* Stride phase for limb swing (distance-paced). */
     float bob_amp;      /* Smoothed view-bob amplitude (0 still .. 0.1 walk). */
+    float water_contact; /* Last physics step's water fraction (0 dry .. 1 wet). */
+    float anim_time;    /* Monotonic simulation seconds for idle/breathing. */
     bool mine_active;   /* Survival mining in progress. */
     int mine_bx, mine_by, mine_bz; /* Mining target cell. */
     uint16_t mine_block; /* Block ID at target when started. */

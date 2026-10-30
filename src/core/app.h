@@ -60,7 +60,15 @@ typedef struct LanRemotePlayer {
     float health;
     bool dead;
     bool has_health;
+    bool creative; /* Last reported game mode (clamped to world mode). */
+    /* Render interpolation (visual only; collision/aim use pos above). */
+    Vec3 rpos;         /* Smoothed feet for drawing. */
+    float ryaw;        /* Smoothed yaw for drawing. */
+    float rpitch;      /* Smoothed pitch for drawing. */
+    bool has_render;   /* True once rpos was seeded from a snapshot. */
     uint32_t last_attack_seq;
+    double last_strike_time; /* Host-side time of the last accepted strike
+                              * (authoritative swing-rate floor, monotonic). */
     uint8_t held_slot;
     uint16_t held_item;
     bool has_held;
@@ -102,6 +110,7 @@ typedef struct MenuData {
     bool name_focused;      /* Text-field focus flags. */
     bool seed_focused;      /* Text-field focus flags. */
     char error[128];        /* Last menu error line ("" = none). */
+    bool pause_show_rules;  /* Pause-menu game-rules sub-view expanded. */
     int select_idx;         /* World-select cursor. */
     int select_scroll;      /* World-select scroll offset (rows). */
     bool delete_armed;      /* Delete-confirmation arming. */
@@ -334,3 +343,27 @@ bool app_lan_host(AppContext *app);
 bool app_lan_join(AppContext *app, const char *address);
 bool app_lan_join_endpoint(AppContext *app, const char *address, uint16_t port);
 void app_lan_disconnect(AppContext *app);
+
+/* LAN replication pump + message dispatch. Non-static so headless
+ * integration tests can drive the real handlers over real loopback
+ * sockets; production calls them from the main loop only.
+ *
+ * app_lan_handle_message routes one received frame (version/identity/
+ * size validated inside). app_lan_update pumps transport events,
+ * drains the reliable block queue, sends beacons, and emits movement,
+ * health, and held-item snapshots.
+ */
+struct LanEvent;
+void app_lan_handle_message(AppContext *app, const struct LanEvent *event);
+void app_lan_update(AppContext *app, double dt);
+
+/* Publish the current authoritative world rules: broadcast to connected
+ * peers when hosting, then persist to world.meta. Call after any
+ * host-side rules change (pause-menu edits, accepted RULES_SET).
+ * No-op without an open world; clients never publish (the host owns
+ * the rules, and RULES_SET from a client is decided in its handler).
+ *
+ * Args:
+ *   app: context with an open world (must not be NULL).
+ */
+void app_apply_world_rules(AppContext *app);

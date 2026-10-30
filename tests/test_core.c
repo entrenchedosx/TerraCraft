@@ -313,11 +313,15 @@ int test_path_dirs(void)
     TEST_ASSERT(path_exe_dir(tiny, sizeof(tiny)) != 0);
     char mc[PATH_MAX_LEN];
     TEST_ASSERT(path_mcassets_dir(mc, sizeof(mc), "generated/tiles") == 0);
+    /* Success means the resolved directory really exists. */
+    TEST_ASSERT(path_is_dir(mc) == true);
     /* Ends with mcassets/generated/tiles (either root). */
     size_t n = strlen(mc);
     TEST_ASSERT(n > 15);
     TEST_ASSERT(strcmp(mc + n - 15, "generated/tiles") == 0 ||
                 strcmp(mc + n - 15, "generated\\tiles") == 0);
+    /* A missing subdirectory is a failure, not a bogus success. */
+    TEST_ASSERT(path_mcassets_dir(mc, sizeof(mc), "test_tmp_missing_mcassets") != 0);
     TEST_ASSERT(path_mcassets_dir(NULL, 10, "x") != 0);
     TEST_ASSERT(path_mcassets_dir(mc, sizeof(mc), NULL) != 0);
     TEST_ASSERT(path_mcassets_dir(mc, sizeof(mc), "") != 0);

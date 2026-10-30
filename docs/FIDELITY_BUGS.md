@@ -127,35 +127,46 @@ the affected behavior has been reproduced and checked in a running build.
 ## TC-FID-005 — Movement lacks acceleration, poses, and edge-safe sneak (implemented; playtest open)
 
 - **Subsystem:** Player movement and collision.
-- **Observed TerraCraft behavior:** Input sets horizontal velocity directly.
-  Sneaking uses 0.3x speed, crouched dimensions 0.6x1.5 with eye 1.27
+- **Observed TerraCraft behavior:** Horizontal input eases velocity toward the
+  walk/sprint wish speed (finite ground acceleration, weaker air control);
+  releasing input retains momentum with MC-derived friction (air floatier
+  than ground). Sprint engages only while moving forward. Sneaking uses 0.3x
+  speed, crouched dimensions 0.6x1.5 with eye 1.27
   (standing 0.6x1.8 eye 1.62); releasing sneak stands only with headroom,
   otherwise the crouch persists. Sneak holds unsupported edges via per-axis
   clips plus a diagonal corner-cut guard (1.5-era moveEntity rule; 1-block
   descents hold until sneak is released — verified headless, needs
   playtest). First-person view bobbing is distance-driven from walk_phase
   (gentle lateral dip, `view_bobbing` default ON, toggle in Settings). A
-  1-block auto step-up exists for dry ledges and shores, gated on
-  `auto_jump` (default OFF, MC-faithful; toggle in Settings).
+  1-block auto step-up exists for dry ledges, gated on `auto_jump` (default
+  OFF, MC-faithful; toggle in Settings); climbing out of water onto a shore
+  is never gated on that setting, so an immersed player can always swim or
+  walk out.
 - **Expected Java-like behavior:** Movement builds and loses momentum; poses
   change body dimensions only when there is room; sneaking prevents walking
   off a supported edge.
 - **Reproduction:** Walk, release movement, crouch under a low ceiling, and
   sneak toward and beyond an unsupported edge (straight, corner diagonal,
   and narrow 1-wide bridge); walk to feel the first-person bob.
-- **Root cause:** The controller is an arcade-style FPS model; pose and
-  edge-support systems are now added, acceleration/friction remain simplified.
-- **Fix:** `player_has_support` per-axis clips + `player_has_support_at`
-  corner guard in `src/game/player.c`; `player_can_stand` headroom gate with
-  `PLAYER_SNEAK_HEIGHT/EYE` in `src/game/player.h`; `player_view_bob_offset`
-  + `app_position_camera` bob in `src/core/app.c`; `view_bobbing` setting in
-  `src/core/settings.*` with Settings toggle in `src/ui/screens.c`.
-- **Test added:** `test_physics_sneak_edge` (straight + 1-block hold),
+- **Root cause:** The controller was an arcade-style FPS model; pose and
+  edge-support systems were added first, and acceleration/friction now use
+  exponential control + MC-derived drag.
+- **Fix:** `player_smoothing` + control time constants (ground 0.12 s, air
+  0.50 s, water 0.35 s; stop 0.08/0.60/0.30 s) in `src/game/player.*`;
+  `player_has_support` per-axis clips + `player_has_support_at` corner guard;
+  `player_can_stand` headroom gate with `PLAYER_SNEAK_HEIGHT/EYE`;
+  `player_view_bob_offset` + `app_position_camera` bob in `src/core/app.c`;
+  `view_bobbing` setting in `src/core/settings.*` with Settings toggle in
+  `src/ui/screens.c`. Sprint requires forward input, and exhaustion follows
+  the sprint state.
+- **Test added:** `test_physics_acceleration` (one-step ramp, steady speed,
+  release momentum/settle, air vs ground control, reversal, sprint gating),
+  `test_physics_sneak_edge` (straight + 1-block hold),
   `test_physics_sneak_edge_corner` (outer L-corner diagonal, narrow bridge
   along/sideways + control fall), `test_physics_sneak_posture` (1.5/1.27 vs
   1.8/1.62, forced crouch, fractional 65.4/67 headroom), `test_player_view_bob`
   (exact phases, walk builds/sneak calmer/still+fly decay), settings
-  default/parse/roundtrip for `view_bobbing`. Debug+Release 207/207 pass.
+  default/parse/roundtrip for `view_bobbing`. Release 243/243 pass.
 - **Human verified?:** No.
 
 ## TC-FID-006 — Inventory and workbench world-tick behavior (implemented; playtest open)

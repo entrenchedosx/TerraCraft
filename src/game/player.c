@@ -28,6 +28,15 @@ static Vec3 player_wish_dir(float yaw, float fwd, float strafe)
     return w;
 }
 
+/* Exponential approach factor for a fixed step (1 = snap, smaller = slower). */
+static float player_smoothing(float dt, float tau)
+{
+    if (!(tau > 1e-5f) || !isfinite(tau)) {
+        return 1.0f;
+    }
+    return 1.0f - expf(-dt / tau);
+}
+
 /* Player AABB corners from feet position. */
 static void player_box(const Player *p, Vec3 *out_mn, Vec3 *out_mx)
 {
@@ -68,8 +77,8 @@ void player_init(Player *p)
     p->fly_speed = 10.9f;
     p->jump_vel = 8.8f;
     p->gravity = 32.0f;
-    p->drag_air = 0.91f;
-    p->drag_ground = 0.6f;
+    p->drag_air = 0.969f;
+    p->drag_ground = 0.817f;
     p->step_accum = 0.0f;
     p->mode = 0; /* WORLD_MODE_SURVIVAL (int to avoid header weight). */
     inv_init(&p->inv);
@@ -95,6 +104,8 @@ void player_init(Player *p)
     p->last_fall = -1.0f;
     p->walk_phase = 0.0f;
     p->bob_amp = 0.0f;
+    p->water_contact = 0.0f;
+    p->anim_time = 0.0f;
     p->mine_active = false;
     p->mine_bx = 0;
     p->mine_by = 0;
@@ -348,22 +359,22 @@ static bool player_try_step_up(Player *p, World *w, float dx, float dz)
 }
 
 /* Clamber onto a shore while pushing against it from the water (only
- * when partially immersed: full submersion never steps). Requires
- * headroom at the raised level, like the mob step-up.
+ * when partially immersed: full submersion never steps). The blocked
+ * horizontal motion is applied at the raised level so the feet end up
+ * above the bank instead of straddling its edge; the following Y resolve
+ * then lands them on top. Requires headroom at the raised level, like
+ * the mob step-up.
  */
-static bool player_try_water_step_up(Player *p, World *w)
+static bool player_try_water_step_up(Player *p, World *w, float dx, float dz)
 {
+    Vec3 saved = p->pos;
+    p->pos.x = saved.x + dx;
+    p->pos.y = saved.y + 1.0f;
+    p->pos.z = saved.z + dz;
     Vec3 mn, mx;
     player_box(p, &mn, &mx);
-    mn.y += 1.0f;
-    mx.y += 1.0f;
     if (player_aabb_solid(w, mn, mx)) {
-        return false;
-    }
-    p->pos.y += 1.0f;
-    player_box(p, &mn, &mx);
-    if (player_aabb_solid(w, mn, mx)) {
-        p->pos.y -= 1.0f;
+        p->pos = saved;
         return false;
     }
     p->vel.y = 0.0f;
@@ -460,6 +471,7 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     bool sprint = in ? in->sprint : false;
     bool auto_jump = in ? in->auto_jump : false;
     const float dt = PLAYER_STEP_DT;
+    p->anim_time += dt;
 
     /* Pose first (feet stay, head shrinks/grows): sneak forces the 1.5 /
      * 1.27 crouch; releasing sneak stands only with headroom, otherwise
@@ -485,8 +497,9 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     bool sneak = p->sneaking;
 
     float water_contact = player_water_contact(w, p);
+    p->water_contact = water_contact;
 
-    p->sprinting = sprint && !sneak;
+    p->sprinting = sprint && !sneak && fwd > 0.0f;
 
     if (p->flying) {
         /* Creative no-clip flight: direct velocity, no gravity/collision. */
@@ -508,9 +521,9 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         return;
     }
 
-    /* Walk mode: horizontal velocity follows input; sneak is 0.3x (MC:
-     * 1.31 m/s vs 4.317 walk). */
-    float speed = sprint && !sneak ? p->sprint_speed : p->walk_speed;
+    /* Walk mode: horizontal velocity eases toward input; sneak is 0.3x
+     * (MC: 1.31 m/s vs 4.317 walk). */
+    float speed = p->sprinting ? p->sprint_speed : p->walk_speed;
     if (sneak) {
         speed *= 0.3f;
     }
@@ -519,12 +532,24 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     }
     Vec3 wish = player_wish_dir(p->yaw, fwd, strafe);
     if (mmath_vec3_length_sq(wish) > 1e-8f) {
-        p->vel.x = wish.x * speed;
-        p->vel.z = wish.z * speed;
+        /* Ease toward the wish velocity: acceleration is finite on the
+         * ground and weak in the air, so taps and direction changes carry
+         * believable momentum instead of snapping. */
+        float tau;
+        if (water_contact > 0.0f) {
+            tau = PLAYER_ACCEL_WATER_TAU;
+        } else if (p->grounded) {
+            tau = PLAYER_ACCEL_GROUND_TAU;
+        } else {
+            tau = PLAYER_ACCEL_AIR_TAU;
+        }
+        float k = player_smoothing(dt, tau);
+        p->vel.x += (wish.x * speed - p->vel.x) * k;
+        p->vel.z += (wish.z * speed - p->vel.z) * k;
     } else {
-        /* No input: decay horizontal velocity (MC-style per-step retention). */
+        /* No input: retain horizontal momentum with MC-style friction. */
         float dry_drag = p->grounded ? p->drag_ground : p->drag_air;
-        float d = dry_drag + (0.80f - dry_drag) * water_contact;
+        float d = dry_drag + (PLAYER_WATER_DRAG - dry_drag) * water_contact;
         p->vel.x *= d;
         p->vel.z *= d;
         if (fabsf(p->vel.x) < 1e-4f) {
@@ -554,8 +579,6 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         } else {
             p->vel.y *= 1.0f - 0.20f * water_contact;
         }
-        p->vel.x *= 1.0f - 0.08f * water_contact;
-        p->vel.z *= 1.0f - 0.08f * water_contact;
     }
 
     if (w == NULL) {
@@ -618,12 +641,13 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     /* Shore clamber: swimming into a bank while partially immersed steps
      * up one block instead of grinding against it. Gated on stalled
      * horizontal motion with live input so open-water swimming never
-     * climbs. Also gated on autoJump, like the dry step-up. */
-    if (auto_jump && water_contact > 0.15f && water_contact < 0.75f &&
+     * climbs. Deliberately NOT tied to autoJump: escaping water is basic
+     * movement (MC parity), unlike the optional dry 1-block auto-step. */
+    if (water_contact > 0.15f && water_contact < 0.75f &&
         mmath_vec3_length_sq(wish) > 1e-8f) {
         float hs = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
         if (hs < 0.05f) {
-            player_try_water_step_up(p, w);
+            player_try_water_step_up(p, w, dx, dz);
         }
     }
     p->pos.y += dy;

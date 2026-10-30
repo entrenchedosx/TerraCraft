@@ -101,6 +101,59 @@ int test_pvp_validate_strike(void)
     return failures;
 }
 
+/* Sequence dedup core: strictly increasing, 0 never valid, epoch
+ * rollover owned by the caller. */
+int test_pvp_seq_accept(void)
+{
+    int failures = 0;
+    uint32_t last = 0;
+    TEST_ASSERT(pvp_seq_accept(1, &last) == true && last == 1);
+    TEST_ASSERT(pvp_seq_accept(1, &last) == false && last == 1);
+    TEST_ASSERT(pvp_seq_accept(0, &last) == false && last == 1);
+    TEST_ASSERT(pvp_seq_accept(2, &last) == true && last == 2);
+    TEST_ASSERT(pvp_seq_accept(100, NULL) == true);
+    TEST_ASSERT(pvp_seq_accept(0, NULL) == false);
+    /* Epoch rollover: caller resets after UINT32_MAX, stream resumes. */
+    last = UINT32_MAX;
+    TEST_ASSERT(pvp_seq_accept(1, &last) == false);
+    last = 0;
+    TEST_ASSERT(pvp_seq_accept(1, &last) == true && last == 1);
+    return failures;
+}
+
+/* Client-supplied arrow damage is capped at the strongest bow shot. */
+int test_pvp_clamp_arrow(void)
+{
+    int failures = 0;
+    TEST_ASSERT_FLOAT_EQ(pvp_clamp_arrow_damage(4.0f), 4.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pvp_clamp_arrow_damage(6.0f), 6.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pvp_clamp_arrow_damage(20.0f), 6.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pvp_clamp_arrow_damage(0.0f), 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pvp_clamp_arrow_damage(-2.0f), 0.0f, 1e-6f);
+    return failures;
+}
+
+/* Wrap-aware angle interpolation takes the short arc. */
+int test_pvp_lerp_angle(void)
+{
+    int failures = 0;
+    TEST_ASSERT_FLOAT_EQ(pvp_lerp_angle(0.0f, 1.0f, 0.5f), 0.5f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pvp_lerp_angle(0.0f, 1.0f, 0.0f), 0.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pvp_lerp_angle(0.0f, 1.0f, 1.0f), 1.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pvp_lerp_angle(0.0f, 1.0f, -1.0f), 0.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pvp_lerp_angle(0.0f, 1.0f, 2.0f), 1.0f, 1e-5f);
+    /* Across the seam the short way: 3.0 -> -3.0 passes through PI. */
+    {
+        float mid = pvp_lerp_angle(3.0f, -3.0f, 0.5f);
+        TEST_ASSERT(mid > 3.1f && mid <= 3.14159265f + 1e-5f);
+    }
+    {
+        float mid = pvp_lerp_angle(-3.0f, 3.0f, 0.5f);
+        TEST_ASSERT(mid < -3.1f && mid >= -3.14159265f - 1e-5f);
+    }
+    return failures;
+}
+
 /* Client-supplied damage is clamped (never trust the wire). */
 int test_pvp_clamp_damage(void)
 {

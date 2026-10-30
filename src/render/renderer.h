@@ -258,9 +258,11 @@ typedef struct Player Player;
 
 /* Draw the third-person player body after mobs (Steve skin when loaded,
  * atlas tile fallback otherwise; frustum-culled). move_blend scales the
- * stride swing (0 still, 1 full). No-op on bad args. */
+ * stride swing (0 still, 1 full). anim (may be NULL for remote avatars)
+ * supplies attack/hurt/landing one-shots; all other pose facts come from
+ * the player. No-op on bad args. */
 void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts,
-                          const Player *p, float move_blend);
+                          const Player *p, float move_blend, const PlayerAnim *anim);
 
 /* Draw the original blocky first-person sleeve and hand after world effects
  * but before the HUD. held_tile is -1 for an empty hand; held_block is 0 for

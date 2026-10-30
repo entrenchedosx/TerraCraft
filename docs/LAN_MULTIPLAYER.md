@@ -45,17 +45,36 @@ is saved in `config/profile.cfg`; it is not tied to a world save.
 - The host's seed, terrain-generation version, game mode, player position,
   and time of day when a client joins. The client creates a local save copy
   and generates the same unmodified terrain.
+- Player-versus-player melee and arrow combat. The host validates strike
+  requests (range, solid-block line of sight, world PvP rule, liveness, and
+  per-attacker sequence numbers) and broadcasts authoritative damage; all
+  peers converge through the victim hurt window plus health snapshots.
+- Health, death, and respawn state. Respawn announcements carry position and
+  authoritative health in one frame so peers converge atomically.
+- World game rules (cheats, keep-inventory, mob spawning, daylight cycle,
+  regeneration, fall damage, PvP). The host owns the rules; clients apply
+  the host's copy on join and cannot override it.
+- Held hotbar slot and item snapshots for remote peers.
+- The LAN handshake is protocol version 4. Older (version 3) builds are
+  rejected at connect time because they would silently miss deaths, health,
+  and rules. All players must run the same game version.
 
 ## Current limits
 
 - A joining client does not receive block edits made before it connected.
-- Mobs, dropped items, player inventories, health, hunger, and other entity
-  state are not synchronized. These remain local to each game.
+- Mobs, dropped items, hunger, and other entity state are not synchronized.
+  Each peer owns its own inventory authoritatively and its death drops stay
+  in its local world copy, so items can neither duplicate nor transfer
+  between peers; remote peers never see each other's drops.
+- A rejoining client starts a fresh local world copy, so its previous local
+  drops are left behind (its saved inventory still loads from its own save).
 - Chat currently accepts printable ASCII only and is limited to 160
   characters.
 - The connection uses direct, unencrypted TCP intended for trusted local
   networks. There is no account authentication or protection from a hostile
-  peer on the same local network.
+  peer on the same local network. Client movement and arrow trajectories
+  are trusted; damage converges through host validation plus the victim
+  hurt window.
 - Falling blocks do not send continuous position snapshots; client animation
   can drift slightly from the host between lifecycle events.
 - The host uses client-reported player positions for rendering and block-edit

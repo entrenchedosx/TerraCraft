@@ -1010,20 +1010,31 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
 }
 
 /* One game-rule toggle row: label left, ON/OFF button right, dim
- * description below. Compact (fits 7 rules + actions at 720p). */
-static void srule_row(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label,
-                      const char *desc, bool *value, float x, float y, float w)
+ * description below. Compact (fits 7 rules + actions at 720p). When
+ * editable is false the button renders disabled and never toggles
+ * (guest view of host-owned rules). */
+static void srule_row_ex(AppContext *app, const UiFrame *ui, float *rects, size_t *rn,
+                         const char *label, const char *desc, bool *value, bool editable, float x,
+                         float y, float w)
 {
     renderer_draw_text(app->renderer, x, y + 4.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B, 1.0f,
                        label);
     char state[8];
     snprintf(state, sizeof(state), "%s", *value ? "ON" : "OFF");
-    if (sbutton(app, ui, rects, rn, x + w - 118.0f, y - 4.0f, 118.0f, 32.0f, state, true)) {
+    if (sbutton(app, ui, rects, rn, x + w - 118.0f, y - 4.0f, 118.0f, 32.0f, state, editable)) {
         *value = !*value;
     }
     renderer_draw_text(app->renderer, x, y + 34.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B,
                        1.0f, desc);
 }
+
+static void srule_row(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label,
+                      const char *desc, bool *value, float x, float y, float w)
+{
+    srule_row_ex(app, ui, rects, rn, label, desc, value, true, x, y, w);
+}
+
+
 
 static void screen_create_world_commit(AppContext *app)
 {
@@ -1332,9 +1343,108 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     }
 }
 
+/* In-session game rules page (pause sub-view): live authoritative values,
+ * host-or-offline editing, guest read-only. Toggles apply instantly
+ * (broadcast + world.meta persist per row). */
+static void screen_pause_rules(AppContext *app, const UiFrame *ui)
+{
+    float rects[SCR_MAX_RECT_VERTS * 6];
+    size_t rn = 0;
+    float cx = (float)app->width * 0.5f;
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, 0.0f, 0.0f,
+          0.0f, 0.55f);
+    sflush(app, rects, &rn);
+    float fw = SCR_BTN_W + 80.0f;
+    if (fw < 520.0f) {
+        fw = 520.0f;
+        if (fw > (float)app->width - 24.0f) {
+            fw = (float)app->width - 24.0f;
+        }
+    }
+    float fx = cx - fw * 0.5f;
+    float y = 36.0f;
+    y = stitle(app, "Game Rules", "Host-authoritative - changes save to world.meta", cx, y);
+    bool editable = !app->lan_client && app->world_open && app->world != NULL;
+    GameRules *r = app->world_open && app->world != NULL ? &app->world->rules : NULL;
+    if (r != NULL) {
+        /* Each row toggles the live rule directly; a change publishes
+         * (broadcast when hosting + world.meta persist) exactly once. */
+        bool before = r->allow_cheats;
+        srule_row_ex(app, ui, rects, &rn, "Allow Cheats", "Unlocks debug give/spawn keys (debug builds).",
+                     &r->allow_cheats, editable, fx, y, fw);
+        if (r->allow_cheats != before) {
+            app_apply_world_rules(app);
+        }
+        y += 52.0f;
+        before = r->keep_inventory;
+        srule_row_ex(app, ui, rects, &rn, "Keep Inventory", "Keep hotbar + inventory + held item through death.",
+                     &r->keep_inventory, editable, fx, y, fw);
+        if (r->keep_inventory != before) {
+            app_apply_world_rules(app);
+        }
+        y += 52.0f;
+        before = r->pvp;
+        srule_row_ex(app, ui, rects, &rn, "Player vs Player", "Players can damage each other in multiplayer.",
+                     &r->pvp, editable, fx, y, fw);
+        if (r->pvp != before) {
+            app_apply_world_rules(app);
+        }
+        y += 52.0f;
+        before = r->mob_spawning;
+        srule_row_ex(app, ui, rects, &rn, "Mob Spawning", "New creatures spawn over time.", &r->mob_spawning,
+                     editable, fx, y, fw);
+        if (r->mob_spawning != before) {
+            app_apply_world_rules(app);
+        }
+        y += 52.0f;
+        before = r->daylight_cycle;
+        srule_row_ex(app, ui, rects, &rn, "Daylight Cycle", "The sun/moon clock advances.", &r->daylight_cycle,
+                     editable, fx, y, fw);
+        if (r->daylight_cycle != before) {
+            app_apply_world_rules(app);
+        }
+        y += 52.0f;
+        before = r->natural_regen;
+        srule_row_ex(app, ui, rects, &rn, "Natural Regeneration", "Heal over time at high hunger (starve still hurts).",
+                     &r->natural_regen, editable, fx, y, fw);
+        if (r->natural_regen != before) {
+            app_apply_world_rules(app);
+        }
+        y += 52.0f;
+        before = r->fall_damage;
+        srule_row_ex(app, ui, rects, &rn, "Fall Damage", "Falling more than 3 blocks hurts.", &r->fall_damage,
+                     editable, fx, y, fw);
+        if (r->fall_damage != before) {
+            app_apply_world_rules(app);
+        }
+        y += 52.0f + 2.0f;
+    }
+    if (!editable) {
+        stext_c(app, "Only the hosting player can change rules.", cx, y, SCR_TEXT_SCALE, SCR_WARN_R,
+                SCR_WARN_G, SCR_WARN_B);
+        y += 8.0f * SCR_TEXT_SCALE + 6.0f;
+    } else {
+        stext_c(app, "Allow Cheats unlocks debug keys; it never grants rule editing to guests.", cx, y,
+                SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        y += 8.0f * SCR_SMALL_SCALE + 8.0f;
+    }
+    if (sbutton(app, ui, rects, &rn, fx, y, fw, SCR_BTN_H, "Done", true)) {
+        app->menu.pause_show_rules = false;
+        return;
+    }
+    sflush(app, rects, &rn);
+    if (ui->key_escape) {
+        app->menu.pause_show_rules = false;
+    }
+}
+
 /* Pause menu over the frozen world: Resume / Settings / Save+Quit. */
 static void screen_paused(AppContext *app, const UiFrame *ui)
 {
+    if (app->menu.pause_show_rules) {
+        screen_pause_rules(app, ui);
+        return;
+    }
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
     float cx = (float)app->width * 0.5f;
@@ -1355,6 +1465,11 @@ static void screen_paused(AppContext *app, const UiFrame *ui)
         settings_to_sliders(app);
         screens_refresh_packs(app);
         app_enter_state(app, GAME_STATE_SETTINGS);
+        return;
+    }
+    y += SCR_BTN_H + SCR_GAP;
+    if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Game Rules...", true)) {
+        app->menu.pause_show_rules = true;
         return;
     }
     y += SCR_BTN_H + SCR_GAP;

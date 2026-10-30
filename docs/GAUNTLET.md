@@ -400,7 +400,9 @@ triaged against the user's report.
 - Falling into water no longer hurts (player + mobs): any real water
   contact at touchdown forgives the fall, matching Minecraft.
 - Swimming into a 1-high shore while partially immersed steps up out
-  of the water instead of grinding; full submersion never climbs.
+  of the water instead of grinding; full submersion never climbs. Shore
+  escape is independent of the `auto_jump` setting (which only gates the
+  optional dry 1-block auto-step).
 - Submerged eyes switch the voxel pass to dense blue fog.
   Proof: `docs/shots/water-underwater.png` (5-deep dive, dawn sky
   above the murk).
@@ -411,6 +413,46 @@ triaged against the user's report.
   public and covered (`test_physics_water_*`, `test_mob_water_cushion`).
 - Known limit kept honest: the third-person body stays vertical while
   swimming (no prone pose yet).
+
+### Round 14 - third-person articulation and swim/use animation
+
+- The third-person body now has a real pose layer: hip-pivoted torso lean
+  (sneak 0.58 rad, sprint 0.14, swimming near-prone at up to 0.95), shoulders
+  and head riding that lean, counter-swinging arms/legs, flutter kick in
+  water, air tuck, idle breathing, and attack/hurt/landing one-shots. Feet
+  stay planted because the old whole-model crouch sink is gone.
+- The animation controller gained a `SWIM` base state (water contact outranks
+  airborne/moving), idle breathing phase, a raised use pose, and a diagonal
+  attack jab; the first-person arm scales held items up to a readable size
+  and the local third-person avatar draws the held block/sprite in its right
+  hand (remote hotbars are not replicated, so remotes stay empty-handed).
+- Renderer/API plumbing: `renderer_draw_player` takes the controller so
+  one-shots reach the body; remote avatars pass `NULL`. Water contact and
+  animation time are per-player fields updated by the physics step.
+- New/updated regressions: `test_player_body_pose` (limb pairing, sneak,
+  swim, attack, landing, head clamp, null safety), swim state coverage in
+  `test_player_anim_states`, plus the existing viewmodel composition tests.
+  Release suite: 242 tests, 0 failures; game and test targets build clean.
+- Visual playtest of the new poses (especially swimming and held items) is
+  still open; no screenshot is claimed for this round.
+
+### Round 15 - movement momentum and air control
+
+- Horizontal velocity no longer snaps to the input wish speed. It eases with
+  exponential time constants (ground 0.12 s, air 0.50 s, water 0.35 s), and
+  releasing input keeps momentum with MC's 20 Hz friction converted to the
+  60 Hz step (0.6*0.91 grounded, 0.91 airborne). Ground stop is intentionally
+  quick; air carries farther, and reversing direction takes a few steps.
+- Sprint now requires forward input (strafing/sneaking never sprint), and
+  survival exhaustion follows the actual sprint state rather than raw input.
+  The removed per-step water horizontal multiplier is folded into the water
+  target speed, so submerged steady speed stays 0.55x walk.
+- New `test_physics_acceleration` covers the one-step ramp, steady speed,
+  release/settle, ground-vs-air control and decay, reversal momentum, and
+  sprint gating; the water-motion test now converges to steady state instead
+  of asserting one snap step. Release suite: 243 tests, 0 failures.
+- A hands-on movement playtest (walk/sprint/jump feel, air steering, water
+  exit) remains the closing evidence for this round.
 
 ## Research
 

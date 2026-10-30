@@ -266,12 +266,46 @@ static int proj_segment_mob(const MobPool *mobs, Vec3 a, Vec3 d, float radius,
     return best;
 }
 
+/* Nearest remote-peer hit along a segment (player-owned arrows only;
+ * dead/creative remotes skipped). Returns the remotes[] index or -1. */
+static int proj_segment_remote(const ProjectileRemote *remotes, size_t nremotes, Vec3 a, Vec3 d,
+                               float radius, float *out_t)
+{
+    int best = -1;
+    float best_t = 2.0f;
+    if (remotes == NULL) {
+        if (out_t != NULL) {
+            *out_t = best_t;
+        }
+        return -1;
+    }
+    for (size_t i = 0; i < nremotes; ++i) {
+        const ProjectileRemote *r = &remotes[i];
+        if (!r->alive || r->creative || !(r->width > 0.0f) || !(r->height > 0.0f)) {
+            continue;
+        }
+        float hw = r->width * 0.5f + radius;
+        Vec3 mn = mmath_vec3(r->pos.x - hw, r->pos.y - radius, r->pos.z - hw);
+        Vec3 mx = mmath_vec3(r->pos.x + hw, r->pos.y + r->height + radius, r->pos.z + hw);
+        float t = proj_segment_aabb(a, d, mn, mx);
+        if (t >= 0.0f && t < best_t) {
+            best_t = t;
+            best = (int)i;
+        }
+    }
+    if (out_t != NULL) {
+        *out_t = best_t;
+    }
+    return best;
+}
+
 /* Resolve one substep segment: nearest impact wins (block beats entity
  * on exact ties, so shots never leak through walls). Applies damage,
  * embed, or despawn through the shared M8 systems.
  */
 static void proj_collide_segment(ProjectilePool *pool, int idx, MobPool *mobs, EntityPool *drops,
-                                 World *w, const ProjectilePlayer *player, Vec3 a, Vec3 b,
+                                 World *w, const ProjectilePlayer *player,
+                                 const ProjectileRemote *remotes, size_t nremotes, Vec3 a, Vec3 b,
                                  ProjectileFrameEvents *ev)
 {
     Projectile *p = &pool->projs[idx];
@@ -291,11 +325,19 @@ static void proj_collide_segment(ProjectilePool *pool, int idx, MobPool *mobs, E
                        player->pos.z + hw);
         player_t = proj_segment_aabb(a, d, mn, mx);
     }
+    /* Remote peers: only the local player's own arrows test them (mob
+     * arrows stay local-player-only; every peer simulates those). */
+    float remote_t = 2.0f;
+    int remote_idx = -1;
+    if (p->owner == (ProjectileOwnerId)ENTITY_PLAYER_ID && nremotes > 0) {
+        remote_idx = proj_segment_remote(remotes, nremotes, a, d, def->radius, &remote_t);
+    }
     /* Entity hits strictly inside the block hit win; ties go to the
      * block (documented wall-first policy). */
     bool entity_first = false;
     float entity_t = 2.0f;
     bool entity_is_player = false;
+    bool entity_is_remote = false;
     if (player_t >= 0.0f && (block_t < 0.0f || player_t < block_t)) {
         entity_first = true;
         entity_t = player_t;
@@ -306,6 +348,13 @@ static void proj_collide_segment(ProjectilePool *pool, int idx, MobPool *mobs, E
         entity_first = true;
         entity_t = mob_t;
         entity_is_player = false;
+    }
+    if (remote_idx >= 0 && (block_t < 0.0f || remote_t < block_t) &&
+        (!entity_first || remote_t < entity_t)) {
+        entity_first = true;
+        entity_t = remote_t;
+        entity_is_player = false;
+        entity_is_remote = true;
     }
     if (!entity_first && block_t < 0.0f) {
         return; /* Clear segment: keep flying. */
@@ -347,6 +396,22 @@ static void proj_collide_segment(ProjectilePool *pool, int idx, MobPool *mobs, E
         p->active = false;
         return;
     }
+    if (entity_is_remote) {
+        /* Remote hits report victim + damage (never applied here — the
+         * app routes them through the host-validated PvP path, same as
+         * melee, so arrows converge exactly like swings). Knockback is
+         * intentionally not reported: the victim's client owns knockback
+         * for remote-origin damage (melee behaves the same). */
+        if (ev->remote_hits < PROJECTILE_MAX_REMOTE_HITS) {
+            ev->remote_ids[ev->remote_hits] = remotes[remote_idx].id;
+            ev->remote_damage[ev->remote_hits] = p->damage;
+            ev->remote_hits++;
+        } else {
+            ev->remote_hits_dropped++;
+        }
+        p->active = false; /* Arrows never penetrate (M9 rule). */
+        return;
+    }
     /* Living-mob hit through the M8 damage API (hurt window, knockback
      * resist, exactly-once death drops — no direct health writes here). */
     const Mob *target = &mobs->mobs[mob_slot];
@@ -374,10 +439,23 @@ static void proj_collide_segment(ProjectilePool *pool, int idx, MobPool *mobs, E
 void projectile_update(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, World *w,
                        const ProjectilePlayer *player, float dt, ProjectileFrameEvents *ev)
 {
+    projectile_update_ex(pool, mobs, drops, w, player, NULL, 0, dt, ev);
+}
+
+void projectile_update_ex(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, World *w,
+                          const ProjectilePlayer *player, const ProjectileRemote *remotes,
+                          size_t nremotes, float dt, ProjectileFrameEvents *ev)
+{
     if (ev != NULL) {
         ev->player_hits = 0;
         ev->player_damage = 0.0f;
         ev->player_knock = mmath_vec3(0.0f, 0.0f, 0.0f);
+        ev->remote_hits = 0;
+        for (int i = 0; i < PROJECTILE_MAX_REMOTE_HITS; ++i) {
+            ev->remote_ids[i] = 0;
+            ev->remote_damage[i] = 0.0f;
+        }
+        ev->remote_hits_dropped = 0;
         ev->mobs_hit = 0;
         ev->mobs_died = 0;
         ev->last_died_type = 0;
@@ -389,6 +467,9 @@ void projectile_update(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, W
     }
     if (pool == NULL || mobs == NULL || drops == NULL || w == NULL || player == NULL || ev == NULL) {
         return;
+    }
+    if (nremotes > 0 && remotes == NULL) {
+        nremotes = 0;
     }
     if (dt < 0.0f) {
         dt = 0.0f;
@@ -438,7 +519,7 @@ void projectile_update(ProjectilePool *pool, MobPool *mobs, EntityPool *drops, W
             Vec3 b = mmath_vec3_add(a, mmath_vec3_scale(p->vel, h));
             p->prev_pos = a;
             p->pos = b;
-            proj_collide_segment(pool, i, mobs, drops, w, player, a, b, ev);
+            proj_collide_segment(pool, i, mobs, drops, w, player, remotes, nremotes, a, b, ev);
         }
     }
 }

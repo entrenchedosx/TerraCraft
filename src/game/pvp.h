@@ -60,6 +60,19 @@ bool pvp_validate_strike(bool pvp_enabled, bool attacker_alive, bool victim_aliv
                          uint32_t victim_id, float damage, float distance, uint32_t seq,
                          uint32_t *last_seq);
 
+/* Sequence dedup core shared by melee and ranged validation: rejects
+ * seq 0 and any seq that does not strictly increase past *last_seq,
+ * updating *last_seq on accept. Callers own epoch rollover (reset
+ * *last_seq to 0 after UINT32_MAX); NULL disables tracking.
+ *
+ * Args:
+ *   seq: incoming per-attacker sequence number.
+ *   last_seq: last accepted sequence (in/out; may be NULL).
+ *
+ * Returns: true when the sequence is fresh (and recorded).
+ */
+bool pvp_seq_accept(uint32_t seq, uint32_t *last_seq);
+
 /* Clamp client-supplied damage into the weapon-sane range
  * (never trust arbitrary client damage; see app.c).
  *
@@ -69,3 +82,25 @@ bool pvp_validate_strike(bool pvp_enabled, bool attacker_alive, bool victim_aliv
  * Returns: clamped damage in [0, 20].
  */
 float pvp_clamp_damage(float damage);
+
+/* Wrap-aware angle interpolation for remote-player rendering (shortest
+ * arc across the -PI/PI seam; t clamped into [0, 1]).
+ *
+ * Args:
+ *   from/to: angles in radians.
+ *   t: blend factor (0 reads as from, 1 reads as to).
+ *
+ * Returns: interpolated angle in [-PI, PI].
+ */
+float pvp_lerp_angle(float from, float to, float t);
+
+/* Clamp client-supplied ARROW damage into the bow-sane range. Bows deal
+ * 2..6 by charge (see SURVIVAL_BOW_DMG_MIN/MAX in game/survival.h); a
+ * larger claim is a modified client and must not become 20 damage.
+ *
+ * Args:
+ *   damage: requested damage.
+ *
+ * Returns: clamped damage in [0, 6].
+ */
+float pvp_clamp_arrow_damage(float damage);
