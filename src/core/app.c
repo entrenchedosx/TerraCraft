@@ -1495,32 +1495,6 @@ static void app_lan_handle_rules(AppContext *app, const LanEvent *event)
     app->world->rules = r;
 }
 
-/* Client->host rule change request. ONLY the host acts on it, and only
- * from a known peer; everyone else (including clients receiving it)
- * ignores it. Any 7-byte combination is a legal ruleset, so validation
- * is about authority, not content. Accepted changes broadcast via
- * RULES and persist to world.meta through app_apply_world_rules.
- * Deliberately independent of Allow Cheats: guests never gain rule
- * editing, with or without cheats; the host always has it. */
-static void app_lan_handle_rules_set(AppContext *app, const LanEvent *event)
-{
-    if (app == NULL || event == NULL || event->size != LAN_MSG_RULES_SET_SIZE ||
-        event->payload[0] != LAN_MSG_RULES_SET || !app->world_open || app->world == NULL) {
-        return;
-    }
-    if (!app->lan_host || app_lan_find_player(app, event->peer_id, false) == NULL) {
-        return;
-    }
-    GameRules r;
-    lan_rules_decode(&r, event->payload + 1);
-    if (game_rules_equal(&r, &app->world->rules)) {
-        return;
-    }
-    app->world->rules = r;
-    LOG_INFO("LAN: applied rule change requested by player %u", (unsigned)event->peer_id);
-    app_apply_world_rules(app);
-}
-
 /* Clamp a reported remote mode to this world's mode. Modes are
  * world-scoped (every legitimate peer runs the host's mode), so a
  * mismatch is a spoof attempt or a stale frame — never trust it into
@@ -2074,7 +2048,8 @@ void app_lan_handle_message(AppContext *app, const LanEvent *event)
         app_lan_handle_rules(app, event);
         break;
     case LAN_MSG_RULES_SET:
-        app_lan_handle_rules_set(app, event);
+        /* Reserved legacy message. Guests never own world settings,
+         * with or without cheats. Only host-local controls may edit. */
         break;
     case LAN_MSG_HELD:
         app_lan_handle_held(app, event);

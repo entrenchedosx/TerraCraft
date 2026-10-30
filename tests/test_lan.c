@@ -954,9 +954,9 @@ static void pvp_rules_tmp_cleanup(const char *dir)
     path_remove_dir(dir);
 }
 
-/* Test: in-session rule editing is host-authoritative (RULES_SET from a
- * known peer applies + broadcasts + persists; unknown peers and clients
- * are ignored; enforcement follows immediately).
+/* Test: only host-local controls edit world rules. Guest packets never
+ * mutate/persist rules, even with cheats enabled. Host changes still
+ * broadcast, persist, and take effect immediately.
  *
  * Returns: failure count.
  */
@@ -999,9 +999,19 @@ int test_lan_rules_editing(void)
         pvp_inject(pair.client, LAN_SERVER_PEER_ID, frame, sizeof(frame));
         TEST_ASSERT(pair.cworld->rules.pvp == true);
     }
-    /* Known peer: applies, broadcasts RULES, and persists to world.meta.
-     * Send without pre-settling so the capture below observes the actual
-     * broadcast (forwarding settles as a side effect). */
+    /* Registered guests cannot modify rules with cheats off or on. */
+    for(int cheats=0;cheats<2;++cheats) {
+        pair.hworld->rules.allow_cheats=cheats!=0;
+        GameRules before=pair.hworld->rules,attack=before;
+        attack.allow_cheats=!before.allow_cheats;
+        attack.keep_inventory=true;attack.pvp=false;
+        uint8_t request[LAN_MSG_RULES_SET_SIZE];
+        request[0]=LAN_MSG_RULES_SET;lan_rules_encode(request+1,&attack);
+        pvp_inject(pair.host,pair.cpid,request,sizeof(request));
+        TEST_ASSERT(game_rules_equal(&before,&pair.hworld->rules));
+    }
+    { char meta[1024];path_join(meta,sizeof(meta),dir,WORLD_META_FILE);TEST_ASSERT(!path_is_file(meta)); }
+    /* Host-local edits still broadcast RULES and persist to world.meta. */
     {
         uint8_t frame[LAN_MSG_RULES_SET_SIZE];
         frame[0] = (uint8_t)LAN_MSG_RULES_SET;
@@ -1010,7 +1020,8 @@ int test_lan_rules_editing(void)
         r.pvp = false;
         r.keep_inventory = true;
         lan_rules_encode(frame + 1, &r);
-        TEST_ASSERT(lan_send(pair.cs, LAN_SERVER_PEER_ID, frame, sizeof(frame)));
+        pair.hworld->rules=r;
+        app_apply_world_rules(pair.host);
         uint8_t rules[LAN_MSG_RULES_SIZE];
         size_t n = 0;
         TEST_ASSERT(pvp_forward_to_client(&pair, LAN_MSG_RULES, rules, sizeof(rules), &n));

@@ -359,9 +359,9 @@ void app_lan_update(AppContext *app, double dt);
 
 /* Publish the current authoritative world rules: broadcast to connected
  * peers when hosting, then persist to world.meta. Call after any
- * host-side rules change (pause-menu edits, accepted RULES_SET).
+ * host-local rules change (pause-menu edits).
  * No-op without an open world; clients never publish (the host owns
- * the rules, and RULES_SET from a client is decided in its handler).
+ * the rules, and RULES_SET from any client is rejected).
  *
  * Args:
  *   app: context with an open world (must not be NULL).
