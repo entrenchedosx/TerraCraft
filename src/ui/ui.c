@@ -1,4 +1,5 @@
 #include "ui/ui.h"
+#include "ui/ui_style.h"
 
 #include <string.h>
 
@@ -22,6 +23,55 @@ void ui_frame_clear(UiFrame *f)
     f->key_up = false;
     f->key_down = false;
     f->key_delete = false;
+    f->key_tab = f->key_shift = f->key_left = f->key_right = false;
+}
+
+void ui_controls_begin(UiControls *s, const UiFrame *f, int screen, bool arrows)
+{
+    if (!s || !f)
+        return;
+    if (s->screen != screen) {
+        memset(s, 0, sizeof(*s));
+        s->screen = screen;
+        s->focus = s->active = -1;
+    }
+    if (f->mouse_clicked || f->wheel)
+        s->focus = -1;
+    int direction = f->key_tab ? (f->key_shift ? -1 : 1) : arrows && f->key_down ? 1 : arrows && f->key_up ? -1 : 0;
+    if (direction)
+        s->focus = ui_focus_next_enabled(s->focus, direction, s->enabled, (size_t)s->previous_count);
+    s->released = (s->was_down || f->mouse_clicked) && !f->mouse_down;
+    s->was_down = f->mouse_down;
+    s->count = 0;
+}
+UiControl ui_control(UiControls *s, const UiFrame *f, float x, float y, float w, float h, bool enabled)
+{
+    UiControl c = {0};
+    if (!s || !f || s->count >= UI_CONTROL_CAP)
+        return c;
+    int index = s->count++;
+    s->enabled[index] = enabled;
+    if (!enabled && s->active == index)
+        s->active = -1;
+    c.hovered = enabled && ui_hit(f->mouse_x, f->mouse_y, x, y, w, h);
+    if (c.hovered && f->mouse_clicked) {
+        s->active = index;
+        s->focus = index;
+    }
+    c.focused = enabled && s->focus == index;
+    c.pressed = c.hovered && s->active == index && f->mouse_down;
+    c.activated = enabled && ((s->released && s->active == index && c.hovered) || (c.focused && f->key_return));
+    return c;
+}
+void ui_controls_end(UiControls *s)
+{
+    if (!s)
+        return;
+    s->previous_count = s->count;
+    if (s->focus >= s->count)
+        s->focus = -1;
+    if (s->released)
+        s->active = -1;
 }
 
 /* Point-in-rect test. */
@@ -92,8 +142,7 @@ bool ui_text_field(const UiFrame *f, bool *focused, char *buf, size_t cap, float
 }
 
 /* Slider drag. */
-bool ui_slider(const UiFrame *f, float *value, float lo, float hi, float x, float y, float w, float h,
-               bool *held)
+bool ui_slider(const UiFrame *f, float *value, float lo, float hi, float x, float y, float w, float h, bool *held)
 {
     if (f == NULL || value == NULL || held == NULL || !(hi > lo) || w <= 0.0f) {
         return false;

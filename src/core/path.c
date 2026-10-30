@@ -345,6 +345,22 @@ int path_exe_dir(char *out, size_t out_cap)
 
 /* Resolve an mcassets subdirectory. The executable-relative location wins
  * only when it actually exists; otherwise fall back to the working
+ * directory (dev runs from the repo root). */
+int path_prepare_runtime_directory(void)
+{
+    if(path_is_file("CMakeLists.txt") || path_is_file("config/profile.cfg") ||
+       path_is_file("config/settings.cfg") || path_is_dir("saves")) return 0;
+    char executable[PATH_MAX_LEN];
+    if(path_exe_dir(executable,sizeof(executable))!=0) return -1;
+#if defined(_WIN32)
+    return _chdir(executable);
+#else
+    return chdir(executable);
+#endif
+}
+
+/* Resolve an mcassets subdirectory. The executable-relative location wins
+ * only when it actually exists; otherwise fall back to the working
  * directory (dev runs from the repo root). Returning a non-existent
  * exe-relative path would silently skip the working-directory layer.
  */

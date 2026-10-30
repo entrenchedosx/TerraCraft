@@ -28,6 +28,7 @@
 #include "game/simulation_clock.h"
 #include "game/time_system.h"
 #include "world/streamer.h"
+#include "ui/ui.h"
 
 /* Forward declarations to avoid pulling subsystem headers into this header. */
 typedef struct Window Window;
@@ -95,6 +96,8 @@ typedef struct LanRemotePlayer {
 
 /* Menu/screen scratch state (all owned here, no globals). */
 typedef struct MenuData {
+    UiControls controls;
+    float settings_scroll;
     char profile_buf[PROFILE_NAME_MAX_LEN + 1]; /* First-run account name. */
     char lan_address_buf[64]; /* IPv4 address of the LAN host. */
     int lan_server_idx;   /* Selected discovered server (-1 = none). */

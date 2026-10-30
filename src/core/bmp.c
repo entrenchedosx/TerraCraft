@@ -1,12 +1,39 @@
 #include "core/bmp.h"
+#include "core/path.h"
 #include "core/log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Hard cap: 4 MiB input (a 16x16 tile is ~1 KiB; anything bigger is junk). */
-#define BMP_MAX_BYTES (4u * 1024u * 1024u)
+/* Native 2048-square menu faces need 16 MiB of pixels plus their header.
+ * This remains a strict allocation/file bound; atlas tiles still require16x16. */
+#define BMP_MAX_BYTES (16u * 1024u * 1024u + 4096u)
+
+int bmp_load_mcasset(const char *relative, int expected_w, int expected_h, BmpImage *out)
+{
+    if (!relative || !out || strstr(relative, ".."))
+        return -1;
+    memset(out, 0, sizeof(*out));
+    char exe[PATH_MAX_LEN], root[PATH_MAX_LEN], file[PATH_MAX_LEN];
+    for (int layer = 0; layer < 2; ++layer) {
+        if (layer == 0) {
+            if (path_exe_dir(exe, sizeof(exe)) != 0 || path_join(root, sizeof(root), exe, "mcassets") != 0)
+                continue;
+        } else
+            snprintf(root, sizeof(root), "mcassets");
+        if (path_join(file, sizeof(file), root, relative) != 0 || !path_is_file(file))
+            continue;
+        if (bmp_load_file(file, out) == 0 && (!expected_w || out->width == expected_w) &&
+            (!expected_h || out->height == expected_h)) {
+            LOG_INFO("asset: loaded %s (%dx%d)", file, out->width, out->height);
+            return 0;
+        }
+        LOG_WARN("asset: unusable bitmap %s (expected %dx%d); trying next root", file, expected_w, expected_h);
+        bmp_free(out);
+    }
+    return -2;
+}
 
 /* Little-endian readers (BMP is LE; explicit to stay endian-clean). */
 static uint16_t bmp_u16(const unsigned char *p)
@@ -56,7 +83,7 @@ int bmp_parse(const unsigned char *data, size_t len, BmpImage *out)
     }
     uint32_t data_off = bmp_u32(data + 10);
     uint32_t dib = bmp_u32(data + 14);
-    if (dib != 40) {
+    if (dib != 40 || data_off < 54) {
         return -4; /* Only BITMAPINFOHEADER. */
     }
     int32_t w = bmp_i32(data + 18);
@@ -68,6 +95,8 @@ int bmp_parse(const unsigned char *data, size_t len, BmpImage *out)
         return -5;
     }
     bool top_down = false;
+    if (h == INT32_MIN)
+        return -6;
     if (h < 0) {
         top_down = true;
         h = -h;

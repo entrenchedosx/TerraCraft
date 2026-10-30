@@ -10,6 +10,8 @@ Writes: mcassets/generated/tiles/<stem>.bmp   (16x16 32-bit BMP, alpha kept)
             skins keep their 64x32/64x64 layout so part UVs map 1:1)
         mcassets/generated/menu/menu_font.bmp (Minecraft ASCII bitmap font)
         mcassets/generated/menu/menu_panorama.bmp (stitched title panorama)
+        mcassets/generated/menu/panorama_0..5.bmp (native title cube faces)
+        mcassets/generated/menu/button*.bmp (native nine-slice widget art)
 
 The engine loads generated/ with its existing BMP/WAV parsers (no PNG or
 Vorbis code in the C build); missing outputs fall back to procedural art
@@ -23,6 +25,7 @@ soundfile, numpy.
 """
 
 import os
+import json
 import sys
 import wave
 
@@ -38,6 +41,10 @@ DOWNLOADED_MENU = os.path.join(REPO, "mcassets", "downloaded", "menu")
 
 TILE_SIZE = 16
 AUDIO_RATE = 22050
+
+# Native logical dimensions and nine-slice borders supplied by the owner's
+# widget .mcmeta files. Keep these synchronized with the renderer's UI skin.
+MENU_WIDGETS = {"button": 3, "button_highlighted": 3, "button_disabled": 1}
 
 # TerraCraft tile stem -> mcassets texture path (relative to textures/).
 TILES = {
@@ -279,15 +286,85 @@ def convert_menu_font():
     return True
 
 
+def _menu_face_paths():
+    """Use a complete downloaded set first; never mix two panoramas."""
+    source_dir = os.path.join(TEX, "gui", "title", "background")
+    downloaded = [os.path.join(DOWNLOADED_MENU, "panorama_%d.png" % i) for i in range(6)]
+    local = [os.path.join(source_dir, "panorama_%d.png" % i) for i in range(6)]
+    return downloaded if all(os.path.isfile(p) for p in downloaded) else local
+
+
+def convert_menu_widgets():
+    """Stage real widget art at native size, checking the supported slice contract.
+
+    Missing files are optional. Existing invalid files are diagnosed separately
+    and cause the converter entry point to fail, rather than reporting success
+    while the renderer quietly falls back to its original artwork.
+    """
+    from PIL import Image
+    converted, missing, invalid = 0, [], []
+    source_dir = os.path.join(TEX, "gui", "sprites", "widget")
+    for stem, border in MENU_WIDGETS.items():
+        src = os.path.join(source_dir, stem + ".png")
+        if not os.path.isfile(src):
+            missing.append(src)
+            continue
+        try:
+            with Image.open(src) as source:
+                image = source.convert("RGBA")
+            if image.size != (200, 20):
+                raise ValueError("expected native 200x20 widget, got %dx%d" % image.size)
+            metadata_path = src + ".mcmeta"
+            if os.path.isfile(metadata_path):
+                with open(metadata_path, encoding="utf-8") as f:
+                    scaling = json.load(f).get("gui", {}).get("scaling", {})
+                expected = {"type": "nine_slice", "width": 200, "height": 20, "border": border}
+                if any(scaling.get(k) != value for k, value in expected.items()):
+                    raise ValueError("unsupported nine-slice metadata; expected %s" % expected)
+            _write_rgba_bmp(image, os.path.join(GEN_MENU, stem + ".bmp"))
+            converted += 1
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            invalid.append("%s: %s" % (src, error))
+    return converted, missing, invalid
+
+
+def convert_menu_native_faces():
+    """Stage all six cube faces without resizing, stitching or filtering.
+
+    Validate the complete input set before writing any face, so an invalid
+    set cannot create a partial new panorama mixed with older output.
+    """
+    from PIL import Image
+    paths = _menu_face_paths()
+    missing = [path for path in paths if not os.path.isfile(path)]
+    if missing:
+        return 0, missing, []
+    faces = []
+    invalid = []
+    for path in paths:
+        try:
+            with Image.open(path) as source:
+                image = source.convert("RGBA")
+            if image.width != image.height or not 64 <= image.width <= 2048:
+                raise ValueError("expected square panorama face of 64..2048 pixels, got %dx%d" % image.size)
+            if faces and image.size != faces[0].size:
+                raise ValueError("panorama face dimensions differ from the first face")
+            faces.append(image)
+        except (OSError, ValueError) as error:
+            invalid.append("%s: %s" % (path, error))
+    if invalid:
+        return 0, [], invalid
+    for i, image in enumerate(faces):
+        _write_rgba_bmp(image, os.path.join(GEN_MENU, "panorama_%d.bmp" % i))
+    return 6, [], []
+
+
 def convert_menu_panorama():
     """Project the local six-face vanilla title cubemap into a 2:1 panorama."""
     from PIL import Image
     import numpy as np
-    source_dir = os.path.join(TEX, "gui", "title", "background")
     faces = []
-    downloaded_faces = [os.path.join(DOWNLOADED_MENU, "panorama_%d.png" % i) for i in range(6)]
-    local_faces = [os.path.join(source_dir, "panorama_%d.png" % i) for i in range(6)]
-    face_paths = downloaded_faces if all(os.path.isfile(p) for p in downloaded_faces) else local_faces
+    face_paths = _menu_face_paths()
     for i in range(6):
         path = face_paths[i]
         if not os.path.isfile(path):
@@ -453,7 +530,9 @@ def main():
     sounds_ok, sounds_missing = convert_sounds()
     skins_ok, skins_missing = convert_skins()
     menu_font_ok = convert_menu_font()
-    menu_panorama_ok = convert_menu_panorama()
+    widgets_ok, widgets_missing, widgets_invalid = convert_menu_widgets()
+    faces_ok, faces_missing, faces_invalid = convert_menu_native_faces()
+    menu_panorama_ok = convert_menu_panorama() if not faces_invalid else False
     print("tiles: %d converted, %d missing" % (tiles_ok, len(tiles_missing)))
     for m in tiles_missing:
         print("  missing tile source: %s" % m)
@@ -468,7 +547,16 @@ def main():
         print("  missing skin source: %s" % m)
     print("menu font: %s" % ("converted" if menu_font_ok else "optional source missing"))
     print("menu panorama: %s" % ("converted" if menu_panorama_ok else "optional source missing"))
+    print("menu widgets: %d converted, %d optional missing, %d invalid" %
+          (widgets_ok, len(widgets_missing), len(widgets_invalid)))
+    print("native panorama: %d converted, %d optional missing, %d invalid" %
+          (faces_ok, len(faces_missing), len(faces_invalid)))
+    for diagnostic in widgets_missing + faces_missing:
+        print("  optional menu source missing: %s" % diagnostic)
+    for diagnostic in widgets_invalid + faces_invalid:
+        print("  invalid menu source: %s" % diagnostic)
     bad = tiles_missing + arm_missing + sounds_missing + skins_missing
+    bad += widgets_invalid + faces_invalid
     return 0 if not bad else 1
 
 

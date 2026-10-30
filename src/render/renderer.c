@@ -1,4 +1,6 @@
 #include "render/renderer.h"
+#include "render/menu_panorama.h"
+#include "ui/ui_style.h"
 #include "core/bmp.h"
 #include "core/log.h"
 #include "core/path.h"
@@ -100,6 +102,10 @@ struct Renderer {
     int ui_tex_tint_loc; /* uTint location (-1 when unavailable). */
     int ui_tex_alpha_loc; /* uAlpha location (-1 when unavailable). */
     unsigned int menu_panorama_tex; /* Optional owner-local Minecraft panorama. */
+    MenuPanorama *menu_panorama;
+    unsigned int button_tex[3];
+    bool button_local[3];
+    int ui_width,ui_height;
     unsigned int menu_font_tex; /* Optional owner-local Minecraft ASCII font. */
     unsigned char menu_font_left[128];
     unsigned char menu_font_width[128];
@@ -966,15 +972,10 @@ static unsigned int renderer_load_menu_bitmap(const char *leaf, int expected_w, 
         minec_glTexParameteri == NULL || minec_glDeleteTextures == NULL) {
         return 0;
     }
-    char dir[PATH_MAX_LEN];
     char file[PATH_MAX_LEN];
-    if (path_mcassets_dir(dir, sizeof(dir), "generated/menu") != 0 ||
-        path_join(file, sizeof(file), dir, leaf) != 0) {
-        return 0;
-    }
+    if (path_join(file,sizeof(file),"generated/menu",leaf)!=0) return 0;
     BmpImage image = {0};
-    if (bmp_load_file(file, &image) != 0 || image.px == NULL || image.width != expected_w ||
-        image.height != expected_h) {
+    if (bmp_load_mcasset(file,expected_w,expected_h,&image)!=0) {
         bmp_free(&image);
         return 0;
     }
@@ -1265,8 +1266,9 @@ Renderer *renderer_create(GlContext *gl)
     /* Optional exact Minecraft menu assets are converted into ignored local
      * BMPs by tools/convert_mcassets.py; clean installs keep TerraCraft's
      * proportional Monocraft font and generated background fallback. */
-    r->menu_panorama_tex = renderer_load_menu_bitmap("menu_panorama.bmp", 1024, 512,
-                                                     true, true, NULL);
+    r->menu_panorama=menu_panorama_create();
+    if(!r->menu_panorama)
+        r->menu_panorama_tex = renderer_load_menu_bitmap("menu_panorama.bmp",1024,512,true,true,NULL);
     if (r->menu_panorama_tex != 0) {
         LOG_INFO("renderer_create: loaded owner-local menu panorama");
     }
@@ -1363,6 +1365,8 @@ void renderer_destroy(Renderer *r)
     }
     texture_atlas_delete(r->player_skin_tex);
     r->player_skin_tex = 0;
+    menu_panorama_destroy(r->menu_panorama);
+    for(int i=0;i<3;++i) texture_atlas_delete(r->button_tex[i]);
     texture_atlas_delete(r->menu_panorama_tex);
     r->menu_panorama_tex = 0;
     texture_atlas_delete(r->menu_font_tex);
@@ -2285,6 +2289,7 @@ void renderer_draw_item_icons(Renderer *r, int width, int height, const IconBatc
  */
 bool renderer_draw_menu_panorama(Renderer *r, int width, int height, float seconds)
 {
+    if(r && menu_panorama_draw(r->menu_panorama,width,height,seconds)) return true;
     if (r == NULL || r->menu_panorama_tex == 0 || width <= 0 || height <= 0) {
         return false;
     }
@@ -2313,6 +2318,56 @@ bool renderer_draw_menu_panorama(Renderer *r, int width, int height, float secon
     };
     return renderer_draw_ui_texture_verts(r, width, height, r->menu_panorama_tex,
                                           verts, 6, 1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+/* Count drawable buffers (opaque pass; semantics unchanged from M4).
+ *
+ * Args:
+ *   r: renderer.
+ *
+ * Returns: drawable count.
+ */
+void renderer_set_ui_canvas(Renderer *r,int width,int height)
+{
+    if(!r) return;
+    r->ui_width=width>0?width:0;
+    r->ui_height=height>0?height:0;
+}
+
+void renderer_draw_button(Renderer *r,int width,int height,float x,float y,float w,float h,int state,bool pressed)
+{
+    if(!renderer_ui_tex_pipeline_ready(r) || state<0 || state>2 ||
+       !minec_glGenTextures || !minec_glTexImage2D || !minec_glTexParameteri) return;
+    if(!r->button_tex[state]) {
+        static const char *files[3]={"button.bmp","button_highlighted.bmp","button_disabled.bmp"};
+        r->button_tex[state]=renderer_load_menu_bitmap(files[state],200,20,false,false,NULL);
+        r->button_local[state]=r->button_tex[state]!=0;
+        if(!r->button_tex[state]) {
+            unsigned char pixels[200*20*4];
+            for(int yy=0;yy<20;++yy) for(int xx=0;xx<200;++xx) {
+                unsigned int hash=(unsigned)(xx*13+yy*31+xx*yy*7);
+                int value=(state==1?154:state==2?62:112)+(int)(hash%13)-6;
+                if(xx==0 || yy==0 || xx==199 || yy==19) value=8;
+                else if(yy<=2 || xx<=2) value+=45;
+                else if(yy>=17 || xx>=197) value-=40;
+                size_t p=(size_t)(yy*200+xx)*4;
+                pixels[p]=pixels[p+1]=pixels[p+2]=(unsigned char)value;pixels[p+3]=255;
+            }
+            minec_glGenTextures(1,&r->button_tex[state]);
+            minec_glBindTexture(MINEC_GL_TEXTURE_2D,r->button_tex[state]);
+            minec_glTexImage2D(MINEC_GL_TEXTURE_2D,0,MINEC_GL_RGBA,200,20,0,MINEC_GL_RGBA,MINEC_GL_UNSIGNED_BYTE,pixels);
+            minec_glTexParameteri(MINEC_GL_TEXTURE_2D,MINEC_GL_TEXTURE_MIN_FILTER,MINEC_GL_NEAREST);
+            minec_glTexParameteri(MINEC_GL_TEXTURE_2D,MINEC_GL_TEXTURE_MAG_FILTER,MINEC_GL_NEAREST);
+            minec_glTexParameteri(MINEC_GL_TEXTURE_2D,MINEC_GL_TEXTURE_WRAP_S,MINEC_GL_CLAMP_TO_EDGE);
+            minec_glTexParameteri(MINEC_GL_TEXTURE_2D,MINEC_GL_TEXTURE_WRAP_T,MINEC_GL_CLAMP_TO_EDGE);
+            LOG_INFO("ui: using original fallback button skin %d; optional local sprite absent",state);
+        }
+    }
+    float vertices[54*4];
+    float border=state==2 && r->button_local[state]?1.0f:3.0f;
+    size_t n=ui_nine_slice_build(vertices,54,x,y,w,h,200,20,border,2);
+    float tint=pressed?.73f:1.0f;
+    (void)renderer_draw_ui_texture_verts(r,width,height,r->button_tex[state],vertices,n,tint,tint,tint,1);
 }
 
 /* Count drawable buffers (opaque pass; semantics unchanged from M4).
@@ -2375,6 +2430,15 @@ void renderer_draw_hud(Renderer *r, int width, int height, const ItemStack *hotb
     if (r == NULL || width <= 0 || height <= 0 || hotbar == NULL || !renderer_ui_ready(r)) {
         return;
     }
+    /* Author every HUD layer in the same 2x-baseline logical canvas used
+     * by menus. Only UI projection changes: the world viewport remains at
+     * the actual drawable resolution. Preserve a caller's existing canvas. */
+    int previous_canvas_width = r->ui_width;
+    int previous_canvas_height = r->ui_height;
+    UiScale metrics = ui_scale_for_drawable(width, height);
+    width = (int)floorf(metrics.canvas_width);
+    height = (int)floorf(metrics.canvas_height);
+    renderer_set_ui_canvas(r, width, height);
     HudFrame frame;
     hud_build(&frame, width, height, hotbar, hotbar_sel);
     hud_build_durability(&frame, width, height, hotbar);
@@ -2385,6 +2449,7 @@ void renderer_draw_hud(Renderer *r, int width, int height, const ItemStack *hotb
     hud_build_bow(&frame, width, height, bow_frac);
     hud_build_flash(&frame, width, height, hurt_flash);
     if (frame.count == 0) {
+        renderer_set_ui_canvas(r, previous_canvas_width, previous_canvas_height);
         return;
     }
     renderer_ui_draw_verts(r, width, height, frame.verts, frame.count);
@@ -2415,8 +2480,16 @@ void renderer_draw_hud(Renderer *r, int width, int height, const ItemStack *hotb
         hud_hotbar_slot(width, height, i, &sx, &sy);
         char num[8];
         snprintf(num, sizeof(num), "%u", (unsigned)s->count);
-        renderer_draw_text(r, sx + 24.0f, sy + 22.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, num);
+        /* A 2x baseline glyph becomes exactly 2/3/4/6 physical pixels at
+         * 720p/1080p/1440p/4K, matching vitals and slot geometry. Measure
+         * the active proportional font to keep every count inside its slot. */
+        float text_width = 0.0f, text_height = 0.0f;
+        renderer_measure_text(r, num, 2.0f, &text_width, &text_height);
+        renderer_draw_text(r, sx + (float)HUD_SLOT_PX - 2.0f - text_width,
+                           sy + (float)HUD_SLOT_PX - 2.0f - text_height,
+                           2.0f, 1.0f, 1.0f, 1.0f, 1.0f, num);
     }
+    renderer_set_ui_canvas(r, previous_canvas_width, previous_canvas_height);
 }
 
 /* Draw raw colored UI quads.
@@ -2444,9 +2517,20 @@ void renderer_draw_rects(Renderer *r, int width, int height, const float *verts,
  *   cr, cg, cb, ca: color.
  *   text: string.
  */
+static float renderer_pixel_text_scale(const Renderer *r,float scale)
+{
+    if(!r || !r->ui_width || r->vp_width<=0) return scale;
+    float ratio=(float)r->vp_width/(float)r->ui_width;
+    return fmaxf(1,roundf(scale*ratio))/ratio;
+}
 void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, float cg, float cb, float ca,
                         const char *text)
 {
+    scale=renderer_pixel_text_scale(r,scale);
+    if(r && r->ui_width && r->vp_width>0) {
+        float ratio=(float)r->vp_width/(float)r->ui_width;
+        x=roundf(x*ratio)/ratio;y=roundf(y*ratio)/ratio;
+    }
     bool textured_font = r != NULL && r->menu_font_tex != 0 && renderer_ui_tex_pipeline_ready(r);
     if (r == NULL || text == NULL || text[0] == '\0' || !(scale > 0.0f) ||
         (!textured_font && !renderer_ui_ready(r))) {
@@ -2504,7 +2588,7 @@ void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, fl
             cx += (float)advance * scale;
         }
         if (floats > 0) {
-            (void)renderer_draw_ui_texture_verts(r, r->vp_width, r->vp_height, r->menu_font_tex,
+            (void)renderer_draw_ui_texture_verts(r, r->ui_width?r->ui_width:r->vp_width, r->ui_height?r->ui_height:r->vp_height, r->menu_font_tex,
                                                  verts, floats / 4u, cr, cg, cb, ca);
         }
         return;
@@ -2522,7 +2606,7 @@ void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, fl
     size_t count = font_build_quads(clipped, x, y, scale, cr, cg, cb, ca, verts, TEXT_MAX_VERTS);
     if (count > 0) {
         /* Viewport size only feeds the ortho matrix; reuse last known size. */
-        renderer_ui_draw_verts(r, r->vp_width, r->vp_height, verts, count);
+        renderer_ui_draw_verts(r, r->ui_width?r->ui_width:r->vp_width, r->ui_height?r->ui_height:r->vp_height, verts, count);
     }
     free(verts);
 }
@@ -2535,6 +2619,7 @@ void renderer_draw_text(Renderer *r, float x, float y, float scale, float cr, fl
  */
 void renderer_measure_text(Renderer *r, const char *text, float scale, float *out_w, float *out_h)
 {
+    scale=renderer_pixel_text_scale(r,scale);
     if (text == NULL || !(scale > 0.0f) || r == NULL || r->menu_font_tex == 0 ||
         !renderer_ui_tex_pipeline_ready(r)) {
         font_measure(text, scale, out_w, out_h);

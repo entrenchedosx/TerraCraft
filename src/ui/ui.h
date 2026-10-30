@@ -12,21 +12,35 @@
 
 /* Per-frame input snapshot assembled by the app from SDL events. */
 typedef struct UiFrame {
-    int mouse_x;      /* Cursor position in pixels (y-down). */
-    int mouse_y;      /* Cursor position in pixels (y-down). */
-    bool mouse_down;  /* Left button currently held. */
-    bool mouse_clicked; /* Left button pressed this frame (edge). */
-    bool mouse_rdown;   /* Right button currently held. */
+    int mouse_x;         /* Cursor position in pixels (y-down). */
+    int mouse_y;         /* Cursor position in pixels (y-down). */
+    bool mouse_down;     /* Left button currently held. */
+    bool mouse_clicked;  /* Left button pressed this frame (edge). */
+    bool mouse_rdown;    /* Right button currently held. */
     bool mouse_rclicked; /* Right button pressed this frame (edge). */
-    int wheel;        /* Accumulated wheel ticks this frame (signed). */
-    char text[64];    /* UTF-8 bytes typed this frame (may be empty). */
-    bool key_backspace; /* Backspace pressed this frame. */
-    bool key_return;    /* Return/Enter pressed this frame. */
-    bool key_escape;    /* Escape pressed this frame. */
-    bool key_up;        /* Up arrow pressed this frame. */
-    bool key_down;      /* Down arrow pressed this frame. */
-    bool key_delete;    /* Delete key pressed this frame. */
+    int wheel;           /* Accumulated wheel ticks this frame (signed). */
+    char text[64];       /* UTF-8 bytes typed this frame (may be empty). */
+    bool key_backspace;  /* Backspace pressed this frame. */
+    bool key_return;     /* Return/Enter pressed this frame. */
+    bool key_escape;     /* Escape pressed this frame. */
+    bool key_up;         /* Up arrow pressed this frame. */
+    bool key_down;       /* Down arrow pressed this frame. */
+    bool key_delete;     /* Delete key pressed this frame. */
+    bool key_tab, key_shift, key_left, key_right;
 } UiFrame;
+
+#define UI_CONTROL_CAP 64
+typedef struct UiControls {
+    int screen, count, previous_count, focus, active;
+    bool enabled[UI_CONTROL_CAP];
+    bool was_down, released;
+} UiControls;
+typedef struct UiControl {
+    bool hovered, focused, pressed, activated;
+} UiControl;
+void ui_controls_begin(UiControls *s, const UiFrame *f, int screen, bool arrow_navigation);
+UiControl ui_control(UiControls *s, const UiFrame *f, float x, float y, float w, float h, bool enabled);
+void ui_controls_end(UiControls *s);
 
 /* Zero an input frame (call once per frame before filling events).
  *
@@ -85,8 +99,7 @@ bool ui_text_field(const UiFrame *f, bool *focused, char *buf, size_t cap, float
  *
  * Returns: true while dragging or on click (value may have changed).
  */
-bool ui_slider(const UiFrame *f, float *value, float lo, float hi, float x, float y, float w, float h,
-               bool *held);
+bool ui_slider(const UiFrame *f, float *value, float lo, float hi, float x, float y, float w, float h, bool *held);
 
 /* Clamp helper for ints.
  *

@@ -28,6 +28,8 @@
 #include "render/renderer.h"
 #include "ui/screens.h"
 #include "ui/ui.h"
+#include "ui/chat_layout.h"
+#include "ui/ui_style.h"
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/streamer.h"
@@ -2329,17 +2331,54 @@ static void app_chat_add_rect(float *rects, size_t *n, float x, float y, float w
     }
 }
 
+/* Chat uses the same baseline canvas as the menus/HUD. Advances are read
+ * from the active proportional font so both local assets and fallback art
+ * wrap exactly as they draw. No stored message is changed by layout. */
+static void app_chat_advances(const AppContext *app, float advances[128])
+{
+    for (unsigned c = 0; c < 128; ++c) advances[c] = 16.0f;
+    for (unsigned c = 32; c < 127; ++c) {
+        char glyph[2] = {(char)c, '\0'};
+        renderer_measure_text(app->renderer, glyph, 2.0f, &advances[c], NULL);
+    }
+}
+
+static unsigned app_chat_row_capacity(float canvas_height)
+{
+    /* Eight-pixel top margin, hotbar clearance, panel padding and two
+     * reserved rows for the history heading and input. */
+    float rows = floorf((canvas_height - 92.0f - 8.0f - 12.0f) / 24.0f) - 2.0f;
+    if (rows < 1.0f) return 1u;
+    return rows > APP_CHAT_HISTORY_LINES ? APP_CHAT_HISTORY_LINES : (unsigned)rows;
+}
+
 static unsigned app_chat_history_visible(const AppContext *app)
 {
-    if (app == NULL || app->height <= 0) {
-        return 1u;
+    if (app == NULL || app->renderer == NULL || app->width <= 0 || app->height <= 0 ||
+        app->chat_line_count == 0) return 1u;
+    UiScale metrics = ui_scale_for_drawable(app->width, app->height);
+    int width = (int)metrics.canvas_width, height = (int)metrics.canvas_height;
+    float panel_width = fminf(720.0f, (float)width - 24.0f);
+    float advances[128];
+    renderer_set_ui_canvas(app->renderer, width, height);
+    app_chat_advances(app, advances);
+    renderer_set_ui_canvas(app->renderer, 0, 0);
+    unsigned capacity = app_chat_row_capacity((float)height), used = 0, visible = 0;
+    unsigned count = app->chat_line_count < APP_CHAT_HISTORY_LINES ? app->chat_line_count : APP_CHAT_HISTORY_LINES;
+    unsigned scroll = app->chat_scroll < count ? app->chat_scroll : count - 1u;
+    ChatLayoutRow wrapped[CHAT_LAYOUT_MESSAGE_BYTES];
+    for (unsigned age = scroll; age < count; ++age) {
+        unsigned index = (app->chat_line_head + APP_CHAT_HISTORY_LINES - 1u - age) % APP_CHAT_HISTORY_LINES;
+        size_t rows = chat_layout_wrap_ascii(app->chat_lines[index], sizeof(app->chat_lines[index]) - 1u,
+                                             advances, panel_width - 16.0f, wrapped, CHAT_LAYOUT_MESSAGE_BYTES);
+        /* Scroll remains measured in messages. Count only complete older
+         * messages, so the oldest message can eventually be shown in full. */
+        if (visible > 0u && rows > capacity - used) break;
+        ++visible;
+        if (rows >= capacity - used) break;
+        used += (unsigned)rows;
     }
-    int total_rows = (app->height - 120) / (int)APP_CHAT_LINE_HEIGHT;
-    unsigned visible = total_rows > 2 ? (unsigned)(total_rows - 2) : 1u;
-    if (visible > APP_CHAT_HISTORY_LINES) {
-        visible = APP_CHAT_HISTORY_LINES;
-    }
-    return visible;
+    return visible > 0u ? visible : 1u;
 }
 
 static float app_chat_line_alpha(double now, double received_at)
@@ -2360,95 +2399,100 @@ static float app_chat_line_alpha(double now, double received_at)
 
 static void app_draw_chat(AppContext *app)
 {
-    if (app == NULL || app->renderer == NULL || (!app->chat_open && app->chat_line_count == 0)) {
+    if (app == NULL || app->renderer == NULL || app->width <= 0 || app->height <= 0 ||
+        (!app->chat_open && app->chat_line_count == 0)) return;
+
+    UiScale metrics = ui_scale_for_drawable(app->width, app->height);
+    int width = (int)metrics.canvas_width, height = (int)metrics.canvas_height;
+    float x = 12.0f, line_h = 24.0f;
+    float panel_w = fmaxf(1.0f, fminf(720.0f, (float)width - 24.0f));
+    float content_w = panel_w - 16.0f;
+    unsigned count = app->chat_line_count < APP_CHAT_HISTORY_LINES ? app->chat_line_count : APP_CHAT_HISTORY_LINES;
+    unsigned capacity = app_chat_row_capacity((float)height);
+    if (app->chat_open) {
+        unsigned messages = app_chat_history_visible(app);
+        unsigned max_scroll = count > messages ? count - messages : 0u;
+        if (app->chat_scroll > max_scroll) app->chat_scroll = max_scroll;
+    } else if (capacity > APP_CHAT_RECENT_VISIBLE) {
+        capacity = APP_CHAT_RECENT_VISIBLE;
+    }
+
+    renderer_set_ui_canvas(app->renderer, width, height);
+    float advances[128];
+    app_chat_advances(app, advances);
+    typedef struct ChatDisplayRow {
+        ChatLayoutRow row;
+        float alpha;
+    } ChatDisplayRow;
+    ChatDisplayRow display[APP_CHAT_HISTORY_LINES];
+    ChatLayoutRow wrapped[CHAT_LAYOUT_MESSAGE_BYTES];
+    unsigned visible = 0;
+    double now = time_now_seconds();
+    unsigned first_age = app->chat_open ? app->chat_scroll : 0u;
+    /* Collect newest rows first, then draw them in chronological order.
+     * A partially visible older message contributes its tail, never pixels
+     * outside the panel. Opening chat reveals every message regardless of
+     * its faded gameplay timestamp. */
+    for (unsigned age = first_age; age < count && visible < capacity; ++age) {
+        unsigned index = (app->chat_line_head + APP_CHAT_HISTORY_LINES - 1u - age) % APP_CHAT_HISTORY_LINES;
+        float alpha = app->chat_open ? 1.0f : app_chat_line_alpha(now, app->chat_line_times[index]);
+        if (alpha <= 0.0f) continue;
+        size_t rows = chat_layout_wrap_ascii(app->chat_lines[index], sizeof(app->chat_lines[index]) - 1u,
+                                             advances, content_w, wrapped, CHAT_LAYOUT_MESSAGE_BYTES);
+        while (rows > 0u && visible < capacity) {
+            display[visible].row = wrapped[--rows];
+            display[visible++].alpha = alpha;
+        }
+    }
+    if (!app->chat_open && visible == 0u) {
+        renderer_set_ui_canvas(app->renderer, 0, 0);
         return;
     }
-    float x = 12.0f;
-    float line_h = APP_CHAT_LINE_HEIGHT;
-    float panel_w = (float)app->width - 24.0f;
-    if (panel_w > 720.0f) {
-        panel_w = 720.0f;
+
+    float h = (float)(visible + (app->chat_open ? 2u : 0u)) * line_h + 12.0f;
+    float y = fmaxf(8.0f, (float)height - h - 92.0f);
+    float rects[APP_CHAT_HISTORY_LINES * 36u];
+    size_t n = 0;
+    if (app->chat_open) {
+        app_chat_add_rect(rects, &n, x, y, panel_w, h, 0.76f);
+    } else {
+        for (unsigned i = 0; i < visible; ++i) {
+            float row_y = y + 6.0f + (float)i * line_h;
+            app_chat_add_rect(rects, &n, x, row_y - 2.0f, panel_w, line_h,
+                              0.64f * display[visible - 1u - i].alpha);
+        }
     }
-    if (panel_w < 1.0f) {
-        panel_w = 1.0f;
-    }
-    float bottom_pad = 92.0f; /* Keep the log clear of the hotbar and vitals. */
+    renderer_draw_rects(app->renderer, width, height, rects, n / 6u);
 
     if (app->chat_open) {
-        unsigned visible = app->chat_line_count;
-        unsigned capacity = app_chat_history_visible(app);
-        if (visible > capacity) {
-            visible = capacity;
-        }
-        unsigned max_scroll = app->chat_line_count > visible ? app->chat_line_count - visible : 0u;
-        if (app->chat_scroll > max_scroll) {
-            app->chat_scroll = max_scroll;
-        }
-        float h = (float)(visible + 2u) * line_h + 12.0f; /* title, history, input */
-        float y = (float)app->height - h - bottom_pad;
-        if (y < 8.0f) {
-            y = 8.0f;
-        }
-        float rects[36];
-        size_t n = 0;
-        app_chat_add_rect(rects, &n, x, y, panel_w, h, 0.76f);
-        renderer_draw_rects(app->renderer, app->width, app->height, rects, 6);
-        renderer_draw_text(app->renderer, x + 8.0f, y + 5.0f, 0.85f,
-                           0.72f, 0.82f, 0.92f, 1.0f,
-                           "Chat history - wheel or Page Up/Down to scroll");
-
-        unsigned oldest_age = app->chat_scroll + (visible > 0u ? visible - 1u : 0u);
-        unsigned start = (app->chat_line_head + APP_CHAT_HISTORY_LINES - 1u - oldest_age) %
-                         APP_CHAT_HISTORY_LINES;
-        for (unsigned i = 0; i < visible; ++i) {
-            unsigned index = (start + i) % APP_CHAT_HISTORY_LINES;
-            renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)(i + 1u) * line_h,
-                               1.0f, 1.0f, 1.0f, 1.0f, 1.0f, app->chat_lines[index]);
-        }
-        char prompt[APP_CHAT_MAX_BYTES + 8];
-        /* Precision-capped: provably fits (GCC -Wformat-truncation). */
-        snprintf(prompt, sizeof(prompt), "> %.*s_", (int)(sizeof(prompt) - 4), app->chat_input);
-        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)(visible + 1u) * line_h,
-                           1.0f, 1.0f, 0.90f, 0.70f, 1.0f, prompt);
-        return;
+        ChatLayoutRow heading[1];
+        const char *title = "Chat history - wheel or Page Up/Down to scroll";
+        if (chat_layout_wrap_ascii(title, 64u, advances, content_w, heading, 1u) != 0u)
+            renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f, 2.0f,
+                               0.72f, 0.82f, 0.92f, 1.0f, heading[0].text);
     }
-
-    unsigned indices[APP_CHAT_HISTORY_LINES];
-    float alphas[APP_CHAT_HISTORY_LINES];
-    unsigned recent_count = 0;
-    double now = time_now_seconds();
-    unsigned oldest = (app->chat_line_head + APP_CHAT_HISTORY_LINES - app->chat_line_count) %
-                      APP_CHAT_HISTORY_LINES;
-    for (unsigned i = 0; i < app->chat_line_count; ++i) {
-        unsigned index = (oldest + i) % APP_CHAT_HISTORY_LINES;
-        float alpha = app_chat_line_alpha(now, app->chat_line_times[index]);
-        if (alpha > 0.0f) {
-            indices[recent_count] = index;
-            alphas[recent_count++] = alpha;
-        }
-    }
-    unsigned first = recent_count > APP_CHAT_RECENT_VISIBLE ? recent_count - APP_CHAT_RECENT_VISIBLE : 0u;
-    unsigned visible = recent_count - first;
-    if (visible == 0u) {
-        return;
-    }
-    float h = (float)visible * line_h + 12.0f;
-    float y = (float)app->height - h - bottom_pad;
-    if (y < 8.0f) {
-        y = 8.0f;
-    }
-    float rects[APP_CHAT_RECENT_VISIBLE * 36u];
-    size_t n = 0;
+    float history_y = y + 6.0f + (app->chat_open ? line_h : 0.0f);
     for (unsigned i = 0; i < visible; ++i) {
-        float row_y = y + 6.0f + (float)i * line_h;
-        app_chat_add_rect(rects, &n, x, row_y - 2.0f, panel_w, line_h, 0.64f * alphas[first + i]);
+        const ChatDisplayRow *row = &display[visible - 1u - i];
+        float row_y = history_y + (float)i * line_h;
+        renderer_draw_text(app->renderer, x + 9.0f, row_y + 1.0f, 2.0f,
+                           0.0f, 0.0f, 0.0f, row->alpha * 0.8f, row->row.text);
+        renderer_draw_text(app->renderer, x + 8.0f, row_y, 2.0f,
+                           1.0f, 1.0f, 1.0f, row->alpha, row->row.text);
     }
-    renderer_draw_rects(app->renderer, app->width, app->height, rects, n / 6u);
-    for (unsigned i = 0; i < visible; ++i) {
-        unsigned item = first + i;
-        renderer_draw_text(app->renderer, x + 8.0f, y + 6.0f + (float)i * line_h,
-                           1.0f, 1.0f, 1.0f, 1.0f, alphas[item], app->chat_lines[indices[item]]);
+    if (app->chat_open) {
+        float prompt_width = advances[(unsigned char)'>'] + advances[(unsigned char)' '] +
+                             advances[(unsigned char)'_'];
+        if (content_w >= prompt_width) {
+            char tail[CHAT_LAYOUT_ROW_BYTES - 3u], prompt[CHAT_LAYOUT_ROW_BYTES];
+            chat_layout_tail_ascii(app->chat_input, sizeof(app->chat_input) - 1u, advances,
+                                   content_w - prompt_width, tail, sizeof(tail));
+            snprintf(prompt, sizeof(prompt), "> %.*s_", (int)(sizeof(prompt) - 4u), tail);
+            renderer_draw_text(app->renderer, x + 8.0f, history_y + (float)visible * line_h,
+                               2.0f, 1.0f, 0.90f, 0.70f, 1.0f, prompt);
+        }
     }
+    renderer_set_ui_canvas(app->renderer, 0, 0);
 }
 
 /* Creative block actions are instantaneous, but still run on a world tick. */
@@ -3462,6 +3506,10 @@ static void app_build_uiframe(AppContext *app, UiFrame *ui, const char *text)
     ui->key_up = window_take_key_pressed(app->window, SDL_SCANCODE_UP);
     ui->key_down = window_take_key_pressed(app->window, SDL_SCANCODE_DOWN);
     ui->key_delete = window_take_key_pressed(app->window, SDL_SCANCODE_DELETE);
+    ui->key_tab=window_take_key_pressed(app->window,SDL_SCANCODE_TAB);
+    ui->key_shift=window_is_key_down(SDL_SCANCODE_LSHIFT)||window_is_key_down(SDL_SCANCODE_RSHIFT);
+    ui->key_left=window_take_key_pressed(app->window,SDL_SCANCODE_LEFT);
+    ui->key_right=window_take_key_pressed(app->window,SDL_SCANCODE_RIGHT);
     app->prev_return = ret;
     app->prev_backspace = bs;
     app->prev_up = up;

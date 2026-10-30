@@ -10,6 +10,17 @@ int g_tests_failed = 0;
  */
 int main(void)
 {
+    RUN_TEST(test_ui_pointer_drawable_scaling);
+    RUN_TEST(test_ui_scale_layout);
+    RUN_TEST(test_ui_nine_slice_geometry);
+    RUN_TEST(test_ui_focus_navigation);
+    RUN_TEST(test_ui_control_capture);
+    RUN_TEST(test_chat_layout_wrapping);
+    RUN_TEST(test_chat_layout_tail);
+    RUN_TEST(test_chat_layout_bounds);
+    RUN_TEST(test_launch_options);
+    RUN_TEST(test_menu_native_bmp);
+    RUN_TEST(test_menu_asset_file_fallback);
     RUN_TEST(test_worldgen_v4_determinism);
     RUN_TEST(test_worldgen_v4_fields);
     RUN_TEST(test_worldgen_v4_spawn);

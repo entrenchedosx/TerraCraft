@@ -121,6 +121,9 @@ int path_list_files(const char *dir, char out_names[][64], size_t out_cap, size_
  * (callers fall back to working-directory-relative paths).
  */
 int path_exe_dir(char *out, size_t out_cap);
+/* Preserve an existing launch-directory save/config tree. Otherwise use
+ * the executable directory, avoiding protected launcher working folders. */
+int path_prepare_runtime_directory(void);
 
 /* Resolve an existing mcassets subdirectory:
  * "<exe>/mcassets/<sub>" when that directory exists, else

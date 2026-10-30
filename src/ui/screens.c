@@ -18,6 +18,7 @@
 #include "render/texture_atlas.h"
 #include "ui/hud.h"
 #include "ui/ui.h"
+#include "ui/ui_style.h"
 #include "world/block.h"
 #include "world/world.h"
 #include "world/world_meta.h"
@@ -26,6 +27,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -54,18 +56,31 @@
 #define SCR_WARN_B 0.40f
 
 #define SCR_BTN_W 320.0f
-#define SCR_BTN_H 44.0f
+#define SCR_BTN_H 40.0f
 #define SCR_GAP 12.0f
 #define SCR_TITLE_SCALE 4.0f
 #define SCR_TEXT_SCALE 2.0f
 #define SCR_SMALL_SCALE 1.5f
 
+static bool screen_scaled(const AppContext *app)
+{
+    return app->state != GAME_STATE_PLAYING;
+}
+static int screen_width(const AppContext *app)
+{
+    return screen_scaled(app) ? (int)ui_scale_for_drawable(app->width, app->height).canvas_width : app->width;
+}
+static int screen_height(const AppContext *app)
+{
+    return screen_scaled(app) ? (int)ui_scale_for_drawable(app->width, app->height).canvas_height : app->height;
+}
+
 /* Scratch rect buffer for one screen (stack-friendly, bounded). */
 #define SCR_MAX_RECT_VERTS 2048
 
 /* Append one filled quad to a rect buffer (HUD verts, 6 floats each). */
-static void srect(float *dst, size_t *n, size_t cap, float x, float y, float w, float h, float r, float g,
-                  float b, float a)
+static void srect(float *dst, size_t *n, size_t cap, float x, float y, float w, float h, float r, float g, float b,
+                  float a)
 {
     if (dst == NULL || n == NULL || *n + 6 > cap || w <= 0.0f || h <= 0.0f) {
         return;
@@ -116,7 +131,7 @@ static void sflush(AppContext *app, float *verts, size_t *n)
     if (*n == 0) {
         return;
     }
-    renderer_draw_rects(app->renderer, app->width, app->height, verts, *n);
+    renderer_draw_rects(app->renderer, screen_width(app), screen_height(app), verts, *n);
     *n = 0;
 }
 
@@ -132,33 +147,36 @@ static void stext_c(AppContext *app, const char *s, float cx, float y, float sca
 /* Button: background + hover tint + top-edge highlight + centered label.
  * Returns true on click.
  */
-static bool sbutton(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y, float w,
-                    float h, const char *label, bool enabled)
+static bool sbutton_skin(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y, float w,
+                         float h, float scale, const char *label, bool enabled)
 {
-    bool hovered = false;
-    bool clicked = false;
-    if (enabled) {
-        clicked = ui_button(ui, x, y, w, h, &hovered);
+    UiControl c = ui_control(&app->menu.controls, ui, x, y, w, h, enabled);
+    if (app->state == GAME_STATE_SETTINGS && c.focused) {
+        if (y < 20)
+            app->menu.settings_scroll = fmaxf(0, app->menu.settings_scroll + y - 20);
+        if (y + h > screen_height(app) - 20)
+            app->menu.settings_scroll += y + h - screen_height(app) + 20;
     }
-    float br = enabled ? (hovered ? SCR_BTN_HOV_R : SCR_BTN_R) : 0.13f;
-    float bg = enabled ? (hovered ? SCR_BTN_HOV_G : SCR_BTN_G) : 0.13f;
-    float bb = enabled ? (hovered ? SCR_BTN_HOV_B : SCR_BTN_B) : 0.14f;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, h, br, bg, bb, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, w, 2.0f, br + 0.12f, bg + 0.12f, bb + 0.12f, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + h - 3.0f, w, 3.0f, 0.05f, 0.05f, 0.06f, 1.0f);
     sflush(app, rects, rn);
-    float tw = 0.0f;
-    float th = 0.0f;
-    renderer_measure_text(app->renderer, label, SCR_TEXT_SCALE, &tw, &th);
-    float tr = enabled ? SCR_TXT_R : SCR_DIM_R;
-    float tg = enabled ? SCR_TXT_G : SCR_DIM_G;
-    float tb = enabled ? SCR_TXT_B : SCR_DIM_B;
-    renderer_draw_text(app->renderer, x + (w - tw) * 0.5f, y + (h - th) * 0.5f, SCR_TEXT_SCALE, tr, tg, tb,
-                       1.0f, label);
-    if (clicked && enabled) {
+    renderer_draw_button(app->renderer, screen_width(app), screen_height(app), x, y, w, h,
+                         !enabled                   ? 2
+                         : (c.hovered || c.focused) ? 1
+                                                    : 0,
+                         c.pressed);
+    float tw = 0, th = 0;
+    renderer_measure_text(app->renderer, label, scale, &tw, &th);
+    float tx = x + (w - tw) * .5f, ty = y + (h - th) * .5f + (c.pressed ? 1 : 0);
+    renderer_draw_text(app->renderer, tx + scale, ty + scale, scale, .10f, .10f, .10f, 1, label);
+    float value = enabled ? 1.0f : .56f;
+    renderer_draw_text(app->renderer, tx, ty, scale, value, value, value, 1, label);
+    if (c.activated)
         audio_play(&app->audio, AUDIO_UI_CLICK);
-    }
-    return clicked && enabled;
+    return c.activated;
+}
+static bool sbutton(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y, float w, float h,
+                    const char *label, bool enabled)
+{
+    return sbutton_skin(app, ui, rects, rn, x, y, w, h, SCR_TEXT_SCALE, label, enabled);
 }
 
 /* Title block: big title + dim subtitle, returns y below the block. */
@@ -189,8 +207,8 @@ static void sbackground_frame(AppContext *app, float *rects, size_t *rn, float s
         return;
     }
     if (shade > 0.0f) {
-        srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height,
-              0.015f, 0.02f, 0.03f, shade);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.015f,
+              0.02f, 0.03f, shade);
         sflush(app, rects, rn);
     }
 }
@@ -279,25 +297,25 @@ static void smenu_tree(float *rects, size_t *rn, float x, float base, float unit
 {
     const float trunk_w = unit * 0.62f;
     const float trunk_h = unit * 3.0f;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x - trunk_w * 0.5f, base - trunk_h, trunk_w, trunk_h,
-          0.24f, 0.16f, 0.10f, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x - trunk_w * 0.5f, base - trunk_h, trunk_w * 0.22f,
-          trunk_h, 0.35f, 0.23f, 0.13f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x - trunk_w * 0.5f, base - trunk_h, trunk_w, trunk_h, 0.24f, 0.16f, 0.10f,
+          1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x - trunk_w * 0.5f, base - trunk_h, trunk_w * 0.22f, trunk_h, 0.35f, 0.23f,
+          0.13f, 1.0f);
     for (int row = 0; row < 4; ++row) {
         int half = row == 0 ? 1 : (row == 3 ? 2 : 3);
         float y = base - trunk_h - unit * (4.0f - (float)row);
         for (int col = -half; col <= half; ++col) {
             float shade = ((row + col + 8) % 3 == 0) ? 0.18f : 0.0f;
-            srect(rects, rn, SCR_MAX_RECT_VERTS, x + (float)col * unit - unit * 0.5f, y,
-                  unit + 1.0f, unit + 1.0f, 0.15f + shade, 0.31f + shade, 0.15f + shade * 0.5f, 1.0f);
+            srect(rects, rn, SCR_MAX_RECT_VERTS, x + (float)col * unit - unit * 0.5f, y, unit + 1.0f, unit + 1.0f,
+                  0.15f + shade, 0.31f + shade, 0.15f + shade * 0.5f, 1.0f);
         }
     }
 }
 
 static void smenu_background(AppContext *app, float *rects, size_t *rn, float anim_t)
 {
-    const float w = (float)app->width;
-    const float h = (float)app->height;
+    const float w = (float)screen_width(app);
+    const float h = (float)screen_height(app);
     /* Fine-grained bands/columns: the old 20-band sky + 30-column ridges
      * produced visible ~36-42 px stripes at 720p (the reported menu
      * pixelation). 48 bands + 96 columns keep the same flat-quad style
@@ -310,8 +328,7 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
         float t = (float)i / (float)(sky_bands - 1);
         float y = h * (float)i / (float)sky_bands;
         float bh = h / (float)sky_bands + 1.0f;
-        srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, y, w, bh,
-              smenu_mix(0.28f, 0.83f, t), smenu_mix(0.49f, 0.55f, t),
+        srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, y, w, bh, smenu_mix(0.28f, 0.83f, t), smenu_mix(0.49f, 0.55f, t),
               smenu_mix(0.68f, 0.39f, t), 1.0f);
     }
 
@@ -322,10 +339,9 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
     float sun = h * 0.105f;
     float sun_x = w * 0.76f + sway;
     float sun_y = h * 0.19f;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, sun_x - sun * 0.5f, sun_y - sun * 0.5f, sun, sun,
-          1.0f, 0.82f, 0.57f, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, sun_x - sun * 0.36f, sun_y - sun * 0.36f, sun * 0.72f,
-          sun * 0.72f, 1.0f, 0.91f, 0.70f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, sun_x - sun * 0.5f, sun_y - sun * 0.5f, sun, sun, 1.0f, 0.82f, 0.57f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, sun_x - sun * 0.36f, sun_y - sun * 0.36f, sun * 0.72f, sun * 0.72f, 1.0f,
+          0.91f, 0.70f, 1.0f);
 
     const float cloud_x[3] = {0.13f, 0.47f, 0.84f};
     const float cloud_y[3] = {0.22f, 0.12f, 0.34f};
@@ -338,12 +354,10 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
         float x = w * fx + sway;
         float y = h * cloud_y[i];
         float unit = fmaxf(5.0f, h * 0.018f) * cloud_s[i];
-        srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + unit, unit * 5.0f, unit * 1.2f,
-              0.73f, 0.78f, 0.76f, 0.9f);
-        srect(rects, rn, SCR_MAX_RECT_VERTS, x + unit, y, unit * 2.6f, unit * 1.8f,
-              0.82f, 0.85f, 0.81f, 0.94f);
-        srect(rects, rn, SCR_MAX_RECT_VERTS, x + unit * 3.0f, y + unit * 0.35f, unit * 1.8f,
-              unit * 1.4f, 0.78f, 0.82f, 0.79f, 0.92f);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + unit, unit * 5.0f, unit * 1.2f, 0.73f, 0.78f, 0.76f, 0.9f);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, x + unit, y, unit * 2.6f, unit * 1.8f, 0.82f, 0.85f, 0.81f, 0.94f);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, x + unit * 3.0f, y + unit * 0.35f, unit * 1.8f, unit * 1.4f, 0.78f, 0.82f,
+              0.79f, 0.92f);
     }
 
     /* Two rolling ridges form the distant terrain silhouette, panning
@@ -353,27 +367,24 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
     float horizon = h * 0.57f;
     for (int i = -2; i <= ridge_cols + 2; ++i) {
         float f = (float)i / (float)ridge_cols + anim_t * 0.002f;
-        float rise = 0.035f + 0.045f * (0.5f + 0.5f * sinf(f * 18.0f + 0.4f)) +
-                     0.025f * (0.5f + 0.5f * sinf(f * 37.0f));
+        float rise =
+            0.035f + 0.045f * (0.5f + 0.5f * sinf(f * 18.0f + 0.4f)) + 0.025f * (0.5f + 0.5f * sinf(f * 37.0f));
         float y = horizon - h * rise;
-        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell + sway, y, cell + 1.0f, h - y,
-              0.26f, 0.39f, 0.25f, 1.0f);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell + sway, y, cell + 1.0f, h - y, 0.26f, 0.39f, 0.25f, 1.0f);
     }
     for (int i = -2; i <= ridge_cols + 2; ++i) {
         float f = (float)i / (float)ridge_cols + anim_t * 0.003f;
-        float rise = 0.018f + 0.030f * (0.5f + 0.5f * sinf(f * 13.0f + 1.7f)) +
-                     0.020f * (0.5f + 0.5f * sinf(f * 29.0f + 0.9f));
+        float rise =
+            0.018f + 0.030f * (0.5f + 0.5f * sinf(f * 13.0f + 1.7f)) + 0.020f * (0.5f + 0.5f * sinf(f * 29.0f + 0.9f));
         float y = h * 0.63f - h * rise;
-        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell + sway, y, cell + 1.0f, h - y,
-              0.21f, 0.34f, 0.19f, 1.0f);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, (float)i * cell + sway, y, cell + 1.0f, h - y, 0.21f, 0.34f, 0.19f, 1.0f);
     }
 
     /* Foreground terraces and sparse pixel patches suggest block-scale
      * terrain while leaving the menu controls easy to read. Finer grid
      * (26x8 vs 13x5) so patches read as texture, not blocks. */
     float ground = h * 0.68f;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, ground, w, h - ground,
-          0.20f, 0.31f, 0.15f, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, 0.0f, ground, w, h - ground, 0.20f, 0.31f, 0.15f, 1.0f);
     float patch_w = fmaxf(10.0f, w / 30.0f);
     float patch_h = fmaxf(6.0f, h / 32.0f);
     for (int row = 0; row < 8; ++row) {
@@ -383,8 +394,8 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
                 float y = ground + (float)row * patch_h * 1.4f;
                 if (x < w && y < h) {
                     float tint = (float)((row + col) % 3) * 0.018f;
-                    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, patch_w, patch_h,
-                          0.21f + tint, 0.325f + tint, 0.155f + tint, 0.55f);
+                    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, patch_w, patch_h, 0.21f + tint, 0.325f + tint,
+                          0.155f + tint, 0.55f);
                 }
             }
         }
@@ -402,8 +413,7 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
         float my = 1.0f - fmodf((float)m * 0.613f + anim_t * 0.016f * (1.0f + (float)(m % 5) * 0.2f), 1.0f);
         float tw = 0.5f + 0.5f * sinf(anim_t * 3.0f + (float)m * 1.7f);
         float ms = 2.0f + (float)(m % 3);
-        srect(rects, rn, SCR_MAX_RECT_VERTS, mx * w, my * h, ms, ms,
-              1.0f, 0.95f, 0.75f, 0.10f + 0.25f * tw);
+        srect(rects, rn, SCR_MAX_RECT_VERTS, mx * w, my * h, ms, ms, 1.0f, 0.95f, 0.75f, 0.10f + 0.25f * tw);
     }
 
     /* A restrained veil keeps white menu text legible over both sky and land. */
@@ -411,53 +421,11 @@ static void smenu_background(AppContext *app, float *rects, size_t *rn, float an
     sflush(app, rects, rn);
 }
 
-static bool smenu_button(AppContext *app, const UiFrame *ui, float *rects, size_t *rn,
-                         float x, float y, float w, float h, float text_scale, const char *label,
-                         bool focused)
+static bool smenu_button(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y, float w,
+                         float h, float text_scale, const char *label, bool focused)
 {
-    bool hovered = false;
-    bool clicked = ui_button(ui, x, y, w, h, &hovered);
-    bool active = hovered || focused;
-    bool pressed = hovered && ui != NULL && ui->mouse_down;
-    float offset = pressed ? 1.0f : 0.0f;
-    float top = active ? 0.52f : 0.58f;
-    float mid = active ? 0.39f : 0.46f;
-    float bot = active ? 0.27f : 0.31f;
-    float blue = active ? 0.10f : 0.0f;
-
-    /* Java Edition's title buttons are deliberately square and flat: a
-     * hard black frame, gray face, one-pixel highlight, and dark lower edge. */
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x - 2.0f, y - 2.0f, w + 4.0f, h + 4.0f,
-          0.02f, 0.02f, 0.02f, 1.0f);
-    if (active) {
-        srect(rects, rn, SCR_MAX_RECT_VERTS, x - 1.0f, y - 1.0f, w + 2.0f, h + 2.0f,
-              0.87f, 0.87f, 0.91f, 1.0f);
-    }
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + offset, w, h - offset, top, top, top + blue, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 1.0f, y + h * 0.42f + offset, w - 2.0f,
-          h * 0.58f - offset, mid, mid, mid + blue, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + offset, w, 1.0f, 0.78f, 0.78f, 0.80f + blue, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + offset, 1.0f, h - offset,
-          0.70f, 0.70f, 0.72f + blue, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y + h - 2.0f, w, 2.0f, bot, bot, bot + blue * 0.3f, 1.0f);
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x + w - 2.0f, y + offset, 2.0f, h - offset,
-          bot, bot, bot + blue * 0.3f, 1.0f);
-    sflush(app, rects, rn);
-
-    float tw = 0.0f;
-    float th = 0.0f;
-    renderer_measure_text(app->renderer, label, text_scale, &tw, &th);
-    float tx = x + (w - tw) * 0.5f;
-    float ty = y + offset + (h - th) * 0.5f;
-    renderer_draw_text(app->renderer, tx + 1.0f, ty + 1.0f, text_scale,
-                       0.08f, 0.08f, 0.08f, 0.9f, label);
-    renderer_draw_text(app->renderer, tx, ty, text_scale,
-                       active ? 1.0f : 0.93f, active ? 1.0f : 0.93f,
-                       active ? 0.64f : 0.93f, 1.0f, label);
-    if (clicked) {
-        audio_play(&app->audio, AUDIO_UI_CLICK);
-    }
-    return clicked;
+    (void)focused;
+    return sbutton_skin(app, ui, rects, rn, x, y, w, h, text_scale, label, true);
 }
 
 /* Java Edition-style title screen. Every visible button has a live action;
@@ -467,9 +435,9 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
-    float width = (float)app->width;
-    float height = (float)app->height;
+    float cx = (float)screen_width(app) * 0.5f;
+    float width = (float)screen_width(app);
+    float height = (float)screen_height(app);
     float gui = fminf(width / 1280.0f, height / 720.0f);
     gui = fmaxf(0.63f, fminf(gui, 1.50f));
     float button_w = fminf(400.0f * gui, width - 36.0f * gui);
@@ -497,20 +465,14 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     float edge = fmaxf(2.0f, 3.0f * gui);
     /* Chunky shadow and bright top pass approximate the beveled Java wordmark
      * while retaining TerraCraft's original name and assets. */
-    renderer_draw_text(app->renderer, title_x + edge, title_y + edge * 2.0f, title_scale,
-                       0.04f, 0.04f, 0.04f, 1.0f, logo);
-    renderer_draw_text(app->renderer, title_x - edge, title_y + edge, title_scale,
-                       0.18f, 0.18f, 0.18f, 1.0f, logo);
-    renderer_draw_text(app->renderer, title_x + edge, title_y + edge, title_scale,
-                       0.22f, 0.22f, 0.22f, 1.0f, logo);
-    renderer_draw_text(app->renderer, title_x, title_y, title_scale,
-                       0.78f, 0.78f, 0.78f, 1.0f, logo);
-    renderer_draw_text(app->renderer, title_x, title_y - gui, title_scale,
-                       0.96f, 0.96f, 0.96f, 0.72f, logo);
-    stext_c(app, "C EDITION", cx + gui, title_y + title_h - 3.0f * gui,
-            2.0f * gui, 0.16f, 0.16f, 0.16f);
-    stext_c(app, "C EDITION", cx, title_y + title_h - 5.0f * gui,
-            2.0f * gui, 0.92f, 0.92f, 0.92f);
+    renderer_draw_text(app->renderer, title_x + edge, title_y + edge * 2.0f, title_scale, 0.04f, 0.04f, 0.04f, 1.0f,
+                       logo);
+    renderer_draw_text(app->renderer, title_x - edge, title_y + edge, title_scale, 0.18f, 0.18f, 0.18f, 1.0f, logo);
+    renderer_draw_text(app->renderer, title_x + edge, title_y + edge, title_scale, 0.22f, 0.22f, 0.22f, 1.0f, logo);
+    renderer_draw_text(app->renderer, title_x, title_y, title_scale, 0.78f, 0.78f, 0.78f, 1.0f, logo);
+    renderer_draw_text(app->renderer, title_x, title_y - gui, title_scale, 0.96f, 0.96f, 0.96f, 0.72f, logo);
+    stext_c(app, "C EDITION", cx + gui, title_y + title_h - 3.0f * gui, 2.0f * gui, 0.16f, 0.16f, 0.16f);
+    stext_c(app, "C EDITION", cx, title_y + title_h - 5.0f * gui, 2.0f * gui, 0.92f, 0.92f, 0.92f);
 
     static const char *const splashes[] = {
         "100% Blocks!",       "Now With LAN!",      "Punch Trees!",      "Also Try F5!",
@@ -536,61 +498,50 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
         char_x += char_w;
     }
 
-    if (ui->key_down) {
-        app->menu.main_focus = app->menu.main_focus < 0 ? 0 : (app->menu.main_focus + 1) % 5;
-    }
-    if (ui->key_up) {
-        app->menu.main_focus = app->menu.main_focus < 0 ? 4 : (app->menu.main_focus + 4) % 5;
-    }
-    if (app->menu.main_focus >= 0) {
-        app->menu.main_focus = ui_clampi(app->menu.main_focus, 0, 4);
-    }
-
     char profile_label[64];
     snprintf(profile_label, sizeof(profile_label), "Player: %.24s", app->username);
     float y = menu_y;
-    bool single = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
-                               "Singleplayer", app->menu.main_focus == 0);
+    bool single = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale, "Singleplayer",
+                               app->menu.main_focus == 0);
     y += button_h + gap;
     bool multiplayer = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
                                     "Multiplayer (LAN)", app->menu.main_focus == 1);
     y += button_h + gap;
-    bool profile = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale,
-                                profile_label, app->menu.main_focus == 2);
+    bool profile = smenu_button(app, ui, rects, &rn, button_x, y, button_w, button_h, label_scale, profile_label,
+                                app->menu.main_focus == 2);
     y += button_h + bottom_gap;
     float small_gap = 8.0f * gui;
     float small_w = (button_w - small_gap) * 0.5f;
-    bool options = smenu_button(app, ui, rects, &rn, button_x, y, small_w, button_h, label_scale,
-                                "Options...", app->menu.main_focus == 3);
-    bool quit = smenu_button(app, ui, rects, &rn, button_x + small_w + small_gap, y,
-                             small_w, button_h, label_scale, "Quit Game", app->menu.main_focus == 4);
+    bool options = smenu_button(app, ui, rects, &rn, button_x, y, small_w, button_h, label_scale, "Options...",
+                                app->menu.main_focus == 3);
+    bool quit = smenu_button(app, ui, rects, &rn, button_x + small_w + small_gap, y, small_w, button_h, label_scale,
+                             "Quit Game", app->menu.main_focus == 4);
 
-    bool confirm = ui->key_return;
-    if (single || (confirm && app->menu.main_focus == 0)) {
+    if (single) {
         app_enter_state(app, GAME_STATE_WORLD_SELECT);
         return;
     }
-    if (multiplayer || (confirm && app->menu.main_focus == 1)) {
+    if (multiplayer) {
         app->menu.lan_address_buf[0] = '\0';
         app->menu.error[0] = '\0';
         app_enter_state(app, GAME_STATE_LAN_MENU);
         return;
     }
-    if (profile || (confirm && app->menu.main_focus == 2)) {
+    if (profile) {
         snprintf(app->menu.profile_buf, sizeof(app->menu.profile_buf), "%s", app->username);
         app->menu.name_focused = true;
         app->menu.error[0] = '\0';
         app_enter_state(app, GAME_STATE_PROFILE);
         return;
     }
-    if (options || (confirm && app->menu.main_focus == 3)) {
+    if (options) {
         app->menu.settings_return = GAME_STATE_MAIN_MENU;
         settings_to_sliders(app);
         screens_refresh_packs(app);
         app_enter_state(app, GAME_STATE_SETTINGS);
         return;
     }
-    if (quit || (confirm && app->menu.main_focus == 4)) {
+    if (quit) {
         app_enter_state(app, GAME_STATE_QUIT);
         return;
     }
@@ -601,20 +552,18 @@ static void screen_main_menu(AppContext *app, const UiFrame *ui)
     float footer_scale = fmaxf(0.85f, 1.5f * gui);
     float footer_h = 0.0f;
     renderer_measure_text(app->renderer, "TerraCraft M9 (v0.9.0)", footer_scale, NULL, &footer_h);
-    renderer_draw_text(app->renderer, 4.0f * gui, height - footer_h - 2.0f * gui,
-                       footer_scale, 0.10f, 0.10f, 0.10f, 1.0f, "TerraCraft M9 (v0.9.0)");
-    renderer_draw_text(app->renderer, 3.0f * gui, height - footer_h - 3.0f * gui,
-                       footer_scale, 1.0f, 1.0f, 1.0f, 1.0f, "TerraCraft M9 (v0.9.0)");
+    renderer_draw_text(app->renderer, 4.0f * gui, height - footer_h - 2.0f * gui, footer_scale, 0.10f, 0.10f, 0.10f,
+                       1.0f, "TerraCraft M9 (v0.9.0)");
+    renderer_draw_text(app->renderer, 3.0f * gui, height - footer_h - 3.0f * gui, footer_scale, 1.0f, 1.0f, 1.0f, 1.0f,
+                       "TerraCraft M9 (v0.9.0)");
     {
         const char *note = "Copyright TerraCraft contributors. Not affiliated with Mojang.";
         float note_w = 0.0f, note_h = 0.0f;
         renderer_measure_text(app->renderer, note, footer_scale, &note_w, &note_h);
-        renderer_draw_text(app->renderer, width - note_w - 2.0f * gui,
-                           height - note_h - 2.0f * gui, footer_scale,
+        renderer_draw_text(app->renderer, width - note_w - 2.0f * gui, height - note_h - 2.0f * gui, footer_scale,
                            0.10f, 0.10f, 0.10f, 1.0f, note);
-        renderer_draw_text(app->renderer, width - note_w - 3.0f * gui,
-                           height - note_h - 3.0f * gui, footer_scale,
-                           1.0f, 1.0f, 1.0f, 1.0f, note);
+        renderer_draw_text(app->renderer, width - note_w - 3.0f * gui, height - note_h - 3.0f * gui, footer_scale, 1.0f,
+                           1.0f, 1.0f, 1.0f, note);
     }
 }
 
@@ -623,8 +572,12 @@ static void world_subtitle(const WorldEntry *e, char *out, size_t cap)
 {
     const char *mode = e->mode == 1 ? "Creative" : "Survival";
     if (e->played > 0) {
-        /* Played stamp as raw epoch (portable, no locale/timezone text). */
-        snprintf(out, cap, "Seed %lld - %s - played %lld", (long long)e->seed, mode, (long long)e->played);
+        time_t played = (time_t)e->played;
+        struct tm *date = gmtime(&played);
+        char formatted[20] = {0};
+        if (date)
+            (void)strftime(formatted, sizeof(formatted), "%Y-%m-%d", date);
+        snprintf(out, cap, "%s - Seed %lld%s%s", mode, (long long)e->seed, formatted[0] ? " - " : "", formatted);
     } else {
         snprintf(out, cap, "Seed %lld - %s", (long long)e->seed, mode);
     }
@@ -635,9 +588,9 @@ static void screen_world_select(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     sbackground(app, rects, &rn);
-    float list_w = SCR_BTN_W + 120.0f;
+    float list_w = fminf(660.0f, (float)screen_width(app) - 48.0f);
     float list_x = cx - list_w * 0.5f;
     float y = 64.0f;
     y = stitle(app, "Select World", NULL, cx, y);
@@ -652,6 +605,10 @@ static void screen_world_select(AppContext *app, const UiFrame *ui)
         app->menu.delete_armed = false;
     }
     int count = (int)app->menu.world_count;
+    if (ui->wheel) {
+        app->menu.select_idx -= ui->wheel * 3;
+        app->menu.delete_armed = false;
+    }
     if (count > 0) {
         app->menu.select_idx = ui_clampi(app->menu.select_idx, 0, count - 1);
     } else {
@@ -660,7 +617,7 @@ static void screen_world_select(AppContext *app, const UiFrame *ui)
 
     /* List box geometry: rows of 56px, visible count from space. */
     float list_y = y;
-    float btn_y = (float)app->height - 4.0f * (SCR_BTN_H * 0.72f + 10.0f) - 20.0f;
+    float btn_y = (float)screen_height(app) - 4.0f * (SCR_BTN_H * 0.72f + 10.0f) - 20.0f;
     float row_h = 56.0f;
     int visible = (int)((btn_y - list_y - 8.0f) / row_h);
     if (visible < 1) {
@@ -690,23 +647,23 @@ static void screen_world_select(AppContext *app, const UiFrame *ui)
         bool clicked = ui_button(ui, list_x, ry, list_w, row_h - 6.0f, &hov);
         /* Repaint the row manually: selection accent + two text lines. */
         if (sel) {
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h,
-                  SCR_ACC_R * 0.35f, SCR_ACC_G * 0.35f, SCR_ACC_B * 0.35f, 1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 2, ry - 2, list_w + 4, row_h, .68f, .68f, .68f, 1);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x, ry, list_w, row_h - 4, .05f, .05f, .05f, .88f);
         } else if (hov) {
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h,
-                  0.20f, 0.20f, 0.22f, 1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h, 0.20f, 0.20f, 0.22f,
+                  1.0f);
         }
         if (clicked) {
             app->menu.select_idx = idx;
             app->menu.delete_armed = false;
         }
         sflush(app, rects, &rn);
-        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 6.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G,
-                           SCR_TXT_B, 1.0f, app->menu.worlds[idx].name);
+        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 6.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B,
+                           1.0f, app->menu.worlds[idx].name);
         char sub[128];
         world_subtitle(&app->menu.worlds[idx], sub, sizeof(sub));
-        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 30.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G,
-                           SCR_DIM_B, 1.0f, sub);
+        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 30.0f, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B,
+                           1.0f, sub);
     }
 
     /* Bottom action buttons (compact height). */
@@ -760,14 +717,13 @@ static void screen_world_select(AppContext *app, const UiFrame *ui)
     }
     sflush(app, rects, &rn);
     if (app->menu.error[0] != '\0') {
-        stext_c(app, app->menu.error, cx, by + bh + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R, SCR_WARN_G,
-                SCR_WARN_B);
+        stext_c(app, app->menu.error, cx, by + bh + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
     }
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_MAIN_MENU);
         return;
     }
-    if (ui->key_return && has) {
+    if (ui->key_return && app->menu.controls.focus < 0 && has) {
         /* Keyboard shortcut mirrors the Play button. */
         char dir[512];
         path_join(dir, sizeof(dir), SESSION_SAVES_DIR, app->menu.worlds[app->menu.select_idx].dirname);
@@ -784,19 +740,27 @@ static bool sfield(AppContext *app, const UiFrame *ui, float *rects, size_t *rn,
     renderer_draw_text(app->renderer, x, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, label);
     float fy = y + 22.0f;
     float fh = 34.0f;
+    UiControl control = ui_control(&app->menu.controls, ui, x, fy, w, fh, true);
+    if (focused && app->menu.controls.focus >= 0)
+        *focused = control.focused;
+    bool confirm = ui_text_field(ui, focused, buf, cap, x, fy, w, fh);
     bool foc = focused != NULL && *focused;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, fy, w, fh, 0.03f, 0.03f, 0.04f, 1.0f);
-    if (foc) {
-        srect(rects, rn, SCR_MAX_RECT_VERTS, x, fy, w, 2.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B, 1.0f);
-        srect(rects, rn, SCR_MAX_RECT_VERTS, x, fy + fh - 2.0f, w, 2.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B,
-              1.0f);
-    }
+    float border = foc ? 1.0f : .50f;
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x, fy, w, fh, border, border, border, 1);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, x + 2, fy + 2, w - 4, fh - 4, .015f, .015f, .015f, 1);
     sflush(app, rects, rn);
     char shown[96];
     snprintf(shown, sizeof(shown), "%s%s", buf, (foc ? "_" : ""));
-    renderer_draw_text(app->renderer, x + 8.0f, fy + 9.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B,
-                       1.0f, shown);
-    return ui_text_field(ui, focused, buf, cap, x, fy, w, fh);
+    char *visible = shown;
+    float shown_width = 0;
+    renderer_measure_text(app->renderer, visible, SCR_TEXT_SCALE, &shown_width, NULL);
+    while (*visible && shown_width > w - 16) {
+        ++visible;
+        renderer_measure_text(app->renderer, visible, SCR_TEXT_SCALE, &shown_width, NULL);
+    }
+    renderer_draw_text(app->renderer, x + 8.0f, fy + 9.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B, 1.0f,
+                       visible);
+    return confirm;
 }
 
 /* Required first-run profile screen. The user may choose a valid account
@@ -805,15 +769,14 @@ static void screen_profile(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     sbackground(app, rects, &rn);
-    float y = (float)app->height * 0.24f;
+    float y = (float)screen_height(app) * 0.24f;
     y = stitle(app, "Choose a Username", "This name appears to other players on your LAN", cx, y);
     float fw = SCR_BTN_W + 80.0f;
     float fx = cx - fw * 0.5f;
-    bool confirm = sfield(app, ui, rects, &rn, "Username (3-24 letters, numbers, underscore)",
-                          app->menu.profile_buf, sizeof(app->menu.profile_buf),
-                          &app->menu.name_focused, fx, y + 28.0f, fw);
+    bool confirm = sfield(app, ui, rects, &rn, "Username (3-24 letters, numbers, underscore)", app->menu.profile_buf,
+                          sizeof(app->menu.profile_buf), &app->menu.name_focused, fx, y + 28.0f, fw);
     y += 112.0f;
     if (sbutton(app, ui, rects, &rn, fx, y, fw, SCR_BTN_H, "Continue", true) || confirm) {
         (void)app_commit_profile(app);
@@ -821,11 +784,10 @@ static void screen_profile(AppContext *app, const UiFrame *ui)
     }
     sflush(app, rects, &rn);
     if (app->menu.error[0] != '\0') {
-        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 14.0f, SCR_TEXT_SCALE,
-                SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
+        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 14.0f, SCR_TEXT_SCALE, SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
     } else if (app->menu.profile_buf[0] == '\0') {
-        stext_c(app, "Leave blank and TerraCraft will generate a name for you.", cx,
-                y + SCR_BTN_H + 14.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        stext_c(app, "Leave blank and TerraCraft will generate a name for you.", cx, y + SCR_BTN_H + 14.0f,
+                SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     }
     if (ui->key_escape && app->username[0] != '\0') {
         app->menu.error[0] = '\0';
@@ -840,7 +802,7 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     sbackground(app, rects, &rn);
 
     /* Pump discovery on wall-clock time (menus have no sim tick). */
@@ -872,7 +834,7 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
         app->menu.lan_server_idx = ui_clampi(app->menu.lan_server_idx, 0, (int)count - 1);
     }
 
-    float y = (float)app->height * 0.10f;
+    float y = (float)screen_height(app) * 0.10f;
     y = stitle(app, "Play Multiplayer", NULL, cx, y);
 
     /* Status line with animated ellipsis while fresh beacons may arrive. */
@@ -884,8 +846,8 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
         } else if (count == 0) {
             snprintf(status, sizeof(status), "Scanning for worlds on your network%.*s", dots, "...");
         } else {
-            snprintf(status, sizeof(status), "%u world%s found on your network",
-                     (unsigned)count, count == 1 ? "" : "s");
+            snprintf(status, sizeof(status), "%u world%s found on your network", (unsigned)count,
+                     count == 1 ? "" : "s");
         }
         stext_c(app, status, cx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
         y += 8.0f * SCR_TEXT_SCALE + 12.0f;
@@ -909,8 +871,8 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
         }
     }
     if (count == 0) {
-        stext_c(app, "No worlds yet - open a world to LAN on another computer!", cx,
-                list_y + 20.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        stext_c(app, "No worlds yet - open a world to LAN on another computer!", cx, list_y + 20.0f, SCR_SMALL_SCALE,
+                SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     }
     for (int r = 0; r < visible; ++r) {
         size_t idx = (size_t)(scroll + r);
@@ -926,35 +888,33 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
         bool hov = false;
         bool clicked = ui_button(ui, list_x, ry, list_w, row_h - 6.0f, &hov);
         if (sel) {
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h,
-                  SCR_ACC_R * 0.35f, SCR_ACC_G * 0.35f, SCR_ACC_B * 0.35f, 1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h, SCR_ACC_R * 0.35f,
+                  SCR_ACC_G * 0.35f, SCR_ACC_B * 0.35f, 1.0f);
         } else if (hov) {
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h,
-                  0.20f, 0.20f, 0.22f, 1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, list_x - 3.0f, ry - 3.0f, list_w + 6.0f, row_h, 0.20f, 0.20f, 0.22f,
+                  1.0f);
         }
         if (clicked) {
             app->menu.lan_server_idx = (int)idx;
         }
         sflush(app, rects, &rn);
         char head[128];
-        snprintf(head, sizeof(head), "%s  %u/%u", info->name, (unsigned)info->players,
-                 (unsigned)info->capacity);
-        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 5.0f, SCR_TEXT_SCALE, SCR_TXT_R,
-                           SCR_TXT_G, SCR_TXT_B, 1.0f, head);
+        snprintf(head, sizeof(head), "%s  %u/%u", info->name, (unsigned)info->players, (unsigned)info->capacity);
+        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 5.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B,
+                           1.0f, head);
         char sub[128];
         snprintf(sub, sizeof(sub), "%s:%u", info->address, (unsigned)info->port);
-        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 29.0f, SCR_SMALL_SCALE, SCR_DIM_R,
-                           SCR_DIM_G, SCR_DIM_B, 1.0f, sub);
+        renderer_draw_text(app->renderer, list_x + 10.0f, ry + 29.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B,
+                           1.0f, sub);
     }
     y = list_y + (float)visible * row_h + 10.0f;
     /* Action row: join, rescan, direct fallback, back. */
     float bw = (list_w - 18.0f) * 0.5f;
     float bh = SCR_BTN_H * 0.72f;
     bool has = count > 0 && app->menu.lan_server_idx >= 0 && !app->lan_join_pending;
-    if (sbutton(app, ui, rects, &rn, list_x, y, bw, bh,
-                app->lan_join_pending ? "Connecting..." : "Join Selected World", has)) {
-        const LanServerInfo *join_info =
-            lan_discover_at(app->lan_discover, (size_t)app->menu.lan_server_idx);
+    if (sbutton(app, ui, rects, &rn, list_x, y, bw, bh, app->lan_join_pending ? "Connecting..." : "Join Selected World",
+                has)) {
+        const LanServerInfo *join_info = lan_discover_at(app->lan_discover, (size_t)app->menu.lan_server_idx);
         if (join_info != NULL && app_lan_join_endpoint(app, join_info->address, join_info->port)) {
             app->menu.error[0] = '\0';
         } else if (app->menu.error[0] == '\0') {
@@ -972,19 +932,17 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
                 app->menu.lan_show_direct ? "Hide Direct Connect" : "Direct Connect", true)) {
         app->menu.lan_show_direct = !app->menu.lan_show_direct;
     }
-    bool back = sbutton(app, ui, rects, &rn, list_x + bw + 18.0f, y, bw, bh,
-                        app->lan_join_pending ? "Cancel" : "Back", true);
+    bool back =
+        sbutton(app, ui, rects, &rn, list_x + bw + 18.0f, y, bw, bh, app->lan_join_pending ? "Cancel" : "Back", true);
     y += bh + 10.0f;
     if (app->menu.lan_show_direct) {
         float fw = list_w;
         app->menu.name_focused = true;
-        bool confirm = sfield(app, ui, rects, &rn, "Host IPv4 (e.g. 192.168.1.20)",
-                              app->menu.lan_address_buf, sizeof(app->menu.lan_address_buf),
-                              &app->menu.name_focused, list_x, y, fw);
+        bool confirm = sfield(app, ui, rects, &rn, "Host IPv4 (e.g. 192.168.1.20)", app->menu.lan_address_buf,
+                              sizeof(app->menu.lan_address_buf), &app->menu.name_focused, list_x, y, fw);
         y += 70.0f;
         bool join = sbutton(app, ui, rects, &rn, list_x, y, fw, bh,
-                            app->lan_join_pending ? "Connecting..." : "Join Address",
-                            !app->lan_join_pending);
+                            app->lan_join_pending ? "Connecting..." : "Join Address", !app->lan_join_pending);
         if (join || (confirm && !app->lan_join_pending)) {
             if (app_lan_join(app, app->menu.lan_address_buf)) {
                 app->menu.error[0] = '\0';
@@ -1013,34 +971,29 @@ static void screen_lan_menu(AppContext *app, const UiFrame *ui)
  * description below. Compact (fits 7 rules + actions at 720p). When
  * editable is false the button renders disabled and never toggles
  * (guest view of host-owned rules). */
-static void srule_row_ex(AppContext *app, const UiFrame *ui, float *rects, size_t *rn,
-                         const char *label, const char *desc, bool *value, bool editable, float x,
-                         float y, float w)
+static void srule_row_ex(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label,
+                         const char *desc, bool *value, bool editable, float x, float y, float w)
 {
-    renderer_draw_text(app->renderer, x, y + 4.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B, 1.0f,
-                       label);
+    renderer_draw_text(app->renderer, x, y + 4.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B, 1.0f, label);
     char state[8];
     snprintf(state, sizeof(state), "%s", *value ? "ON" : "OFF");
     if (sbutton(app, ui, rects, rn, x + w - 118.0f, y - 4.0f, 118.0f, 32.0f, state, editable)) {
         *value = !*value;
     }
-    renderer_draw_text(app->renderer, x, y + 34.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B,
-                       1.0f, desc);
+    renderer_draw_text(app->renderer, x, y + 34.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, desc);
 }
 
-static void srule_row(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label,
-                      const char *desc, bool *value, float x, float y, float w)
+static void srule_row(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label, const char *desc,
+                      bool *value, float x, float y, float w)
 {
     srule_row_ex(app, ui, rects, rn, label, desc, value, true, x, y, w);
 }
 
-
-
 static void screen_create_world_commit(AppContext *app)
 {
     char dir[512];
-    int rc = session_create_world_ex(SESSION_SAVES_DIR, app->menu.name_buf, app->menu.seed_buf,
-                                     app->menu.create_mode, &app->menu.create_rules, dir);
+    int rc = session_create_world_ex(SESSION_SAVES_DIR, app->menu.name_buf, app->menu.seed_buf, app->menu.create_mode,
+                                     &app->menu.create_rules, dir);
     if (rc != 0) {
         snprintf(app->menu.error, sizeof(app->menu.error), "Could not create world (see log).");
         return;
@@ -1061,15 +1014,15 @@ static void screen_create_world(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     sbackground(app, rects, &rn);
     float y = 40.0f;
     float fw = SCR_BTN_W + 80.0f;
     /* Wider rules page keeps labels + ON/OFF on one line at small widths. */
     if (app->menu.create_show_rules && fw < 520.0f) {
         fw = 520.0f;
-        if (fw > (float)app->width - 24.0f) {
-            fw = (float)app->width - 24.0f;
+        if (fw > (float)screen_width(app) - 24.0f) {
+            fw = (float)screen_width(app) - 24.0f;
         }
     }
     float fx = cx - fw * 0.5f;
@@ -1077,11 +1030,11 @@ static void screen_create_world(AppContext *app, const UiFrame *ui)
     if (!app->menu.create_show_rules) {
         y = stitle(app, "Create New World", NULL, cx, y);
 
-        bool confirm = sfield(app, ui, rects, &rn, "World Name", app->menu.name_buf,
-                              sizeof(app->menu.name_buf), &app->menu.name_focused, fx, y, fw);
+        bool confirm = sfield(app, ui, rects, &rn, "World Name", app->menu.name_buf, sizeof(app->menu.name_buf),
+                              &app->menu.name_focused, fx, y, fw);
         y += 22.0f + 34.0f + 14.0f;
-        confirm = sfield(app, ui, rects, &rn, "Seed (blank = random)", app->menu.seed_buf,
-                         sizeof(app->menu.seed_buf), &app->menu.seed_focused, fx, y, fw) ||
+        confirm = sfield(app, ui, rects, &rn, "Seed (blank = random)", app->menu.seed_buf, sizeof(app->menu.seed_buf),
+                         &app->menu.seed_focused, fx, y, fw) ||
                   confirm;
         y += 22.0f + 34.0f + 14.0f;
 
@@ -1095,14 +1048,12 @@ static void screen_create_world(AppContext *app, const UiFrame *ui)
             } else {
                 snprintf(prev, sizeof(prev), "Seed: %ld", seed);
             }
-            renderer_draw_text(app->renderer, fx, y, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G,
-                               SCR_DIM_B, 1.0f, prev);
+            renderer_draw_text(app->renderer, fx, y, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, prev);
             y += 22.0f;
         }
 
         /* Mode cycle button. */
-        renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B,
-                           1.0f, "Game Mode");
+        renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, "Game Mode");
         y += 22.0f;
         const char *mode_label = app->menu.create_mode == 1 ? "Mode: Creative" : "Mode: Survival";
         if (sbutton(app, ui, rects, &rn, fx, y, fw, 40.0f, mode_label, true)) {
@@ -1118,14 +1069,13 @@ static void screen_create_world(AppContext *app, const UiFrame *ui)
         }
         y += 36.0f + 14.0f;
 
-        bool do_create =
-            sbutton(app, ui, rects, &rn, fx, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Create World", true);
-        bool do_cancel = sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, y,
-                                 (fw - 12.0f) * 0.5f, SCR_BTN_H, "Cancel", true);
+        bool do_create = sbutton(app, ui, rects, &rn, fx, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Create World", true);
+        bool do_cancel =
+            sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Cancel", true);
         sflush(app, rects, &rn);
         if (app->menu.error[0] != '\0') {
-            stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R,
-                    SCR_WARN_G, SCR_WARN_B);
+            stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R, SCR_WARN_G,
+                    SCR_WARN_B);
         }
         if (do_cancel || ui->key_escape) {
             window_text_input(false);
@@ -1148,29 +1098,25 @@ static void screen_create_world(AppContext *app, const UiFrame *ui)
     srule_row(app, ui, rects, &rn, "Keep Inventory", "Keep hotbar + inventory + held item through death.",
               &r->keep_inventory, fx, y, fw);
     y += 52.0f;
-    srule_row(app, ui, rects, &rn, "Player vs Player", "Players can damage each other in multiplayer.",
-              &r->pvp, fx, y, fw);
+    srule_row(app, ui, rects, &rn, "Player vs Player", "Players can damage each other in multiplayer.", &r->pvp, fx, y,
+              fw);
     y += 52.0f;
-    srule_row(app, ui, rects, &rn, "Mob Spawning", "New creatures spawn over time.", &r->mob_spawning, fx,
-              y, fw);
+    srule_row(app, ui, rects, &rn, "Mob Spawning", "New creatures spawn over time.", &r->mob_spawning, fx, y, fw);
     y += 52.0f;
-    srule_row(app, ui, rects, &rn, "Daylight Cycle", "The sun/moon clock advances.", &r->daylight_cycle, fx,
-              y, fw);
+    srule_row(app, ui, rects, &rn, "Daylight Cycle", "The sun/moon clock advances.", &r->daylight_cycle, fx, y, fw);
     y += 52.0f;
     srule_row(app, ui, rects, &rn, "Natural Regeneration", "Heal over time at high hunger (starve still hurts).",
               &r->natural_regen, fx, y, fw);
     y += 52.0f;
-    srule_row(app, ui, rects, &rn, "Fall Damage", "Falling more than 3 blocks hurts.", &r->fall_damage, fx,
-              y, fw);
+    srule_row(app, ui, rects, &rn, "Fall Damage", "Falling more than 3 blocks hurts.", &r->fall_damage, fx, y, fw);
     y += 52.0f + 6.0f;
 
     bool done = sbutton(app, ui, rects, &rn, fx, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Done", true);
-    bool do_cancel2 = sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, y,
-                              (fw - 12.0f) * 0.5f, SCR_BTN_H, "Cancel", true);
+    bool do_cancel2 =
+        sbutton(app, ui, rects, &rn, fx + (fw + 12.0f) * 0.5f, y, (fw - 12.0f) * 0.5f, SCR_BTN_H, "Cancel", true);
     sflush(app, rects, &rn);
     if (app->menu.error[0] != '\0') {
-        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R,
-                SCR_WARN_G, SCR_WARN_B);
+        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 12.0f, SCR_TEXT_SCALE, SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
     }
     if (done) {
         app->menu.create_show_rules = false;
@@ -1192,13 +1138,17 @@ static void screen_create_world(AppContext *app, const UiFrame *ui)
 }
 
 /* One slider row: label, track with knob, live value text. */
-static void sslider_row(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label,
-                        float *value, float lo, float hi, const char *fmt, bool *held, float x, float y,
-                        float w)
+static void sslider_row(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, const char *label, float *value,
+                        float lo, float hi, const char *fmt, bool *held, float x, float y, float w)
 {
     renderer_draw_text(app->renderer, x, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, label);
     float ty = y + 24.0f;
     float th = 10.0f;
+    UiControl control = ui_control(&app->menu.controls, ui, x, ty - 8, w, th + 16, true);
+    if (control.focused && (ui->key_left || ui->key_right)) {
+        float step = strcmp(label, "Render Distance") == 0 ? 1.0f : (hi - lo) * .01f;
+        *value = fmaxf(lo, fminf(hi, *value + (ui->key_right ? step : -step)));
+    }
     srect(rects, rn, SCR_MAX_RECT_VERTS, x, ty, w, th, 0.10f, 0.10f, 0.12f, 1.0f);
     float t = (*value - lo) / (hi - lo);
     if (!(t >= 0.0f)) {
@@ -1208,13 +1158,14 @@ static void sslider_row(AppContext *app, const UiFrame *ui, float *rects, size_t
         t = 1.0f;
     }
     float kx = x + t * w;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, kx - 4.0f, ty - 6.0f, 8.0f, th + 12.0f, SCR_ACC_R, SCR_ACC_G,
-          SCR_ACC_B, 1.0f);
+    srect(rects, rn, SCR_MAX_RECT_VERTS, kx - 4.0f, ty - 6.0f, 8.0f, th + 12.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B, 1.0f);
     sflush(app, rects, rn);
     char val[48];
+    renderer_draw_button(app->renderer, screen_width(app), screen_height(app), kx - 6, ty - 7, 12, th + 14,
+                         control.hovered || control.focused ? 1 : 0, *held);
     snprintf(val, sizeof(val), fmt, (double)*value);
-    renderer_draw_text(app->renderer, x + w + 12.0f, ty - 4.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G,
-                       SCR_TXT_B, 1.0f, val);
+    renderer_draw_text(app->renderer, x + w + 12.0f, ty - 4.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B, 1.0f,
+                       val);
     ui_slider(ui, value, lo, hi, x, ty - 8.0f, w, th + 16.0f, held);
 }
 
@@ -1223,28 +1174,30 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     sbackground(app, rects, &rn);
-    float y = 56.0f;
+    float overflow = fmaxf(0, 690.0f - (float)screen_height(app));
+    app->menu.settings_scroll = fmaxf(0, fminf(overflow, app->menu.settings_scroll - (float)ui->wheel * 32));
+    float y = 56.0f - app->menu.settings_scroll;
     y = stitle(app, "Settings", NULL, cx, y);
     float fw = SCR_BTN_W + 160.0f;
     float fx = cx - fw * 0.5f;
     float sw = fw - 130.0f;
 
-    sslider_row(app, ui, rects, &rn, "Render Distance", &app->menu.sl_rd, 2.0f, 8.0f, "%.0f",
-                &app->menu.held_rd, fx, y, sw);
+    sslider_row(app, ui, rects, &rn, "Render Distance", &app->menu.sl_rd, 2.0f, 8.0f, "%.0f", &app->menu.held_rd, fx, y,
+                sw);
     y += 62.0f;
     sslider_row(app, ui, rects, &rn, "Mouse Sensitivity", &app->menu.sl_sens, 0.0005f, 0.010f, "%.4f",
                 &app->menu.held_sens, fx, y, sw);
     y += 62.0f;
-    sslider_row(app, ui, rects, &rn, "Field of View", &app->menu.sl_fov, 60.0f, 110.0f, "%.0f",
-                &app->menu.held_fov, fx, y, sw);
+    sslider_row(app, ui, rects, &rn, "Field of View", &app->menu.sl_fov, 60.0f, 110.0f, "%.0f", &app->menu.held_fov, fx,
+                y, sw);
     y += 62.0f;
-    sslider_row(app, ui, rects, &rn, "Master Volume", &app->menu.sl_vol, 0.0f, 100.0f, "%.0f",
-                &app->menu.held_vol, fx, y, sw);
+    sslider_row(app, ui, rects, &rn, "Master Volume", &app->menu.sl_vol, 0.0f, 100.0f, "%.0f", &app->menu.held_vol, fx,
+                y, sw);
     y += 62.0f;
-    sslider_row(app, ui, rects, &rn, "Effects Volume", &app->menu.sl_sfx, 0.0f, 100.0f, "%.0f",
-                &app->menu.held_sfx, fx, y, sw);
+    sslider_row(app, ui, rects, &rn, "Effects Volume", &app->menu.sl_sfx, 0.0f, 100.0f, "%.0f", &app->menu.held_sfx, fx,
+                y, sw);
     y += 62.0f;
 
     /* Live-commit sliders every frame (cheap applies; pack handled below). */
@@ -1252,8 +1205,7 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     app_apply_settings(app);
 
     /* VSync toggle. */
-    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
-                       "VSync");
+    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, "VSync");
     char vsync_label[32];
     snprintf(vsync_label, sizeof(vsync_label), "%s", app->settings.vsync ? "ON" : "OFF");
     if (sbutton(app, ui, rects, &rn, fx + sw + 12.0f, y - 6.0f, 118.0f, 36.0f, vsync_label, true)) {
@@ -1263,8 +1215,7 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     y += 52.0f;
 
     /* Auto-Jump toggle (MC default OFF: 1-block ledges need a jump). */
-    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
-                       "Auto-Jump");
+    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, "Auto-Jump");
     char autojump_label[32];
     snprintf(autojump_label, sizeof(autojump_label), "%s", app->settings.auto_jump ? "ON" : "OFF");
     if (sbutton(app, ui, rects, &rn, fx + sw + 12.0f, y - 6.0f, 118.0f, 36.0f, autojump_label, true)) {
@@ -1274,8 +1225,7 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     y += 52.0f;
 
     /* View Bobbing toggle (MC default ON: gentle first-person walk bob). */
-    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
-                       "View Bobbing");
+    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, "View Bobbing");
     char bobbing_label[32];
     snprintf(bobbing_label, sizeof(bobbing_label), "%s", app->settings.view_bobbing ? "ON" : "OFF");
     if (sbutton(app, ui, rects, &rn, fx + sw + 12.0f, y - 6.0f, 118.0f, 36.0f, bobbing_label, true)) {
@@ -1285,8 +1235,7 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     y += 52.0f;
 
     /* Pack cycle: "<" + name + ">" (immediate atlas reload on change). */
-    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f,
-                       "Resource Pack");
+    renderer_draw_text(app->renderer, fx, y, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, "Resource Pack");
     const char *pack_name = "Default";
     if (app->menu.pack_count > 0) {
         pack_name = app->menu.packs[app->menu.pack_idx];
@@ -1301,8 +1250,8 @@ static void screen_settings(AppContext *app, const UiFrame *ui)
     float pw = 0.0f;
     float ph = 0.0f;
     renderer_measure_text(app->renderer, pack_label, SCR_TEXT_SCALE, &pw, &ph);
-    renderer_draw_text(app->renderer, fx + sw + 12.0f, y, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B,
-                       1.0f, pack_label);
+    renderer_draw_text(app->renderer, fx + sw + 12.0f, y, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B, 1.0f,
+                       pack_label);
     if (sbutton(app, ui, rects, &rn, fx + sw + 24.0f + pw, y - 6.0f, 40.0f, 36.0f, ">", app->menu.pack_count > 1)) {
         if (app->menu.pack_count > 0) {
             app->menu.pack_idx = (app->menu.pack_idx + 1) % (int)app->menu.pack_count;
@@ -1350,15 +1299,15 @@ static void screen_pause_rules(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, 0.0f, 0.0f,
+    float cx = (float)screen_width(app) * 0.5f;
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
           0.0f, 0.55f);
     sflush(app, rects, &rn);
     float fw = SCR_BTN_W + 80.0f;
     if (fw < 520.0f) {
         fw = 520.0f;
-        if (fw > (float)app->width - 24.0f) {
-            fw = (float)app->width - 24.0f;
+        if (fw > (float)screen_width(app) - 24.0f) {
+            fw = (float)screen_width(app) - 24.0f;
         }
     }
     float fx = cx - fw * 0.5f;
@@ -1384,15 +1333,15 @@ static void screen_pause_rules(AppContext *app, const UiFrame *ui)
         }
         y += 52.0f;
         before = r->pvp;
-        srule_row_ex(app, ui, rects, &rn, "Player vs Player", "Players can damage each other in multiplayer.",
-                     &r->pvp, editable, fx, y, fw);
+        srule_row_ex(app, ui, rects, &rn, "Player vs Player", "Players can damage each other in multiplayer.", &r->pvp,
+                     editable, fx, y, fw);
         if (r->pvp != before) {
             app_apply_world_rules(app);
         }
         y += 52.0f;
         before = r->mob_spawning;
-        srule_row_ex(app, ui, rects, &rn, "Mob Spawning", "New creatures spawn over time.", &r->mob_spawning,
-                     editable, fx, y, fw);
+        srule_row_ex(app, ui, rects, &rn, "Mob Spawning", "New creatures spawn over time.", &r->mob_spawning, editable,
+                     fx, y, fw);
         if (r->mob_spawning != before) {
             app_apply_world_rules(app);
         }
@@ -1412,20 +1361,20 @@ static void screen_pause_rules(AppContext *app, const UiFrame *ui)
         }
         y += 52.0f;
         before = r->fall_damage;
-        srule_row_ex(app, ui, rects, &rn, "Fall Damage", "Falling more than 3 blocks hurts.", &r->fall_damage,
-                     editable, fx, y, fw);
+        srule_row_ex(app, ui, rects, &rn, "Fall Damage", "Falling more than 3 blocks hurts.", &r->fall_damage, editable,
+                     fx, y, fw);
         if (r->fall_damage != before) {
             app_apply_world_rules(app);
         }
         y += 52.0f + 2.0f;
     }
     if (!editable) {
-        stext_c(app, "Only the hosting player can change rules.", cx, y, SCR_TEXT_SCALE, SCR_WARN_R,
-                SCR_WARN_G, SCR_WARN_B);
+        stext_c(app, "Only the hosting player can change rules.", cx, y, SCR_TEXT_SCALE, SCR_WARN_R, SCR_WARN_G,
+                SCR_WARN_B);
         y += 8.0f * SCR_TEXT_SCALE + 6.0f;
     } else {
-        stext_c(app, "Allow Cheats unlocks debug keys; it never grants rule editing to guests.", cx, y,
-                SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        stext_c(app, "Allow Cheats unlocks debug keys; it never grants rule editing to guests.", cx, y, SCR_SMALL_SCALE,
+                SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
         y += 8.0f * SCR_SMALL_SCALE + 8.0f;
     }
     if (sbutton(app, ui, rects, &rn, fx, y, fw, SCR_BTN_H, "Done", true)) {
@@ -1447,12 +1396,12 @@ static void screen_paused(AppContext *app, const UiFrame *ui)
     }
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     /* Dim veil so the frozen world shows through faintly. */
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, 0.0f, 0.0f,
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
           0.0f, 0.55f);
     sflush(app, rects, &rn);
-    float y = (float)app->height * 0.28f;
+    float y = (float)screen_height(app) * 0.28f;
     y = stitle(app, "Game Menu", app->lan_host ? "LAN host active - TCP port 25566" : NULL, cx, y);
     float bx = cx - SCR_BTN_W * 0.5f;
     if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Resume Game", true)) {
@@ -1495,11 +1444,10 @@ static void screen_paused(AppContext *app, const UiFrame *ui)
     }
     sflush(app, rects, &rn);
     if (app->menu.error[0] != '\0') {
-        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 10.0f, SCR_SMALL_SCALE,
-                SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
+        stext_c(app, app->menu.error, cx, y + SCR_BTN_H + 10.0f, SCR_SMALL_SCALE, SCR_WARN_R, SCR_WARN_G, SCR_WARN_B);
     } else if (app->lan_host) {
-        stext_c(app, "Share this computer's local IPv4 address with your friends.", cx,
-                y + SCR_BTN_H + 10.0f, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        stext_c(app, "Share this computer's local IPv4 address with your friends.", cx, y + SCR_BTN_H + 10.0f,
+                SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     }
     if (ui->key_escape) {
         app_enter_state(app, GAME_STATE_PLAYING);
@@ -1546,16 +1494,15 @@ static void sslot_count(AppContext *app, float x, float y, const ItemStack *slot
     float tw = 0.0f;
     float th = 0.0f;
     renderer_measure_text(app->renderer, cb, SCR_SMALL_SCALE + 1.0f, &tw, &th);
-    renderer_draw_text(app->renderer, x + SINV_SLOT - tw - 3.0f, y + SINV_SLOT - th - 2.0f,
-                       SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, cb);
+    renderer_draw_text(app->renderer, x + SINV_SLOT - tw - 3.0f, y + SINV_SLOT - th - 2.0f, SCR_SMALL_SCALE + 1.0f,
+                       1.0f, 1.0f, 1.0f, 1.0f, cb);
 }
 
 /* Survival click handling for one storage slot (pick up / place / merge /
  * swap on LMB; half-split / place-one on RMB). Both stacks stay canonical.
  * Accepted actions click (menu feedback sound); denied clicks are silent.
  */
-static void sslot_survival(AppContext *app, const UiFrame *ui, float x, float y, ItemStack *slot,
-                           ItemStack *cursor)
+static void sslot_survival(AppContext *app, const UiFrame *ui, float x, float y, ItemStack *slot, ItemStack *cursor)
 {
     if (!ui_hit(ui->mouse_x, ui->mouse_y, x, y, SINV_SLOT, SINV_SLOT)) {
         return;
@@ -1628,8 +1575,7 @@ static void scursor_draw(AppContext *app, const UiFrame *ui, float *rects, size_
     if (app->cursor.count > 1) {
         char cb[8];
         snprintf(cb, sizeof(cb), "%u", (unsigned)app->cursor.count);
-        renderer_draw_text(app->renderer, x + 30.0f, y + 16.0f, SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f,
-                           1.0f, 1.0f, cb);
+        renderer_draw_text(app->renderer, x + 30.0f, y + 16.0f, SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, cb);
     }
 }
 
@@ -1670,8 +1616,8 @@ static void scraft_recompute(AppContext *app, ItemStack *grid, int gw, int gh, u
  * is denied without consuming ingredients). Ingredients are consumed
  * only after the take is fully accepted — never partial, never lost.
  */
-static void scraft_take(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y,
-                        ItemStack *grid, int gw, int gh, uint32_t *hashslot, IconBatch *icons)
+static void scraft_take(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y, ItemStack *grid,
+                        int gw, int gh, uint32_t *hashslot, IconBatch *icons)
 {
     sslot_draw(app, ui, rects, rn, x, y, &app->craft_out, icons);
     if (!ui_hit(ui->mouse_x, ui->mouse_y, x, y, SINV_SLOT, SINV_SLOT) || !ui->mouse_clicked) {
@@ -1716,37 +1662,35 @@ static void screen_inventory(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     float grid_h = 3.0f * SINV_PITCH + 12.0f + SINV_SLOT;
     float craft_h = 2.0f * SINV_PITCH + 12.0f;
     float panel_w = SINV_GRID_W + SINV_PAD * 2.0f;
     /* +28 bottom pad: the hint line must sit below the hotbar row, not on it. */
     float panel_h = grid_h + craft_h + 88.0f + 28.0f;
     float px = cx - panel_w * 0.5f;
-    float py = ((float)app->height - panel_h) * 0.5f;
+    float py = ((float)screen_height(app) - panel_h) * 0.5f;
     if (py < 8.0f) {
         py = 8.0f;
     }
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, 0.0f,
-          0.0f, 0.0f, 0.55f);
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
+          0.0f, 0.55f);
     srect(rects, &rn, SCR_MAX_RECT_VERTS, px, py, panel_w, panel_h, 0.10f, 0.10f, 0.12f, 0.96f);
     sflush(app, rects, &rn);
 
     stext_c(app, "Inventory", cx, py + 10.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
     char vit[96];
     snprintf(vit, sizeof(vit), "Health %.0f/%.0f  Hunger %.0f/%.0f", (double)app->player.health,
-             (double)app->player.max_health, (double)app->player.hunger,
-             (double)app->player.max_hunger);
-    stext_c(app, vit, cx, py + 10.0f + 8.0f * SCR_TEXT_SCALE + 6.0f, SCR_SMALL_SCALE + 1.0f,
-            SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+             (double)app->player.max_health, (double)app->player.hunger, (double)app->player.max_hunger);
+    stext_c(app, vit, cx, py + 10.0f + 8.0f * SCR_TEXT_SCALE + 6.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G,
+            SCR_DIM_B);
 
     float gx = cx - SINV_GRID_W * 0.5f;
     float gy = py + 88.0f;
     IconBatch icons;
     icons_clear(&icons);
     /* Player 2x2 crafting (output derived, take-only). */
-    stext_c(app, "Crafting", gx + SINV_PITCH, gy - 20.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G,
-            SCR_DIM_B);
+    stext_c(app, "Crafting", gx + SINV_PITCH, gy - 20.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     scraft_recompute(app, app->craft2, 2, 2, &app->craft_hash);
     for (int row = 0; row < 2; ++row) {
         for (int col = 0; col < 2; ++col) {
@@ -1757,8 +1701,8 @@ static void screen_inventory(AppContext *app, const UiFrame *ui)
             sslot_survival(app, ui, x, y, slot, &app->cursor);
         }
     }
-    scraft_take(app, ui, rects, &rn, gx + 2.0f * SINV_PITCH + 24.0f, gy + SINV_PITCH * 0.5f, app->craft2,
-                2, 2, &app->craft_hash, &icons);
+    scraft_take(app, ui, rects, &rn, gx + 2.0f * SINV_PITCH + 24.0f, gy + SINV_PITCH * 0.5f, app->craft2, 2, 2,
+                &app->craft_hash, &icons);
     gy += craft_h;
     const char *hov_name = NULL;
     for (int row = 0; row < 3; ++row) {
@@ -1788,14 +1732,12 @@ static void screen_inventory(AppContext *app, const UiFrame *ui)
         }
         if (col == app->player.hotbar_sel) {
             /* Selection outline (4 bars; srect has no outline primitive). */
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy - 2.0f, SINV_SLOT + 4.0f, 2.0f, 1.0f,
-                  1.0f, 1.0f, 1.0f);
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy + SINV_SLOT, SINV_SLOT + 4.0f, 2.0f,
-                  1.0f, 1.0f, 1.0f, 1.0f);
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy - 2.0f, 2.0f, SINV_SLOT + 4.0f, 1.0f,
-                  1.0f, 1.0f, 1.0f);
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x + SINV_SLOT, hy - 2.0f, 2.0f, SINV_SLOT + 4.0f,
-                  1.0f, 1.0f, 1.0f, 1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy - 2.0f, SINV_SLOT + 4.0f, 2.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy + SINV_SLOT, SINV_SLOT + 4.0f, 2.0f, 1.0f, 1.0f, 1.0f,
+                  1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy - 2.0f, 2.0f, SINV_SLOT + 4.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+            srect(rects, &rn, SCR_MAX_RECT_VERTS, x + SINV_SLOT, hy - 2.0f, 2.0f, SINV_SLOT + 4.0f, 1.0f, 1.0f, 1.0f,
+                  1.0f);
             sflush(app, rects, &rn);
         }
         sslot_survival(app, ui, x, hy, slot, &app->cursor);
@@ -1803,12 +1745,11 @@ static void screen_inventory(AppContext *app, const UiFrame *ui)
     sflush(app, rects, &rn);
     scursor_draw(app, ui, rects, &rn, &icons);
     /* Icons first, counts over them (Minecraft convention). */
-    renderer_draw_item_icons(app->renderer, app->width, app->height, &icons);
+    renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &icons);
     for (int i = 0; i < 4; ++i) {
         int cx2 = i % 2;
         int cy2 = i / 2;
-        sslot_count(app, gx + (float)cx2 * SINV_PITCH, gy - craft_h + (float)cy2 * SINV_PITCH,
-                    &app->craft2[i]);
+        sslot_count(app, gx + (float)cx2 * SINV_PITCH, gy - craft_h + (float)cy2 * SINV_PITCH, &app->craft2[i]);
     }
     sslot_count(app, gx + 2.0f * SINV_PITCH + 24.0f, gy - craft_h + SINV_PITCH * 0.5f, &app->craft_out);
     for (int row = 0; row < 3; ++row) {
@@ -1826,14 +1767,12 @@ static void screen_inventory(AppContext *app, const UiFrame *ui)
         char held[96];
         snprintf(held, sizeof(held), "Holding: %s x%u  (LMB place, RMB place one)", info->name,
                  (unsigned)app->cursor.count);
-        stext_c(app, held, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G,
-                SCR_ACC_B);
+        stext_c(app, held, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B);
     } else if (hov_name != NULL) {
-        stext_c(app, hov_name, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G,
-                SCR_TXT_B);
+        stext_c(app, hov_name, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
     } else {
-        stext_c(app, "LMB move / RMB split  -  E or ESC to close", cx, py + panel_h - 24.0f,
-                SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        stext_c(app, "LMB move / RMB split  -  E or ESC to close", cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f,
+                SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     }
 }
 
@@ -1845,23 +1784,20 @@ static void screen_creative(AppContext *app, const UiFrame *ui)
 {
     /* Catalogue: all valid items in registry order (blocks 1..19 sans
      * water, then materials, then tools). Bounded and allocation-free. */
-ItemId cata[64];
+    ItemId cata[64];
     int ncata = 0;
     for (uint16_t id = 1; id <= 19 && ncata < (int)(sizeof(cata) / sizeof(cata[0])); ++id) {
         if (item_is_valid(id)) {
             cata[ncata++] = id;
         }
     }
-    const uint16_t extra[] = {ITEM_COAL, ITEM_APPLE, ITEM_STICK, ITEM_BOW, ITEM_ARROW,
-                              ITEM_BONE, ITEM_RAW_BEEF, ITEM_LEATHER, ITEM_ROTTEN_FLESH,
-                              ITEM_IRON_INGOT, ITEM_DIAMOND,
-                              ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE, ITEM_IRON_PICKAXE,
-                              ITEM_DIAMOND_PICKAXE,
-                              ITEM_WOOD_AXE, ITEM_STONE_AXE, ITEM_IRON_AXE, ITEM_DIAMOND_AXE,
-                              ITEM_WOOD_SHOVEL, ITEM_STONE_SHOVEL, ITEM_IRON_SHOVEL,
-                              ITEM_DIAMOND_SHOVEL,
-                              ITEM_WOOD_SWORD, ITEM_STONE_SWORD, ITEM_IRON_SWORD,
-                              ITEM_DIAMOND_SWORD};
+    const uint16_t extra[] = {ITEM_COAL,          ITEM_APPLE,        ITEM_STICK,           ITEM_BOW,
+                              ITEM_ARROW,         ITEM_BONE,         ITEM_RAW_BEEF,        ITEM_LEATHER,
+                              ITEM_ROTTEN_FLESH,  ITEM_IRON_INGOT,   ITEM_DIAMOND,         ITEM_WOOD_PICKAXE,
+                              ITEM_STONE_PICKAXE, ITEM_IRON_PICKAXE, ITEM_DIAMOND_PICKAXE, ITEM_WOOD_AXE,
+                              ITEM_STONE_AXE,     ITEM_IRON_AXE,     ITEM_DIAMOND_AXE,     ITEM_WOOD_SHOVEL,
+                              ITEM_STONE_SHOVEL,  ITEM_IRON_SHOVEL,  ITEM_DIAMOND_SHOVEL,  ITEM_WOOD_SWORD,
+                              ITEM_STONE_SWORD,   ITEM_IRON_SWORD,   ITEM_DIAMOND_SWORD};
     for (size_t i = 0; i < sizeof(extra) / sizeof(extra[0]) && ncata < (int)(sizeof(cata) / sizeof(cata[0])); ++i) {
         if (item_is_valid(extra[i])) {
             cata[ncata++] = extra[i];
@@ -1874,25 +1810,23 @@ ItemId cata[64];
 
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
     float grid_h = (float)rows * SINV_PITCH + 12.0f + SINV_SLOT;
     float panel_w = SINV_GRID_W + SINV_PAD * 2.0f;
     float panel_h = grid_h + 88.0f + 28.0f; /* Bottom pad: hint below hotbar. */
     float px = cx - panel_w * 0.5f;
-    float py = ((float)app->height - panel_h) * 0.5f;
+    float py = ((float)screen_height(app) - panel_h) * 0.5f;
     if (py < 8.0f) {
         py = 8.0f;
     }
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, 0.0f,
-          0.0f, 0.0f, 0.55f);
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
+          0.0f, 0.55f);
     srect(rects, &rn, SCR_MAX_RECT_VERTS, px, py, panel_w, panel_h, 0.10f, 0.10f, 0.12f, 0.96f);
     sflush(app, rects, &rn);
 
-    stext_c(app, "Creative Inventory", cx, py + 10.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G,
-            SCR_TXT_B);
-    stext_c(app, "Click an item for a full stack, then click a hotbar slot",
-            cx, py + 10.0f + 8.0f * SCR_TEXT_SCALE + 6.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R,
-            SCR_DIM_G, SCR_DIM_B);
+    stext_c(app, "Creative Inventory", cx, py + 10.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
+    stext_c(app, "Click an item for a full stack, then click a hotbar slot", cx,
+            py + 10.0f + 8.0f * SCR_TEXT_SCALE + 6.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
 
     float gx = cx - SINV_GRID_W * 0.5f;
     float gy = py + 88.0f;
@@ -1943,7 +1877,7 @@ ItemId cata[64];
     sflush(app, rects, &rn);
     scursor_draw(app, ui, rects, &rn, &icons);
     /* Icons first, counts over them. */
-    renderer_draw_item_icons(app->renderer, app->width, app->height, &icons);
+    renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &icons);
     for (int i = 0; i < ncata; ++i) {
         int col = i % SINV_COLS;
         int row = i / SINV_COLS;
@@ -1959,16 +1893,13 @@ ItemId cata[64];
     if (!stack_is_empty(&app->cursor)) {
         const ItemInfo *info = item_get_info(app->cursor.item);
         char held[96];
-        snprintf(held, sizeof(held), "Holding: %s x%u  (click a hotbar slot)", info->name,
-                 (unsigned)app->cursor.count);
-        stext_c(app, held, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G,
-                SCR_ACC_B);
+        snprintf(held, sizeof(held), "Holding: %s x%u  (click a hotbar slot)", info->name, (unsigned)app->cursor.count);
+        stext_c(app, held, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B);
     } else if (hov_name != NULL) {
-        stext_c(app, hov_name, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G,
-                SCR_TXT_B);
+        stext_c(app, hov_name, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
     } else {
-        stext_c(app, "E or ESC to close", cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f,
-                SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
+        stext_c(app, "E or ESC to close", cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G,
+                SCR_DIM_B);
     }
 }
 
@@ -1981,18 +1912,18 @@ static void screen_crafting(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
-    float bench_h = 3.0f * SINV_PITCH;                       /* 3x3 grid block. */
-    float stor_h = 3.0f * SINV_PITCH + 12.0f + SINV_SLOT;    /* 27 slots + hotbar. */
+    float cx = (float)screen_width(app) * 0.5f;
+    float bench_h = 3.0f * SINV_PITCH;                    /* 3x3 grid block. */
+    float stor_h = 3.0f * SINV_PITCH + 12.0f + SINV_SLOT; /* 27 slots + hotbar. */
     float panel_w = SINV_GRID_W + SINV_PAD * 2.0f;
     float panel_h = bench_h + 12.0f + stor_h + 88.0f + 28.0f; /* Bottom line below hotbar. */
     float px = cx - panel_w * 0.5f;
-    float py = ((float)app->height - panel_h) * 0.5f;
+    float py = ((float)screen_height(app) - panel_h) * 0.5f;
     if (py < 8.0f) {
         py = 8.0f;
     }
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, 0.0f,
-          0.0f, 0.0f, 0.55f);
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
+          0.0f, 0.55f);
     srect(rects, &rn, SCR_MAX_RECT_VERTS, px, py, panel_w, panel_h, 0.10f, 0.10f, 0.12f, 0.96f);
     sflush(app, rects, &rn);
 
@@ -2047,11 +1978,10 @@ static void screen_crafting(AppContext *app, const UiFrame *ui)
     sflush(app, rects, &rn);
     scursor_draw(app, ui, rects, &rn, &icons);
     /* Icons first, counts over them. */
-    renderer_draw_item_icons(app->renderer, app->width, app->height, &icons);
+    renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &icons);
     for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 3; ++col) {
-            sslot_count(app, gx + (float)col * SINV_PITCH, gy + (float)row * SINV_PITCH,
-                        &app->craft3[row * 3 + col]);
+            sslot_count(app, gx + (float)col * SINV_PITCH, gy + (float)row * SINV_PITCH, &app->craft3[row * 3 + col]);
         }
     }
     sslot_count(app, gx + 3.0f * SINV_PITCH + 24.0f, gy + SINV_PITCH, &app->craft_out);
@@ -2068,11 +1998,9 @@ static void screen_crafting(AppContext *app, const UiFrame *ui)
         const ItemInfo *info = item_get_info(app->cursor.item);
         char held[96];
         snprintf(held, sizeof(held), "Holding: %s x%u", info->name, (unsigned)app->cursor.count);
-        stext_c(app, held, cx, py + panel_h - 22.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G,
-                SCR_ACC_B);
+        stext_c(app, held, cx, py + panel_h - 22.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B);
     } else if (hov_name != NULL) {
-        stext_c(app, hov_name, cx, py + panel_h - 22.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G,
-                SCR_TXT_B);
+        stext_c(app, hov_name, cx, py + panel_h - 22.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
     }
 }
 
@@ -2083,11 +2011,11 @@ static void screen_dead(AppContext *app, const UiFrame *ui)
 {
     float rects[SCR_MAX_RECT_VERTS * 6];
     size_t rn = 0;
-    float cx = (float)app->width * 0.5f;
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)app->width, (float)app->height, 0.35f,
-          0.02f, 0.02f, 0.72f);
+    float cx = (float)screen_width(app) * 0.5f;
+    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.35f, 0.02f,
+          0.02f, 0.72f);
     sflush(app, rects, &rn);
-    float y = (float)app->height * 0.30f;
+    float y = (float)screen_height(app) * 0.30f;
     y = stitle(app, "You Died", "Your items scattered where you fell", cx, y);
     float bx = cx - SCR_BTN_W * 0.5f;
     if (sbutton(app, ui, rects, &rn, bx, y, SCR_BTN_W, SCR_BTN_H, "Respawn", true)) {
@@ -2121,8 +2049,8 @@ static void screen_loading(AppContext *app)
     } else {
         snprintf(line2, sizeof(line2), "Preparing terrain...");
     }
-    float cx = (float)app->width * 0.5f;
-    float cy = (float)app->height * 0.5f;
+    float cx = (float)screen_width(app) * 0.5f;
+    float cy = (float)screen_height(app) * 0.5f;
     stext_c(app, line1, cx, cy - 20.0f, SCR_TEXT_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
     stext_c(app, line2, cx, cy + 24.0f, SCR_TEXT_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     /* Green progress bar under the text (fills with chunk progress). */
@@ -2134,13 +2062,12 @@ static void screen_loading(AppContext *app)
         if (frac > 1.0f) {
             frac = 1.0f;
         }
-        float bw = fminf(420.0f, (float)app->width - 80.0f);
+        float bw = fminf(420.0f, (float)screen_width(app) - 80.0f);
         float bx = cx - bw * 0.5f;
         float by = cy + 56.0f;
         float rects[SCR_MAX_RECT_VERTS * 6];
         size_t rn = 0;
-        srect(rects, &rn, SCR_MAX_RECT_VERTS, bx - 2.0f, by - 2.0f, bw + 4.0f, 10.0f,
-              0.05f, 0.05f, 0.05f, 1.0f);
+        srect(rects, &rn, SCR_MAX_RECT_VERTS, bx - 2.0f, by - 2.0f, bw + 4.0f, 10.0f, 0.05f, 0.05f, 0.05f, 1.0f);
         srect(rects, &rn, SCR_MAX_RECT_VERTS, bx, by, bw * frac, 6.0f, 0.25f, 0.75f, 0.25f, 1.0f);
         sflush(app, rects, &rn);
     }
@@ -2164,8 +2091,8 @@ void screens_draw_debug(AppContext *app)
     }
     const ItemStack *sel_slot = &app->player.inv.slots[sel_idx];
     const ItemInfo *sel = item_get_info(sel_slot->item);
-    snprintf(lines[0], sizeof(lines[0]), "TerraCraft debug - %.1f FPS  %.2f ms/frame",
-             (double)app->fps_smooth, (double)app->frame_ms_avg);
+    snprintf(lines[0], sizeof(lines[0]), "TerraCraft debug - %.1f FPS  %.2f ms/frame", (double)app->fps_smooth,
+             (double)app->frame_ms_avg);
     snprintf(lines[1], sizeof(lines[1]), "XYZ: %.2f / %.2f / %.2f", (double)p.x, (double)p.y, (double)p.z);
     snprintf(lines[2], sizeof(lines[2]), "Chunk: %d %d", (int)floorf(p.x / 16.0f), (int)floorf(p.z / 16.0f));
     snprintf(lines[3], sizeof(lines[3]), "Chunks: %zu loaded, %zu drawn (+%zu transp), %zu culled",
@@ -2176,20 +2103,19 @@ void screens_draw_debug(AppContext *app)
     snprintf(lines[6], sizeof(lines[6]), "Held: %s x%u", sel != NULL ? sel->name : "?",
              stack_is_empty(sel_slot) ? 0u : (unsigned)sel_slot->count);
     snprintf(lines[7], sizeof(lines[7]), "Pack: %s", app->settings.pack);
-    snprintf(lines[8], sizeof(lines[8]), "Mesh: %.2f ms  Up: %.2f ms  Draw: %.2f ms", perf.mesh_ms,
-             perf.upload_ms, perf.draw_ms);
+    snprintf(lines[8], sizeof(lines[8]), "Mesh: %.2f ms  Up: %.2f ms  Draw: %.2f ms", perf.mesh_ms, perf.upload_ms,
+             perf.draw_ms);
     snprintf(lines[9], sizeof(lines[9]), "Mobs: %d living (%d cow %d zomb %d skel), %d drawn %d culled",
              mob_active_count(&app->mobs), mob_count_type(&app->mobs, ENTITY_COW),
-              mob_count_type(&app->mobs, ENTITY_ZOMBIE), mob_count_type(&app->mobs, ENTITY_SKELETON),
-             app->mobs_drawn, app->mobs_culled);
-    snprintf(lines[10], sizeof(lines[10]), "AI: thinks %u, paths %u (pool rng strain)",
-             (unsigned)app->mobs.ai_thinks, (unsigned)app->mobs.path_reqs);
+             mob_count_type(&app->mobs, ENTITY_ZOMBIE), mob_count_type(&app->mobs, ENTITY_SKELETON), app->mobs_drawn,
+             app->mobs_culled);
+    snprintf(lines[10], sizeof(lines[10]), "AI: thinks %u, paths %u (pool rng strain)", (unsigned)app->mobs.ai_thinks,
+             (unsigned)app->mobs.path_reqs);
     snprintf(lines[11], sizeof(lines[11]), "Arrows: %d flying (%d stuck), fired %u hits %u, drawn %d",
-             projectile_active_count(&app->projectiles),
-             projectile_embedded_count(&app->projectiles), (unsigned)app->projectiles.fired,
-             (unsigned)app->projectiles.impacts, app->arrows_drawn);
-    snprintf(lines[12], sizeof(lines[12]), "Simulation: %.2f ms/tick, %.1f ticks/s",
-             (double)app->sim_ms_avg, (double)app->sim_tps);
+             projectile_active_count(&app->projectiles), projectile_embedded_count(&app->projectiles),
+             (unsigned)app->projectiles.fired, (unsigned)app->projectiles.impacts, app->arrows_drawn);
+    snprintf(lines[12], sizeof(lines[12]), "Simulation: %.2f ms/tick, %.1f ticks/s", (double)app->sim_ms_avg,
+             (double)app->sim_tps);
     if (app->process_working_set_bytes > 0) {
         snprintf(lines[13], sizeof(lines[13]), "Process resident memory: %llu MiB",
                  (unsigned long long)(app->process_working_set_bytes / (1024u * 1024u)));
@@ -2198,8 +2124,7 @@ void screens_draw_debug(AppContext *app)
     }
     float y = 12.0f;
     for (int i = 0; i < 14 && lines[i][0] != '\0'; ++i) {
-        renderer_draw_text(app->renderer, 12.0f, y, SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
-                           lines[i]);
+        renderer_draw_text(app->renderer, 12.0f, y, SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, lines[i]);
         y += 22.0f;
     }
 }
@@ -2210,6 +2135,21 @@ void screens_update(AppContext *app, const UiFrame *ui)
     if (app == NULL || ui == NULL) {
         return;
     }
+    UiFrame input = *ui;
+    bool scaled = screen_scaled(app);
+    if (scaled) {
+        input.mouse_x =
+            app->width > 0 ? (int)floorf((float)ui->mouse_x * (float)screen_width(app) / (float)app->width) : 0;
+        input.mouse_y =
+            app->height > 0 ? (int)floorf((float)ui->mouse_y * (float)screen_height(app) / (float)app->height) : 0;
+        renderer_set_ui_canvas(app->renderer, screen_width(app), screen_height(app));
+    }
+    ui = &input;
+    bool arrows = app->state != GAME_STATE_WORLD_SELECT && app->state != GAME_STATE_LAN_MENU &&
+                  app->state != GAME_STATE_CREATE_WORLD && app->state != GAME_STATE_PROFILE;
+    int page = (app->state == GAME_STATE_CREATE_WORLD && app->menu.create_show_rules) ||
+               (app->state == GAME_STATE_PAUSED && app->menu.pause_show_rules);
+    ui_controls_begin(&app->menu.controls, ui, (int)app->state * 4 + 1 + page, arrows);
     switch (app->state) {
     case GAME_STATE_PROFILE:
         screen_profile(app, ui);
@@ -2251,4 +2191,6 @@ void screens_update(AppContext *app, const UiFrame *ui)
     default:
         break;
     }
+    ui_controls_end(&app->menu.controls);
+    renderer_set_ui_canvas(app->renderer, 0, 0);
 }

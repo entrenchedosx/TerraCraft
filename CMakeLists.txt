@@ -74,6 +74,10 @@ set(TERRACRAFT_SOURCES
   src/platform/lan_discover.c
   src/platform/gl_ctx.c
   src/render/renderer.c
+  src/render/menu_panorama.c
+  src/ui/ui_style.c
+  src/ui/chat_layout.c
+  src/core/launch_options.c
   src/render/shader.c
   src/render/camera.c
   src/render/mesher.c
@@ -197,6 +201,11 @@ add_executable(terracraft_tests
   tests/test_settings.c
   tests/test_profile.c
   tests/test_ui.c
+  tests/test_ui_metrics.c
+  tests/test_ui_controls.c
+  tests/test_chat_layout.c
+  tests/test_launch_options.c
+  tests/test_menu_bitmaps.c
   tests/test_gameplay.c
   tests/test_esave.c
   tests/test_craft.c
@@ -223,10 +232,12 @@ endif()
 # the source tree exists (absent on CI/fresh clones -> quiet skip, the
 # procedural/synth fallbacks cover it).
 if(EXISTS "${CMAKE_SOURCE_DIR}/mcassets/generated")
-  add_custom_command(TARGET terracraft POST_BUILD
+  add_custom_target(terracraft_assets
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/mcassets/generated"
             "$<TARGET_FILE_DIR:terracraft>/mcassets/generated")
+  add_dependencies(terracraft terracraft_assets)
+  add_dependencies(terracraft_tests terracraft_assets)
 endif()
 
 add_test(NAME terracraft_tests COMMAND terracraft_tests)

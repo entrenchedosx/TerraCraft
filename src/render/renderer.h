@@ -366,3 +366,8 @@ void renderer_measure_text(Renderer *r, const char *text, float scale, float *ou
  * Returns false when the owner-local panorama is absent or drawing is unavailable.
  */
 bool renderer_draw_menu_panorama(Renderer *r, int width, int height, float seconds);
+/* Shared pixel-art button skin: 0 normal, 1 highlighted, 2 disabled.
+ * Press is a shading state. Geometry preserves native corner pixels. */
+void renderer_draw_button(Renderer *r,int width,int height,float x,float y,float w,float h,int state,bool pressed);
+/* Menus may use a logical canvas; gameplay HUD remains in drawable pixels. */
+void renderer_set_ui_canvas(Renderer *r,int width,int height);

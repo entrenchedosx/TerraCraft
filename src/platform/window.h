@@ -14,10 +14,10 @@ typedef struct Window Window;
 /* Simplified event kinds consumed by AppContext. */
 typedef enum WindowEventKind {
     WINDOW_EVENT_NONE = 0,
-    WINDOW_EVENT_QUIT,    /* Window X button / SDL_QUIT. */
-    WINDOW_EVENT_KEY_ESC, /* ESC pressed -> request quit. */
-    WINDOW_EVENT_RESIZE,  /* Drawable size changed; width/height valid. */
-    WINDOW_EVENT_TEXT,    /* SDL text input; text[] carries UTF-8 bytes. */
+    WINDOW_EVENT_QUIT,      /* Window X button / SDL_QUIT. */
+    WINDOW_EVENT_KEY_ESC,   /* ESC pressed -> request quit. */
+    WINDOW_EVENT_RESIZE,    /* Drawable size changed; width/height valid. */
+    WINDOW_EVENT_TEXT,      /* SDL text input; text[] carries UTF-8 bytes. */
     WINDOW_EVENT_FOCUS_LOST /* Window focus lost (auto-pause in game). */
 } WindowEventKind;
 
@@ -115,7 +115,8 @@ void window_get_relative_motion(int *out_dx, int *out_dy);
 bool window_is_key_down(int scancode);
 
 /* Consume one key-down edge latched while SDL events were drained. Key-up
- * before a simulation tick does not erase the press. Returns false for an
+ * before a simulation tick does not erase
+ * the press. Returns false for an
  * invalid scancode or when there was no pending edge.
  */
 bool window_take_key_pressed(Window *win, int scancode);
@@ -139,7 +140,8 @@ bool window_is_mouse_down(int button);
 bool window_take_mouse_pressed(Window *win, int button);
 
 /* Clear queued key and mouse press edges on focus/state transitions so UI
- * or resumed gameplay cannot consume a stale action.
+ * or resumed gameplay cannot consume a stale
+ * action.
  */
 void window_clear_input_edges(Window *win);
 
@@ -154,7 +156,15 @@ void window_clear_input_edges(Window *win);
  */
 int window_take_wheel_delta(Window *win);
 
-/* Get the cursor position in window pixels (y-down, undefined in
+/* Convert logical window coordinates to drawable pixels. Nonpositive
+ * dimensions preserve the input coordinates. Coordinates outside the
+ * client area remain outside; outputs saturate at integer limits.
+ * Pure helper: it does not query SDL or require an open window.
+ */
+void window_mouse_to_drawable(int x, int y, int logical_width, int logical_height, int drawable_width,
+                              int drawable_height, int *out_x, int *out_y);
+
+/* Get the cursor position in drawable pixels (y-down, undefined in
  * relative-mouse mode; menus run with capture off).
  *
  * Args:

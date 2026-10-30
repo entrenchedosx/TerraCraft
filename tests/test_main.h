@@ -9,6 +9,17 @@
 /* Global counters (defined in test_main.c). */
 extern int g_tests_run;
 extern int g_tests_failed;
+int test_ui_pointer_drawable_scaling(void);
+int test_ui_scale_layout(void);
+int test_ui_nine_slice_geometry(void);
+int test_ui_focus_navigation(void);
+int test_ui_control_capture(void);
+int test_chat_layout_wrapping(void);
+int test_chat_layout_tail(void);
+int test_chat_layout_bounds(void);
+int test_launch_options(void);
+int test_menu_native_bmp(void);
+int test_menu_asset_file_fallback(void);
 int test_worldgen_v4_determinism(void);
 int test_worldgen_v4_fields(void);
 int test_worldgen_v4_spawn(void);

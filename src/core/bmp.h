@@ -21,7 +21,9 @@ typedef struct BmpImage {
 /* Parse BMP bytes into an RGBA image.
  * Accepts: 'BM' magic, BITMAPINFOHEADER (40 B), BI_RGB, 24 or 32 bpp.
  * Supports bottom-up (positive height) and top-down (negative height).
- * Rejects files over 4 MiB and truncations/mismatches safely.
+ * Rejects files over16MiB plus4096 header bytes, invalid offsets,
+ * truncations and unsafe dimensions. Native menu images share this reader;
+ * atlas overrides separately require16x16 pixels.
  *
  * Args:
  *   data: file bytes (must not be NULL).
@@ -48,6 +50,9 @@ void bmp_free(BmpImage *img);
  * Returns: 0 on success, non-zero on I/O or parse failure.
  */
 int bmp_load_file(const char *path, BmpImage *out);
+/* Optional owner-local image: try each existing file, not just the first
+ * existing directory. expected dimensions0 allow native-size images. */
+int bmp_load_mcasset(const char *relative, int expected_w, int expected_h, BmpImage *out);
 
 /* Validate tile suitability: exactly 16x16.
  *

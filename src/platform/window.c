@@ -2,6 +2,9 @@
 #include "core/log.h"
 #include "game/input_buffer.h"
 
+#include <limits.h>
+#include <math.h>
+
 /* Portable SDL include: vcpkg uses <SDL2/SDL.h>, some distros expose <SDL.h>. */
 #if defined(__has_include)
 #if __has_include(<SDL2/SDL.h>)
@@ -50,8 +53,8 @@ Window *window_create(const char *title, int width, int height)
     /* Ask SDL for a High-DPI aware, resizable, OpenGL-capable window.
      * Actual GL attributes (version/profile) are set in gl_ctx_init before
      * context creation; SDL applies them at SDL_GL_CreateContext time. */
-    SDL_Window *handle = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
-                                          height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_Window *handle = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height,
+                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (handle == NULL) {
         LOG_ERROR("SDL_CreateWindow failed: %s", SDL_GetError());
         if (s_window_count == 0) {
@@ -60,7 +63,8 @@ Window *window_create(const char *title, int width, int height)
         return NULL;
     }
     /* Keep the title and gameplay HUD usable when the resizable window is
-     * dragged toward a very small size. The menu also adapts below 300 px. */
+     * dragged toward a very small size. The
+     * menu also adapts below 300 px. */
     SDL_SetWindowMinimumSize(handle, 320, 240);
 
     Window *win = (Window *)SDL_malloc(sizeof(Window));
@@ -359,7 +363,34 @@ int window_take_wheel_delta(Window *win)
     return d;
 }
 
-/* Get the cursor position in window pixels (meaningful with capture off).
+static int window_scaled_coordinate(int coordinate, int logical_extent, int drawable_extent)
+{
+    double scaled = floor((double)coordinate * (double)drawable_extent / (double)logical_extent);
+    if (scaled <= (double)INT_MIN) {
+        return INT_MIN;
+    }
+    if (scaled >= (double)INT_MAX) {
+        return INT_MAX;
+    }
+    return (int)scaled;
+}
+
+void window_mouse_to_drawable(int x, int y, int logical_width, int logical_height, int drawable_width,
+                              int drawable_height, int *out_x, int *out_y)
+{
+    if (logical_width > 0 && logical_height > 0 && drawable_width > 0 && drawable_height > 0) {
+        x = window_scaled_coordinate(x, logical_width, drawable_width);
+        y = window_scaled_coordinate(y, logical_height, drawable_height);
+    }
+    if (out_x != NULL) {
+        *out_x = x;
+    }
+    if (out_y != NULL) {
+        *out_y = y;
+    }
+}
+
+/* Get the cursor position in drawable pixels (meaningful with capture off).
  *
  * Args:
  *   out_x/out_y: receivers.
@@ -369,6 +400,20 @@ void window_get_mouse_pos(int *out_x, int *out_y)
     int x = 0;
     int y = 0;
     SDL_GetMouseState(&x, &y);
+    /* SDL mouse coordinates are logical window coordinates, while the
+     * viewport and all existing UI rectangles
+     * use GL drawable pixels.
+     * Query the actual focused window rather than assuming a fixed DPI. */
+    SDL_Window *focused = SDL_GetMouseFocus();
+    if (focused == NULL) {
+        focused = SDL_GetKeyboardFocus();
+    }
+    if (focused != NULL) {
+        int logical_w = 0, logical_h = 0, drawable_w = 0, drawable_h = 0;
+        SDL_GetWindowSize(focused, &logical_w, &logical_h);
+        SDL_GL_GetDrawableSize(focused, &drawable_w, &drawable_h);
+        window_mouse_to_drawable(x, y, logical_w, logical_h, drawable_w, drawable_h, &x, &y);
+    }
     if (out_x != NULL) {
         *out_x = x;
     }
