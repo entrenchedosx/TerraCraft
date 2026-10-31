@@ -1,4 +1,5 @@
 #include "world/worldgen_v4.h"
+#include "world/worldgen_v5.h"
 #include "core/noise.h"
 #include "world/biome.h"
 #include "world/block.h"
@@ -95,6 +96,15 @@ GenClimate worldgen_climate(long seed, int x, int z)
     return c;
 }
 
+static GenClimate climate_profile(long seed, int x, int z, int profile)
+{
+    return profile >= 5 ? worldgen5_climate(seed, x, z) : worldgen_climate(seed, x, z);
+}
+static uint16_t surface_profile(long seed, int x, int z, int h, int profile)
+{
+    return profile >= 5 ? worldgen5_surface(seed, x, z, h) : worldgen_surface(seed, x, z, h);
+}
+
 static Fields fields(long seed, int x, int y, int z)
 {
     Fields f;
@@ -147,10 +157,29 @@ static Fields sample(long seed, int x, int y, int z)
                 f[iy * 4 + iz * 2 + ix] = fields(seed, ax + ix * GRID, ay + iy * GRID, az + iz * GRID);
     return interpolate(f, 1, 2, 4, (float)(x - ax) / GRID, (float)(y - ay) / GRID, (float)(z - az) / GRID);
 }
-static GenDensity combine(GenClimate c, Fields f, int y)
+static GenDensity combine(GenClimate c, Fields f, int y, int profile)
 {
     GenDensity d;
     float depth = c.height - (float)y;
+    if (profile >= 5) {
+        float resistant = 1 - smooth(-.4f, .5f, c.erosion);
+        d.terrain = depth / 12 + f.shape * (.16f + resistant * (.24f + c.mountain * .85f)) * smooth(-10, 18, depth);
+        float opening = smooth(1, 30, depth);
+        d.cheese = (.66f - .17f * opening) - f.cheese;
+        /* Rounded paired zero-contours form winding tunnels. Thickness and
+         * noodle occurrence blend continuously rather than flipping a gate. */
+        float thickness = .12f + .04f * smooth(-.45f, .45f, f.gate);
+        d.spaghetti = sqrtf(f.sa * f.sa + f.sb * f.sb) - thickness + (1 - opening) * .035f;
+        d.noodle = sqrtf(f.na * f.na + f.nb * f.nb) - mix(.025f, .082f, smooth(-.5f, .4f, f.gate));
+        float cave = fminf(d.cheese, fminf(d.spaghetti, d.noodle));
+        cave = fmaxf(cave, (3.0f - y) * .15f);
+        d.final_density = fminf(d.terrain, cave * 12);
+        d.vein = f.vein;
+        d.vein_ridge = fmaxf(fabsf(f.va), fabsf(f.vb));
+        d.richness = clamp(fabsf(f.vein), .4f, .6f) - .3f;
+        d.filler_gap = -.3f - f.rich;
+        return d;
+    }
     d.terrain = depth / 12 + f.shape * (.32f + c.mountain * 1.1f) * smooth(-12, 20, depth);
     /* Chamber size grows with depth; near-surface cheese is suppressed,
      * but spaghetti intersections may cut natural entrances. */
@@ -173,7 +202,12 @@ static GenDensity combine(GenClimate c, Fields f, int y)
 }
 GenDensity worldgen_density(long seed, int x, int y, int z)
 {
-    return combine(worldgen_climate(seed, x, z), sample(seed, x, y, z), y);
+    return worldgen_density_profile(seed, x, y, z, 4);
+}
+
+GenDensity worldgen_density_profile(long seed, int x, int y, int z, int profile)
+{
+    return combine(climate_profile(seed, x, z, profile), sample(seed, x, y, z), y, profile);
 }
 
 /* Nearest jittered local aquifer centers. Different levels/dry cells are
@@ -225,7 +259,11 @@ static GenAquifer aquifer_at(AquiferColumn a, int y, GenClimate c)
 }
 GenAquifer worldgen_aquifer(long seed, int x, int y, int z)
 {
-    return aquifer_at(aquifer_column(seed, x, z), y, worldgen_climate(seed, x, z));
+    return worldgen_aquifer_profile(seed, x, y, z, 4);
+}
+GenAquifer worldgen_aquifer_profile(long seed, int x, int y, int z, int profile)
+{
+    return aquifer_at(aquifer_column(seed, x, z), y, climate_profile(seed, x, z, profile));
 }
 static uint16_t base_block(GenClimate c, GenDensity d, GenAquifer a, int y)
 {
@@ -245,14 +283,22 @@ static uint16_t base_block(GenClimate c, GenDensity d, GenAquifer a, int y)
 }
 uint16_t worldgen_base_block(long seed, int x, int y, int z)
 {
+    return worldgen_base_block_profile(seed, x, y, z, 4);
+}
+uint16_t worldgen_base_block_profile(long seed, int x, int y, int z, int profile)
+{
     if (y < 0 || y >= CHUNK_Y)
         return BLOCK_AIR;
-    GenClimate c = worldgen_climate(seed, x, z);
-    return base_block(c, combine(c, sample(seed, x, y, z), y), aquifer_at(aquifer_column(seed, x, z), y, c), y);
+    GenClimate c = climate_profile(seed, x, z, profile);
+    return base_block(c, combine(c, sample(seed, x, y, z), y, profile), aquifer_at(aquifer_column(seed, x, z), y, c), y);
 }
 int worldgen_height(long seed, int x, int z)
 {
-    GenClimate c = worldgen_climate(seed, x, z);
+    return worldgen_height_profile(seed, x, z, 4);
+}
+int worldgen_height_profile(long seed, int x, int z, int profile)
+{
+    GenClimate c = climate_profile(seed, x, z, profile);
     AquiferColumn aq = aquifer_column(seed, x, z);
     int ax = divfloor(x, GRID) * GRID, az = divfloor(z, GRID) * GRID, last = -1;
     Fields f[8];
@@ -266,7 +312,7 @@ int worldgen_height(long seed, int x, int z)
             last = ay;
         }
         Fields v = interpolate(f, 1, 2, 4, (float)(x - ax) / GRID, (float)(y - ay) / GRID, (float)(z - az) / GRID);
-        if (block_is_solid(base_block(c, combine(c, v, y), aquifer_at(aq, y, c), y)))
+        if (block_is_solid(base_block(c, combine(c, v, y, profile), aquifer_at(aq, y, c), y)))
             return y;
     }
     return 0;
@@ -329,7 +375,7 @@ static bool rock(uint16_t id)
 {
     return id == BLOCK_STONE || id == BLOCK_DEEPSLATE;
 }
-static void stamp_ores(Chunk *c, long seed)
+static void stamp_ores(Chunk *c, long seed, int profile)
 {
     for (size_t r = 0; r < sizeof(ores) / sizeof(ores[0]); ++r) {
         OreRule rule = ores[r];
@@ -350,7 +396,7 @@ static void stamp_ores(Chunk *c, long seed)
                     uint32_t path_seed = rng;
                     if (y < 2 || y >= CHUNK_Y - 2)
                         continue;
-                    if (rule.biome >= 0 && worldgen_climate(seed, (int)px, (int)pz).biome != rule.biome)
+                    if (rule.biome >= 0 && climate_profile(seed, (int)px, (int)pz, profile).biome != rule.biome)
                         continue;
                     /* A fixed path seed per anchor avoids chunk-local RNG consumption. */
                     int root_x = (int)floorf(px), root_z = (int)floorf(pz);
@@ -375,7 +421,7 @@ static void stamp_ores(Chunk *c, long seed)
                                     uint16_t id =
                                         chunk_in_bounds(nx, ny, nz)
                                             ? chunk_get_block(c, nx, ny, nz)
-                                            : worldgen_base_block(seed, wx + ox + dirs[i][0], ny, wz + oz + dirs[i][2]);
+                                            : worldgen_base_block_profile(seed, wx + ox + dirs[i][0], ny, wz + oz + dirs[i][2], profile);
                                     if (id == BLOCK_AIR)
                                         air = true;
                                 }
@@ -415,6 +461,10 @@ static void stamp_ores(Chunk *c, long seed)
 }
 void worldgen_fill(Chunk *c, long seed)
 {
+    worldgen_fill_profile(c, seed, 4);
+}
+void worldgen_fill_profile(Chunk *c, long seed, int profile)
+{
     Fields lattice[NY * 5 * 5];
     for (int iy = 0; iy < NY; ++iy)
         for (int iz = 0; iz < 5; ++iz)
@@ -424,13 +474,13 @@ void worldgen_fill(Chunk *c, long seed)
     for (int z = 0; z < 16; ++z)
         for (int x = 0; x < 16; ++x) {
             int wx = c->cx * 16 + x, wz = c->cz * 16 + z;
-            GenClimate climate = worldgen_climate(seed, wx, wz);
+            GenClimate climate = climate_profile(seed, wx, wz, profile);
             AquiferColumn aq = aquifer_column(seed, wx, wz);
             int top = -1;
             for (int y = 0; y < CHUNK_Y; ++y) {
                 Fields f = interpolate(&lattice[(y / GRID) * 25 + (z / GRID) * 5 + x / GRID], 1, 5, 25,
                                        (float)(x % GRID) / GRID, (float)(y % GRID) / GRID, (float)(z % GRID) / GRID);
-                GenDensity d = combine(climate, f, y);
+                GenDensity d = combine(climate, f, y, profile);
                 uint16_t id = base_block(climate, d, aquifer_at(aq, y, climate), y);
                 /* Richness and filler gaps make veins sparse mineral networks,
                  * not a solid tube of ore. Deep iron / shallow copper bands. */
@@ -453,7 +503,7 @@ void worldgen_fill(Chunk *c, long seed)
                     top = y;
             }
             if (top > 0) {
-                uint16_t surface = worldgen_surface(seed, wx, wz, top);
+                uint16_t surface = surface_profile(seed, wx, wz, top, profile);
                 /* Only sky-facing terrain receives soil. No dirt shell inside caves. */
                 chunk_set_block(c, x, top, z, surface);
                 for (int depth = 1; depth <= 4 && top - depth > 0; ++depth) {
@@ -466,7 +516,7 @@ void worldgen_fill(Chunk *c, long seed)
                 }
             }
         }
-    stamp_ores(c, seed);
+    stamp_ores(c, seed, profile);
 }
 
 static bool footing(uint16_t id)
@@ -546,7 +596,7 @@ int worldgen_find_spawn_with_budget(World *w, Vec3 *out, int rings)
                 if (abs(dx) != ring && abs(dz) != ring)
                     continue;
                 int cx = origin_x + dx * 4, cz = origin_z + dz * 4, x = cx * 16 + 8, z = cz * 16 + 8;
-                GenClimate climate = worldgen_climate(w->seed, x, z);
+                GenClimate climate = climate_profile(w->seed, x, z, w->terrain_version);
                 if (climate.height < 68 || climate.height > 145 || climate.mountain > .6f ||
                     climate.biome == BIOME_DESERT)
                     continue;
@@ -596,7 +646,7 @@ int worldgen_find_spawn_with_budget(World *w, Vec3 *out, int rings)
     int cx = divfloor(x, 16), cz = divfloor(z, 16);
     if (!world_get_chunk(w, cx, cz) && world_generate_chunk(w, cx, cz) != 0)
         return -2;
-    int y = worldgen_height(w->seed, x, z);
+    int y = worldgen_height_profile(w->seed, x, z, w->terrain_version);
     if (y < 70)
         y = 70;
     if (y > 190)

@@ -11,7 +11,8 @@
 /* Default cycle speed: one full day per 1200 seconds (MC: 20 minutes). */
 #define TIME_DEFAULT_SPEED (1.0f / 1200.0f)
 
-/* Minimum global light so nights stay navigable (never pitch black). */
+/* Floor for the sun-intensity track. Outdoor night readability comes from
+ * the shader's separate moon/skylight terms, not sunlight below the horizon. */
 #define TIME_MIN_INTENSITY 0.15f
 
 /* Day/night state. */

@@ -7,7 +7,7 @@
 
 #include <stddef.h>
 
-/* AO channel index in the 9-float vertex. */
+/* AO channel index in the 11-float vertex. */
 #define AO_OFF 8
 
 /* Test: pure AO level mapping and brightness table.
@@ -273,13 +273,14 @@ int test_ao_sun_shade(void)
     MeshData *m = mesher_build_chunk_mesh(c, NULL);
     TEST_ASSERT(m != NULL);
     if (m != NULL) {
-        /* Top face of (8,64,8): open AO (level 3) but shaded sun -> 0.45. */
+        /* Roof shading is now a separate propagated channel. Geometry AO
+         * remains open rather than crushing both lighting terms again. */
         float aos[8];
         int n = collect_top_ao(m, 65.0f, 8.0f, 9.0f, 8.0f, 9.0f, aos, 8);
         TEST_ASSERT(n == 4);
         int shaded = 1;
         for (int i = 0; i < n; ++i) {
-            float d = aos[i] - 0.45f;
+            float d = aos[i] - 1.0f;
             if (d < 0.0f) {
                 d = -d;
             }

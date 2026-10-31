@@ -23,8 +23,8 @@ typedef struct GpuChunkBuffer {
 
 /* Upload a CPU mesh into GPU buffers (creates VAO/VBO/EBO on first use,
  * re-uploads on dirty). Empty meshes (0 indices) destroy GPU buffers and
- * mark the entry invalid (nothing to draw). Vertex layout: 9 floats
- * [pos xyz | normal xyz | uv uv | ao], locations 0/1/2/3.
+ * mark the entry invalid (nothing to draw). Vertex layout: 11 floats
+ * [pos xyz | normal xyz | uv uv | ao | sky | block], locations 0/1/2/3/4.
  *
  * Args:
  *   g: buffer entry to fill (must not be NULL).

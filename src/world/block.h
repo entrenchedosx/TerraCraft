@@ -119,6 +119,9 @@ bool block_is_blended(uint16_t type);
 /* Fluid-state helpers. BLOCK_WATER is a source; horizontal flow is level
  * 1..7 and falling water keeps full height while fed from above. */
 bool block_is_water(uint16_t type);
+/* Render-light transport, 0=clear and 15=opaque. Emission is 0..15. */
+int block_light_opacity(uint16_t type);
+int block_light_emission(uint16_t type);
 int block_water_level(uint16_t type);
 bool block_water_is_falling(uint16_t type);
 uint16_t block_water_flowing(int level, bool falling);

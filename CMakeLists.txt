@@ -81,6 +81,7 @@ set(TERRACRAFT_SOURCES
   src/render/shader.c
   src/render/camera.c
   src/render/mesher.c
+  src/render/voxel_light.c
   src/render/vao_manager.c
   src/render/texture_atlas.c
   src/render/font.c
@@ -91,6 +92,7 @@ set(TERRACRAFT_SOURCES
   src/world/gravity.c
     src/world/world_gen.c
     src/world/worldgen_v4.c
+    src/world/worldgen_v5.c
   src/world/streamer.c
   src/world/biome.c
   src/world/world_meta.c
@@ -187,6 +189,7 @@ add_executable(terracraft_tests
   tests/test_world.c
   tests/test_gravity.c
   tests/test_mesher.c
+  tests/test_voxel_light.c
   tests/test_texture.c
   tests/test_streamer.c
   tests/test_physics.c
@@ -198,6 +201,7 @@ add_executable(terracraft_tests
   tests/test_save.c
   tests/test_biome.c
   tests/test_worldgen_v4.c
+  tests/test_worldgen_v5.c
   tests/test_settings.c
   tests/test_profile.c
   tests/test_ui.c

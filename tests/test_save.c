@@ -55,6 +55,50 @@ static void save_tmp_cleanup(const char *dir)
  *
  * Returns: failure count.
  */
+int test_session_world_sort(void)
+{
+    int failures = 0;
+    const char *root = "test_tmp_world_sort";
+    const char *dirs[] = {"test_tmp_world_sort/alpha", "test_tmp_world_sort/beta", "test_tmp_world_sort/gamma"};
+    /* Both ascending and descending timestamps exercise insertion regardless
+     * of filesystem enumeration order. Names, paths and seeds stay paired. */
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int i = 0; i < 3; ++i) {
+            WorldMeta meta;
+            world_meta_defaults(&meta);
+            snprintf(meta.name, sizeof(meta.name), "World %d", i);
+            meta.seed = 100 + i;
+            meta.last_played = pass ? 30 - i * 10 : 10 + i * 10;
+            TEST_ASSERT(world_meta_write(dirs[i], &meta) == 0);
+            /* The writer correctly stamps the real save time. Override it
+             * in this fixture to test sorting without waiting between saves. */
+            char path[512];
+            TEST_ASSERT(path_join(path, sizeof(path), dirs[i], WORLD_META_FILE) == 0);
+            FILE *file = fopen(path, "ab");
+            TEST_ASSERT(file != NULL);
+            if (file) {
+                fprintf(file, "last_played=%lld\n", (long long)meta.last_played);
+                fclose(file);
+            }
+        }
+        WorldEntry entries[3];
+        TEST_ASSERT(session_list_worlds(root, entries, 3) == 3);
+        for (int i = 0; i < 3; ++i) {
+            int source = pass ? i : 2 - i;
+            char expected[64];
+            snprintf(expected, sizeof(expected), "World %d", source);
+            TEST_ASSERT(strcmp(entries[i].name, expected) == 0);
+            TEST_ASSERT(entries[i].seed == 100 + source);
+            const char *leaf = strrchr(dirs[source], '/') + 1;
+            TEST_ASSERT(strcmp(entries[i].dirname, leaf) == 0);
+            if (i) TEST_ASSERT(entries[i - 1].played > entries[i].played);
+        }
+    }
+    for (int i = 0; i < 3; ++i) save_tmp_cleanup(dirs[i]);
+    path_remove_dir(root);
+    return failures;
+}
+
 int test_meta_roundtrip(void)
 {
     int failures = 0;
@@ -125,7 +169,7 @@ int test_meta_corrupt(void)
     TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Profile Two\nseed=8\nterrain_version=2\n",
                                  &m) == 0);
     TEST_ASSERT(m.terrain_version == 2); /* Existing profile is kept exactly. */
-    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=5\n",
+    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=6\n",
                                  &m) != 0);
     /* Missing directory fails. */
     TEST_ASSERT(world_meta_read("test_tmp_m5_no_such_dir_xyz", &m) != 0);

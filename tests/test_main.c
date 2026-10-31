@@ -10,6 +10,9 @@ int g_tests_failed = 0;
  */
 int main(void)
 {
+    RUN_TEST(test_voxel_light_sky_and_cave);
+    RUN_TEST(test_voxel_light_torch_and_removal);
+    RUN_TEST(test_voxel_light_seams_and_invalidation);
     RUN_TEST(test_ui_pointer_drawable_scaling);
     RUN_TEST(test_ui_scale_layout);
     RUN_TEST(test_ui_nine_slice_geometry);
@@ -21,6 +24,12 @@ int main(void)
     RUN_TEST(test_launch_options);
     RUN_TEST(test_menu_native_bmp);
     RUN_TEST(test_menu_asset_file_fallback);
+    RUN_TEST(test_worldgen_v5_determinism);
+    RUN_TEST(test_worldgen_v5_fields);
+    RUN_TEST(test_worldgen_v5_spawn);
+    RUN_TEST(test_worldgen_v5_save_compatibility);
+    RUN_TEST(test_worldgen_v5_ore_depth);
+    RUN_TEST(test_worldgen_v4_frozen_hashes);
     RUN_TEST(test_worldgen_v4_determinism);
     RUN_TEST(test_worldgen_v4_fields);
     RUN_TEST(test_worldgen_v4_spawn);
@@ -122,6 +131,7 @@ int main(void)
     RUN_TEST(test_sanitize);
     RUN_TEST(test_world_delete);
     RUN_TEST(test_session_persist);
+    RUN_TEST(test_session_world_sort);
     RUN_TEST(test_biome_determinism);
     RUN_TEST(test_biome_coverage);
     RUN_TEST(test_world_gen_terrain_v2);

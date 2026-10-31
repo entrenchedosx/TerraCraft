@@ -1,7 +1,7 @@
 #pragma once
 
-/* Versioned terrain generation: profile 4 uses the density pipeline in
- * worldgen_v4.h. Profiles 1..3 remain frozen for save compatibility.
+/* Versioned terrain generation: profiles 4/5 use the cached density pipeline in
+ * worldgen_v4.h and worldgen_v5.h. Profiles 1..4 retain their saved-world rules.
  * Legacy noise-based terrain generation (M5): layered continental/hill/detail
  * heightmap over seven climate biomes, with 3D-noise caves, clustered
  * ores, order-independent trees, and surface vegetation. Deterministic

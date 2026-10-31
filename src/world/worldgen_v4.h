@@ -31,3 +31,10 @@ bool worldgen_spawn_valid(const World *world, int x, int z, Vec3 *out, float *sc
 int worldgen_find_spawn(World *world, Vec3 *out);
 /* Diagnostic search budget (0..128 rings), also exercises rescue behavior. */
 int worldgen_find_spawn_with_budget(World *world, Vec3 *out, int rings);
+
+/* Shared cached kernel; explicit version keeps profile4's rules unchanged. */
+GenDensity worldgen_density_profile(long seed, int x, int y, int z, int profile);
+GenAquifer worldgen_aquifer_profile(long seed, int x, int y, int z, int profile);
+int worldgen_height_profile(long seed, int x, int z, int profile);
+uint16_t worldgen_base_block_profile(long seed, int x, int y, int z, int profile);
+void worldgen_fill_profile(Chunk *chunk, long seed, int profile);

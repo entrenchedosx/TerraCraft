@@ -25,6 +25,7 @@
 #include "render/shader.h"
 #include "render/texture_atlas.h"
 #include "render/vao_manager.h"
+#include "render/voxel_light.h"
 #include "ui/hud.h"
 #include "world/chunk.h"
 #include "world/world.h"
@@ -75,6 +76,9 @@ struct Renderer {
     int cam_pos_loc;
     int voxel_cloud_time_loc;
     int voxel_cloud_altitude_loc;
+    int voxel_atlas_materials_loc;
+    const World *light_world; /* Borrowed during this world's rendering. */
+    uint8_t *light_cache[WORLD_MAX_CHUNKS]; /* Packed derived light, 64KiB/slot. */
     Shader *sky_shader; /* Procedural world-space sky, optional on limited GL. */
     unsigned int sky_vao;
     unsigned int sky_vbo;
@@ -187,7 +191,7 @@ static int renderer_find_slot(Renderer *r, int cx, int cz)
 {
     int free_slot = -1;
     for (int i = 0; i < WORLD_MAX_CHUNKS; ++i) {
-        bool live = r->gpu[i][0].vao != 0 || r->gpu[i][0].valid || r->gpu[i][1].vao != 0 ||
+        bool live = r->light_cache[i] != NULL || r->gpu[i][0].vao != 0 || r->gpu[i][0].valid || r->gpu[i][1].vao != 0 ||
                     r->gpu[i][1].valid;
         if (live) {
             if (r->gpu[i][0].cx == cx && r->gpu[i][0].cz == cz) {
@@ -198,6 +202,43 @@ static int renderer_find_slot(Renderer *r, int cx, int cz)
         }
     }
     return free_slot;
+}
+
+/* Dynamic meshes sample the same fields as terrain. Coherent vertex order
+ * means the slot search runs once per visited chunk, not once per vertex. */
+static void renderer_light_vertices(Renderer *r, float *vertices, size_t count)
+{
+    int last_cx = 0, last_cz = 0, last_y = -1, last_x = 0, last_z = 0;
+    bool have_chunk = false;
+    bool have_sample = false;
+    const uint8_t *cache = NULL;
+    float sky = 1.0f, emitted = 0.0f;
+    for (size_t i = 0; i < count; ++i) {
+        float *v = vertices + i * MESHER_FLOATS_PER_VERTEX;
+        int wx = (int)floorf(v[0] + v[3] * 0.02f);
+        int y = (int)floorf(v[1] + v[4] * 0.02f);
+        int wz = (int)floorf(v[2] + v[5] * 0.02f);
+        int cx = (int)floorf((float)wx / CHUNK_X);
+        int cz = (int)floorf((float)wz / CHUNK_Z);
+        if (!have_chunk || cx != last_cx || cz != last_cz) {
+            int slot = renderer_find_slot(r, cx, cz);
+            cache = slot >= 0 &&
+                    r->gpu[slot][0].cx == cx && r->gpu[slot][0].cz == cz ? r->light_cache[slot] : NULL;
+            last_cx = cx; last_cz = cz; last_y = -1;
+            have_sample = false;
+            have_chunk = true;
+        }
+        if (!have_sample || y != last_y || wx != last_x || wz != last_z) {
+            uint8_t light = y >= CHUNK_Y ? 15 : 0;
+            if (cache && y >= 0 && y < CHUNK_Y)
+                light = cache[chunk_index(wx - cx * CHUNK_X, y, wz - cz * CHUNK_Z)];
+            sky = cache ? (float)(light & 15) / 15.0f : voxel_light_direct_sky(r->light_world, wx, y, wz);
+            emitted = (float)(light >> 4) / 15.0f;
+            last_x = wx; last_y = y; last_z = wz;
+            have_sample = true;
+        }
+        v[9] = sky; v[10] = emitted;
+    }
 }
 
 /* Mob part face layout: unit-cube corner indices (x + 2y + 4z) per face,
@@ -256,7 +297,7 @@ static Vec3 mob_rot_z(Vec3 p, float a)
  * region while tile-path parts repeat one rect on all faces.
  *
  * Args:
- *   dst: 36-vert destination (must hold 36*9 floats).
+ *   dst: 36-vert destination (must hold 36*MESHER_FLOATS_PER_VERTEX floats).
  *   mob_pos: mob feet position (world).
  *   yaw: mob facing (radians).
  *   part: model part.
@@ -317,6 +358,8 @@ static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPar
             v[6] = (MOB_FACE_U[q] == 0.0f) ? fuv[f][0] : fuv[f][2];
             v[7] = (MOB_FACE_V[q] == 0.0f) ? fuv[f][1] : fuv[f][3];
             v[8] = 1.0f;
+            v[9] = 1.0f;
+            v[10] = 0.0f;
             n++;
         }
     }
@@ -567,6 +610,7 @@ static void mob_draw_batch(Renderer *r, const Camera *cam, float aspect, const T
     mesh.index_count = o;
     mesh.vertex_cap = o;
     mesh.index_cap = o;
+    renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
     if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
         gpu_chunk_draw(&r->ent_buf);
     }
@@ -744,6 +788,7 @@ static bool renderer_draw_player_arm_batch(Renderer *r, const Camera *cam, float
     mesh.index_count = vertex_count;
     mesh.vertex_cap = vertex_count;
     mesh.index_cap = vertex_count;
+    renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
     bool drew = gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0;
     if (drew) {
         gpu_chunk_draw(&r->ent_buf);
@@ -951,6 +996,7 @@ void renderer_draw_projectiles(Renderer *r, const ProjectilePool *pool, const Ca
     mesh.index_count = o;
     mesh.vertex_cap = o;
     mesh.index_cap = o;
+    renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
     if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
         gpu_chunk_draw(&r->ent_buf);
     }
@@ -1119,6 +1165,7 @@ Renderer *renderer_create(GlContext *gl)
         r->cam_pos_loc = shader_get_uniform_location(r->shader, "uCamPos");
         r->voxel_cloud_time_loc = shader_get_uniform_location(r->shader, "uCloudTime");
         r->voxel_cloud_altitude_loc = shader_get_uniform_location(r->shader, "uCloudAltitude");
+        r->voxel_atlas_materials_loc = shader_get_uniform_location(r->shader, "uAtlasMaterials");
         if (r->mvp_loc < 0 || r->atlas_loc < 0) {
             LOG_WARN("renderer_create: core uniforms missing (mvp=%d atlas=%d)", r->mvp_loc, r->atlas_loc);
         }
@@ -1327,6 +1374,7 @@ void renderer_destroy(Renderer *r)
     for (int i = 0; i < WORLD_MAX_CHUNKS; ++i) {
         gpu_chunk_destroy(&r->gpu[i][0]);
         gpu_chunk_destroy(&r->gpu[i][1]);
+        free(r->light_cache[i]);
     }
     gpu_chunk_destroy(&r->ent_buf);
     if (r->ui_vbo != 0 && minec_glDeleteBuffers != NULL) {
@@ -1462,6 +1510,7 @@ void renderer_refresh_world(Renderer *r, World *w)
         return;
     }
     double mesh_ms = 0.0;
+    r->light_world = w;
     double upload_ms = 0.0;
     int rebuilt = 0;
     for (size_t i = 0; i < WORLD_MAX_CHUNKS; ++i) {
@@ -1476,14 +1525,17 @@ void renderer_refresh_world(Renderer *r, World *w)
             continue;
         }
         double t0 = time_now_seconds();
-        MeshData *opaque = mesher_build_chunk_mesh(c, w);
-        MeshData *transp = mesher_build_transparent_mesh(c, w);
+        VoxelLightBake *light = voxel_light_bake(c, w);
+        if (!light) continue;
+        MeshData *opaque = mesher_build_lit_mesh(c, w, light, false);
+        MeshData *transp = mesher_build_lit_mesh(c, w, light, true);
         double t1 = time_now_seconds();
         mesh_ms += (t1 - t0) * 1000.0;
         if (opaque == NULL || transp == NULL) {
             LOG_ERROR("renderer: mesher failed for chunk (%d,%d)", c->cx, c->cz);
             mesher_free(opaque);
             mesher_free(transp);
+            voxel_light_free(light);
             continue;
         }
         int slot = renderer_find_slot(r, c->cx, c->cz);
@@ -1491,11 +1543,15 @@ void renderer_refresh_world(Renderer *r, World *w)
             LOG_ERROR("renderer: no GPU slot for chunk (%d,%d)", c->cx, c->cz);
             mesher_free(opaque);
             mesher_free(transp);
+            voxel_light_free(light);
             continue;
         }
         double t2 = time_now_seconds();
         int rc = gpu_chunk_upload(&r->gpu[slot][RENDERER_PASS_OPAQUE], opaque, c->cx, c->cz);
         int rc2 = gpu_chunk_upload(&r->gpu[slot][RENDERER_PASS_TRANSPARENT], transp, c->cx, c->cz);
+        if (!r->light_cache[slot]) r->light_cache[slot] = (uint8_t *)malloc(CHUNK_VOLUME);
+        voxel_light_copy_chunk(light, r->light_cache[slot]);
+        voxel_light_free(light);
         double t3 = time_now_seconds();
         upload_ms += (t3 - t2) * 1000.0;
         if (rc != 0 || rc2 != 0) {
@@ -1503,7 +1559,7 @@ void renderer_refresh_world(Renderer *r, World *w)
         }
         mesher_free(opaque);
         mesher_free(transp);
-        c->dirty = false;
+        c->dirty = rc != 0 || rc2 != 0;
         ++rebuilt;
     }
     r->perf.mesh_ms = mesh_ms;
@@ -1525,7 +1581,7 @@ void renderer_prune_world(Renderer *r, const World *w)
         return;
     }
     for (int i = 0; i < WORLD_MAX_CHUNKS; ++i) {
-        bool live = r->gpu[i][0].vao != 0 || r->gpu[i][0].valid || r->gpu[i][1].vao != 0 ||
+        bool live = r->light_cache[i] != NULL || r->gpu[i][0].vao != 0 || r->gpu[i][0].valid || r->gpu[i][1].vao != 0 ||
                     r->gpu[i][1].valid;
         if (!live) {
             continue;
@@ -1535,6 +1591,8 @@ void renderer_prune_world(Renderer *r, const World *w)
                       r->gpu[i][0].cz);
             gpu_chunk_destroy(&r->gpu[i][0]);
             gpu_chunk_destroy(&r->gpu[i][1]);
+            free(r->light_cache[i]);
+            r->light_cache[i] = NULL;
         }
     }
 }
@@ -1584,15 +1642,27 @@ static bool renderer_begin_voxel_tex(Renderer *r, const Camera *cam, float aspec
         minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, tex);
     }
     shader_set_uniform_int(r->atlas_loc, 0);
+    shader_set_uniform_float(r->voxel_atlas_materials_loc, tex == r->atlas ? 1.0f : 0.0f);
     shader_set_uniform_vec3(r->sun_dir_loc, sun.x, sun.y, sun.z);
     shader_set_uniform_float(r->light_intensity_loc, intensity);
     shader_set_uniform_vec3(r->sky_color_loc, sky.x, sky.y, sky.z);
+    Vec3 fog_eye = camera_get_position(cam);
+    float fog_probe[MESHER_FLOATS_PER_VERTEX] = {0};
+    fog_probe[0] = fog_eye.x; fog_probe[1] = fog_eye.y; fog_probe[2] = fog_eye.z;
+    renderer_light_vertices(r, fog_probe, 1);
+    float fog_visibility = 0.10f + 0.90f * fmaxf(fog_probe[9], fog_probe[10]);
     if (r->underwater) {
         /* Submerged: short blue sightlines instead of sky haze. */
-        shader_set_uniform_vec3(r->fog_color_loc, 0.05f, 0.16f, 0.38f);
+        float night = 1.0f - fminf(1.0f, fmaxf(0.0f, (sun.y + 0.16f) / 0.36f));
+        shader_set_uniform_vec3(r->fog_color_loc, (0.05f - night * 0.025f) * fog_visibility,
+                                (0.16f - night * 0.075f) * fog_visibility,
+                                (0.38f - night * 0.22f) * fog_visibility);
         shader_set_uniform_float(r->fog_density_loc, RENDERER_UNDERWATER_FOG_DENSITY);
     } else {
-        shader_set_uniform_vec3(r->fog_color_loc, sky.x, sky.y, sky.z);
+        float daylight = fminf(1.0f, fmaxf(0.0f, (sun.y + 0.16f) / 0.36f));
+        shader_set_uniform_vec3(r->fog_color_loc, (sky.x * daylight + 0.065f * (1.0f - daylight)) * fog_visibility,
+                                (sky.y * daylight + 0.078f * (1.0f - daylight)) * fog_visibility,
+                                (sky.z * daylight + 0.105f * (1.0f - daylight)) * fog_visibility);
         shader_set_uniform_float(r->fog_density_loc, RENDERER_FOG_DENSITY);
     }
     Vec3 cam_pos = camera_get_position(cam);
@@ -1812,11 +1882,11 @@ static const float CUBE_U[4] = {0.0f, 1.0f, 0.0f, 1.0f};
 static const float CUBE_V[4] = {0.0f, 0.0f, 1.0f, 1.0f};
 
 /* Emit one textured cube (36 non-indexed verts, VoxelVertex layout) into
- * dst (36*9 floats); ao is constant across the cube. Yaw spins the cube
+ * dst (36*MESHER_FLOATS_PER_VERTEX floats); ao is constant across the cube. Yaw spins the cube
  * around Y about its center (drops rotate so every face reads in turn).
  *
  * Args:
- *   dst: 324-float destination (must not be NULL).
+ *   dst: 36-vertex destination (must not be NULL).
  *   minx, miny, minz: cube minimum corner.
  *   size: edge length (> 0).
  *   tile: atlas tile index.
@@ -1850,6 +1920,8 @@ static void entity_emit_cube(float *dst, float minx, float miny, float minz, flo
             v[6] = (CUBE_U[i] == 0.0f) ? u0 : u1;
             v[7] = (CUBE_V[i] == 0.0f) ? v0 : v1;
             v[8] = ao;
+            v[9] = 1.0f;
+            v[10] = 0.0f;
             n += 1;
         }
     }
@@ -1858,7 +1930,7 @@ static void entity_emit_cube(float *dst, float minx, float miny, float minz, flo
 /* Upload raw VoxelVertex verts (non-indexed count) into the scratch
  * buffer and draw it. No-op on bad args or missing pipe.
  */
-static void renderer_draw_transient(Renderer *r, const float *verts, size_t vcount)
+static void renderer_draw_transient(Renderer *r, float *verts, size_t vcount)
 {
     if (vcount == 0) {
         gpu_chunk_destroy(&r->ent_buf);
@@ -1879,6 +1951,7 @@ static void renderer_draw_transient(Renderer *r, const float *verts, size_t vcou
     mesh.index_count = icount;
     mesh.vertex_cap = vcount;
     mesh.index_cap = icount;
+    renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
     if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
         gpu_chunk_draw(&r->ent_buf);
     }
@@ -1967,6 +2040,7 @@ void renderer_draw_falling_blocks(Renderer *r, const World *w, const Camera *cam
     mesh.index_count = o;
     mesh.vertex_cap = o;
     mesh.index_cap = o;
+    renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
     if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
         gpu_chunk_draw(&r->ent_buf);
     }
@@ -2022,6 +2096,7 @@ void renderer_draw_particles(Renderer *r, const ParticlePool *pool, const Camera
     mesh.index_count = o;
     mesh.vertex_cap = o;
     mesh.index_cap = o;
+    renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
     if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
         gpu_chunk_draw(&r->ent_buf);
     }
@@ -2053,7 +2128,7 @@ void renderer_draw_block_overlay(Renderer *r, const Camera *cam, float aspect, c
     if (!renderer_begin_voxel(r, cam, aspect, ts)) {
         return;
     }
-    float verts[36 * 9];
+    float verts[36 * MESHER_FLOATS_PER_VERTEX];
     float pad = 0.001f;
     entity_emit_cube(verts, (float)bx - pad, (float)by - pad, (float)bz - pad, 1.0f + pad * 2.0f,
                      TILE_CRACK0 + stage, 1.0f, 0.0f);
@@ -2131,8 +2206,11 @@ void renderer_drop_all(Renderer *r)
     for (int i = 0; i < WORLD_MAX_CHUNKS; ++i) {
         gpu_chunk_destroy(&r->gpu[i][0]);
         gpu_chunk_destroy(&r->gpu[i][1]);
+        free(r->light_cache[i]);
+        r->light_cache[i] = NULL;
     }
     gpu_chunk_destroy(&r->ent_buf);
+    r->light_world = NULL;
     r->perf.drawn = 0;
     r->perf.drawn_t = 0;
     r->perf.culled = 0;

@@ -1,5 +1,6 @@
 #include "test_main.h"
 #include "world/worldgen_v4.h"
+#include "world/worldgen_v5.h"
 #include "world/world_gen.h"
 #include "world/world.h"
 #include "world/chunk.h"
@@ -216,7 +217,7 @@ int test_worldgen_v4_materials(void)
     TEST_ASSERT(meta.terrain_version == 4);
     return failures;
 }
-int test_worldgen_v4_ore_depth(void)
+static int test_worldgen_ore_depth_profile(int profile)
 {
     int failures = 0;
     World *w = world_create();
@@ -224,13 +225,13 @@ int test_worldgen_v4_ore_depth(void)
     if (!w)
         return failures;
     w->seed = 123456;
-    w->terrain_version = 4;
+    w->terrain_version = profile;
     size_t low[BLOCK_COUNT] = {0}, high[BLOCK_COUNT] = {0}, total[BLOCK_COUNT] = {0};
     int mountain_x = 0, mountain_z = 0;
     bool found = false;
     for (int z = -2048; z < 2048 && !found; z += 64)
         for (int x = -2048; x < 2048; x += 64) {
-            GenClimate c = worldgen_climate(w->seed, x, z);
+            GenClimate c = profile == 5 ? worldgen5_climate(w->seed, x, z) : worldgen_climate(w->seed, x, z);
             if (c.biome == BIOME_MOUNTAINS && c.height > 140) {
                 mountain_x = x / 16;
                 mountain_z = z / 16;
@@ -267,4 +268,14 @@ int test_worldgen_v4_ore_depth(void)
     TEST_ASSERT(total[BLOCK_EMERALD_ORE] < total[BLOCK_IRON_ORE]);
     world_destroy(w);
     return failures;
+}
+
+int test_worldgen_v4_ore_depth(void)
+{
+    return test_worldgen_ore_depth_profile(4);
+}
+
+int test_worldgen_v5_ore_depth(void)
+{
+    return test_worldgen_ore_depth_profile(5);
 }

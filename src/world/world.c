@@ -326,6 +326,13 @@ static bool world_set_block_internal(World *w, int wx, int wy, int wz, uint16_t 
         return false;
     }
     chunk_set_block(c, lx, wy, lz, id);
+    /* Skylight can travel down the complete column and both light channels
+     * spread up to 14 cells sideways. Edits therefore affect neighboring
+     * meshes even when the edited block is not itself on a chunk edge. */
+    if (block_light_opacity(old) != block_light_opacity(id) ||
+        block_light_emission(old) != block_light_emission(id)) {
+        world_dirty_chunk_neighborhood(w, cx, cz);
+    }
     if (lx == 0) {
         Chunk *neighbor = world_get_chunk(w, cx - 1, cz);
         if (neighbor != NULL) {

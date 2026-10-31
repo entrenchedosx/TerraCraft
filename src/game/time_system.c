@@ -60,6 +60,8 @@ static float segment(const float *progs, int n, float p, int *out_i)
             if (f > 1.0f) {
                 f = 1.0f;
             }
+            /* Smooth first derivatives at dawn/dusk keyframes. */
+            f = f * f * (3.0f - 2.0f * f);
             return f;
         }
     }

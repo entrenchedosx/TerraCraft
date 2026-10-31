@@ -166,6 +166,18 @@ bool block_has_gravity(uint16_t type)
     return block_get_info(type)->gravity_affected;
 }
 
+int block_light_opacity(uint16_t type)
+{
+    if (type == BLOCK_LEAVES || block_is_water(type)) return 2;
+    if (type == BLOCK_GLASS || !block_is_solid(type)) return 0;
+    return 15;
+}
+
+int block_light_emission(uint16_t type)
+{
+    return type == BLOCK_TORCH ? 14 : (type == BLOCK_LAVA ? 15 : 0);
+}
+
 /* Cross-sprite blocks (non-solid decor rendered as X quads). */
 bool block_is_cross(uint16_t type)
 {

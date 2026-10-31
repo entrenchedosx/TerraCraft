@@ -1,4 +1,5 @@
 #include "world/worldgen_v4.h"
+#include "world/worldgen_v5.h"
 #include "world/world_gen.h"
 #include "world/world.h"
 #include "world/chunk.h"
@@ -8,6 +9,18 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
+#include <string.h>
+
+/* Stable FNV-1a over explicit block-ID bytes, independent of host endian. */
+static uint64_t chunk_hash(const Chunk *c)
+{
+    uint64_t h = UINT64_C(14695981039346656037);
+    for (int i = 0; i < CHUNK_VOLUME; ++i) {
+        h = (h ^ (c->blocks[i] & 255u)) * UINT64_C(1099511628211);
+        h = (h ^ (c->blocks[i] >> 8)) * UINT64_C(1099511628211);
+    }
+    return h;
+}
 
 /* Offline field atlas, actual 32x32 chunks and many-seed spawn report. */
 static int probe_open(FILE **file, const char *path, const char *mode)
@@ -17,11 +30,41 @@ static int probe_open(FILE **file, const char *path, const char *mode)
 }
 int main(int argc, char **argv)
 {
+    if (argc > 1 && strcmp(argv[1], "--hash4") == 0) {
+        const int coords[][2] = {{-1, -1}, {0, 0}, {31, -17}, {-63, 42}};
+        const long seeds[] = {123456, -7654321};
+        for (int s = 0; s < 2; ++s) {
+            World *world = world_create();
+            if (!world) return 1;
+            world->seed = seeds[s];
+            world->terrain_version = 4;
+            for (int i = 0; i < 4; ++i) {
+                if (world_generate_chunk(world, coords[i][0], coords[i][1]) != 0) {
+                    world_destroy(world);
+                    return 2;
+                }
+                printf("%ld %d %d %llu\n", seeds[s], coords[i][0], coords[i][1],
+                       (unsigned long long)chunk_hash(world_get_chunk(world, coords[i][0], coords[i][1])));
+            }
+            world_destroy(world);
+        }
+        return 0;
+    }
     const char *prefix = argc > 1 ? argv[1] : "build/worldgen";
     long seed = argc > 2 ? strtol(argv[2], NULL, 10) : 123456;
     int seeds = argc > 3 ? atoi(argv[3]) : 100;
+    int profile = argc > 4 ? atoi(argv[4]) : 5;
+    if ((profile != 4 && profile != 5) || seeds < 0 || seeds > 10000) {
+        fprintf(stderr, "Usage: worldgen_probe [prefix] [seed] [spawn-seeds 0..10000] [profile 4|5]\n");
+        return 1;
+    }
+    printf("TerraCraft profile %d seed %ld\n", profile, seed);
     char path[512];
     FILE *f = NULL;
+    snprintf(path, sizeof(path), "%s-meta.json", prefix);
+    if (probe_open(&f, path, "w") != 0) return 1;
+    fprintf(f, "{\"profile\":%d,\"seed\":%ld,\"spawn_seeds\":%d}\n", profile, seed, seeds);
+    fclose(f);
     snprintf(path, sizeof(path), "%s-fields.csv", prefix);
     if (probe_open(&f, path, "w") != 0)
         return 1;
@@ -29,7 +72,7 @@ int main(int argc, char **argv)
     clock_t begin = clock();
     for (int z = -2048; z < 2048; z += 8)
         for (int x = -2048; x < 2048; x += 8) {
-            GenClimate c = worldgen_climate(seed, x, z);
+            GenClimate c = profile == 5 ? worldgen5_climate(seed, x, z) : worldgen_climate(seed, x, z);
             fprintf(f, "%d,%d,%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%.5f,%.5f\n", x, z, c.height, c.continentalness,
                     c.erosion, c.temperature, c.humidity, c.weirdness, c.biome, c.mountain, c.river);
         }
@@ -41,8 +84,8 @@ int main(int argc, char **argv)
             "x,y,terrain,cheese,spaghetti,noodle,final_density,aquifer_level,wet,barrier,vein,vein_ridge,richness\n");
     for (int y = 0; y < 256; y += 2)
         for (int x = -256; x < 256; x += 2) {
-            GenDensity d = worldgen_density(seed, x, y, 0);
-            GenAquifer a = worldgen_aquifer(seed, x, y, 0);
+            GenDensity d = worldgen_density_profile(seed, x, y, 0, profile);
+            GenAquifer a = worldgen_aquifer_profile(seed, x, y, 0, profile);
             fprintf(f, "%d,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%d,%.4f,%.4f,%.4f\n", x, y, d.terrain, d.cheese,
                     d.spaghetti, d.noodle, d.final_density, a.level, a.wet, a.barrier, d.vein, d.vein_ridge,
                     d.richness);
@@ -54,7 +97,7 @@ int main(int argc, char **argv)
     fprintf(f, "P6\n512 256\n255\n");
     for (int y = 255; y >= 0; --y)
         for (int x = -256; x < 256; ++x) {
-            uint16_t id = worldgen_base_block(seed, x, y, 0);
+            uint16_t id = worldgen_base_block_profile(seed, x, y, 0, profile);
             const BlockInfo *b = block_get_info(id);
             unsigned char rgb[3] = {(unsigned char)(b->color_r * 255), (unsigned char)(b->color_g * 255),
                                     (unsigned char)(b->color_b * 255)};
@@ -67,7 +110,7 @@ int main(int argc, char **argv)
     if (!w)
         return 1;
     w->seed = seed;
-    w->terrain_version = 4;
+    w->terrain_version = profile;
     size_t histogram[BLOCK_COUNT] = {0}, depth[16][BLOCK_COUNT] = {0};
     unsigned char *region = malloc(512u * 512u * 3u);
     if (!region) {
@@ -145,7 +188,7 @@ int main(int argc, char **argv)
         if (!w)
             return 1;
         w->seed = (long)((unsigned int)i * 2654435761u);
-        w->terrain_version = 4;
+        w->terrain_version = profile;
         Vec3 pos = mmath_vec3(0, 0, 0);
         int rc = worldgen_find_spawn(w, &pos);
         if (rc < 0 || !worldgen_spawn_valid(w, (int)floorf(pos.x), (int)floorf(pos.z), NULL, NULL))

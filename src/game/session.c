@@ -47,7 +47,10 @@ int session_list_worlds(const char *saves_root, WorldEntry *out, size_t cap)
         if (world_meta_read(full, &m) != 0) {
             continue; /* Skip dirs without valid metadata (never crash). */
         }
-        WorldEntry *e = &out[n];
+        /* Shifting the output array must not overwrite the entry being
+         * inserted (which previously aliased out[n]). */
+        WorldEntry entry;
+        WorldEntry *e = &entry;
         size_t nl = strlen(m.name);
         if (nl > 63) {
             nl = 63;
@@ -69,9 +72,7 @@ int session_list_worlds(const char *saves_root, WorldEntry *out, size_t cap)
             out[j] = out[j - 1];
             --j;
         }
-        if (j != n) {
-            out[j] = *e;
-        }
+        out[j] = *e;
         ++n;
     }
     return (int)n;

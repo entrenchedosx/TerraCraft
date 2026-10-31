@@ -2,6 +2,7 @@
 #include "core/log.h"
 #include "core/time.h"
 #include "render/texture_atlas.h"
+#include "render/voxel_light.h"
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/world.h"
@@ -154,7 +155,7 @@ static bool mesher_occludes(uint16_t id)
  *
  * Returns: 0 on success, -1 on OOM.
  */
-static int mesh_emit_face(MeshData *m, const FaceDef *f, int face_idx, const Chunk *c, const World *w, int x,
+static int mesh_emit_face(MeshData *m, const VoxelLightBake *light, const FaceDef *f, int face_idx, const Chunk *c, const World *w, int x,
                           int y, int z, float wx, float wy, float wz, uint16_t block)
 {
     if (mesh_reserve_vertices(m, 4) != 0 || mesh_reserve_indices(m, 6) != 0) {
@@ -171,25 +172,8 @@ static int mesh_emit_face(MeshData *m, const FaceDef *f, int face_idx, const Chu
     int ey = y + f->ny_o;
     int ez = z + f->nz_o;
 
-    /* Per-face sun visibility: full sun unless an occluding block sits
-     * anywhere in the column above the face (M4 skylight heuristic).
-     * The scan exits early on the first occluder (canopy shade) — but
-     * open sky must NOT scan all 256 cells per face (~1M wasted lookups
-     * per chunk); a short probe covers trees, and anything past it is
-     * effectively skylit for gameplay shading. */
-    float sun = MESHER_SUN_FULL;
-    if (ey < CHUNK_Y) {
-        int top = ey + MESHER_SKY_PROBE;
-        if (top > CHUNK_Y) {
-            top = CHUNK_Y;
-        }
-        for (int sy = ey; sy < top; ++sy) {
-            if (mesher_occludes(mesher_neighbor(c, w, ex, sy, ez))) {
-                sun = MESHER_SUN_SHADE;
-                break;
-            }
-        }
-    }
+    float sky, emitted;
+    voxel_light_sample(light, ex, ey, ez, &sky, &emitted);
 
     /* Tangent axes (the two non-normal axes) for AO corner offsets. */
     int naxis = (f->nx_o != 0) ? 0 : ((f->ny_o != 0) ? 1 : 2);
@@ -219,7 +203,7 @@ static int mesh_emit_face(MeshData *m, const FaceDef *f, int face_idx, const Chu
         bool side2 = mesher_occludes(mesher_neighbor(c, w, ex + o2[0], ey + o2[1], ez + o2[2]));
         bool corner =
             mesher_occludes(mesher_neighbor(c, w, ex + o1[0] + o2[0], ey + o1[1] + o2[1], ez + o1[2] + o2[2]));
-        float ao = mesher_ao_factor(mesher_ao_level(side1, side2, corner)) * sun;
+        float ao = mesher_ao_factor(mesher_ao_level(side1, side2, corner));
 
         float *v = m->vertices + (m->vertex_count * MESHER_FLOATS_PER_VERTEX);
         v[0] = wx + f->corners[i][0];
@@ -235,6 +219,8 @@ static int mesh_emit_face(MeshData *m, const FaceDef *f, int face_idx, const Chu
         v[6] = (FACE_U[i] == 0.0f) ? u0 : u1;
         v[7] = (FACE_V[i] == 0.0f) ? v0 : v1;
         v[8] = ao;
+        v[9] = sky;
+        v[10] = emitted;
         m->vertex_count++;
     }
     unsigned int *ix = m->indices + m->index_count;
@@ -264,7 +250,7 @@ static uint16_t mesher_neighbor(const Chunk *c, const World *w, int lx, int ly, 
     return world_get_block(w, wx, ly, wz);
 }
 
-/* Emit one sprite vertex (9-float VoxelVertex layout). */
+/* Emit one sprite vertex; light channels are filled once per sprite. */
 static void mesh_emit_sprite_vert(MeshData *m, float x, float y, float z, float nx, float ny, float nz,
                                   float u, float v, float ao)
 {
@@ -297,7 +283,7 @@ static void mesh_emit_sprite_vert(MeshData *m, float x, float y, float z, float 
  *
  * Returns: 0 on success, -1 on OOM.
  */
-static int mesh_emit_cross(MeshData *m, const Chunk *c, const World *w, int x, int y, int z, float wx,
+static int mesh_emit_cross(MeshData *m, const VoxelLightBake *light, int x, int y, int z, float wx,
                            float wy, float wz, uint16_t block)
 {
     if (mesh_reserve_vertices(m, 16) != 0 || mesh_reserve_indices(m, 24) != 0) {
@@ -305,21 +291,9 @@ static int mesh_emit_cross(MeshData *m, const Chunk *c, const World *w, int x, i
     }
     float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
     texture_atlas_tile_uv(block_tile_for_face(block, 0), &u0, &v0, &u1, &v1);
-    /* Sun visibility like a top face (skips AO occlusion entirely;
-     * same bounded probe as faces — open sky never scans 256 cells). */
-    float sun = MESHER_SUN_FULL;
-    if (y + 1 < CHUNK_Y) {
-        int top = y + 1 + MESHER_SKY_PROBE;
-        if (top > CHUNK_Y) {
-            top = CHUNK_Y;
-        }
-        for (int sy = y + 1; sy < top; ++sy) {
-            if (mesher_occludes(mesher_neighbor(c, w, x, sy, z))) {
-                sun = MESHER_SUN_SHADE;
-                break;
-            }
-        }
-    }
+    float sky, emitted;
+    voxel_light_sample(light, x, y, z, &sky, &emitted);
+    const float sun = 1.0f; /* Sprites have no geometry AO. */
     unsigned int base = (unsigned int)m->vertex_count;
     /* Diagonal A: (0,0,0)-(1,0,1), normal (-1,0,1)/sqrt(2). */
     const float na = -0.70710678f;
@@ -342,6 +316,10 @@ static int mesh_emit_cross(MeshData *m, const Chunk *c, const World *w, int x, i
     mesh_emit_sprite_vert(m, wx + 1.0f, wy + 1.0f, wz, -nb, 0.0f, -nb, u0, v1, sun);
     mesh_emit_sprite_vert(m, wx, wy, wz + 1.0f, -nb, 0.0f, -nb, u1, v0, sun);
     mesh_emit_sprite_vert(m, wx, wy + 1.0f, wz + 1.0f, -nb, 0.0f, -nb, u1, v1, sun);
+    for (size_t i = base; i < m->vertex_count; ++i) {
+        m->vertices[i * MESHER_FLOATS_PER_VERTEX + 9] = sky;
+        m->vertices[i * MESHER_FLOATS_PER_VERTEX + 10] = emitted;
+    }
     unsigned int *ix = m->indices + m->index_count;
     for (int q = 0; q < 4; ++q) {
         unsigned int bq = base + (unsigned int)(q * 4);
@@ -366,7 +344,7 @@ static int mesh_emit_cross(MeshData *m, const Chunk *c, const World *w, int x, i
  *
  * Returns: owned MeshData or NULL.
  */
-static MeshData *mesher_build_filtered(const Chunk *c, const World *w, bool transparent)
+MeshData *mesher_build_lit_mesh(const Chunk *c, const World *w, const VoxelLightBake *light, bool transparent)
 {
     if (c == NULL) {
         return NULL;
@@ -409,7 +387,7 @@ static MeshData *mesher_build_filtered(const Chunk *c, const World *w, bool tran
                  * crossed quads, never as a cube (a cube turns a flower
                  * into a red box). */
                 if (block_is_cross(id)) {
-                    if (mesh_emit_cross(m, c, w, x, y, z, wx, wy, wz, id) != 0) {
+                    if (mesh_emit_cross(m, light, x, y, z, wx, wy, wz, id) != 0) {
                         LOG_ERROR("mesher: out of memory emitting sprite");
                         mesher_free(m);
                         return NULL;
@@ -429,7 +407,7 @@ static MeshData *mesher_build_filtered(const Chunk *c, const World *w, bool tran
                     if (!visible) {
                         continue;
                     }
-                    if (mesh_emit_face(m, fd, f, c, w, x, y, z, wx, wy, wz, id) != 0) {
+                    if (mesh_emit_face(m, light, fd, f, c, w, x, y, z, wx, wy, wz, id) != 0) {
                         LOG_ERROR("mesher: out of memory emitting face");
                         mesher_free(m);
                         return NULL;
@@ -454,7 +432,11 @@ static MeshData *mesher_build_filtered(const Chunk *c, const World *w, bool tran
  */
 MeshData *mesher_build_chunk_mesh(const Chunk *c, const World *w)
 {
-    return mesher_build_filtered(c, w, false);
+    VoxelLightBake *light = voxel_light_bake(c, w);
+    if (!light) return NULL;
+    MeshData *mesh = mesher_build_lit_mesh(c, w, light, false);
+    voxel_light_free(light);
+    return mesh;
 }
 
 /* Build the transparent mesh (blended faces only).
@@ -467,7 +449,11 @@ MeshData *mesher_build_chunk_mesh(const Chunk *c, const World *w)
  */
 MeshData *mesher_build_transparent_mesh(const Chunk *c, const World *w)
 {
-    return mesher_build_filtered(c, w, true);
+    VoxelLightBake *light = voxel_light_bake(c, w);
+    if (!light) return NULL;
+    MeshData *mesh = mesher_build_lit_mesh(c, w, light, true);
+    voxel_light_free(light);
+    return mesh;
 }
 
 /* Free a mesh.

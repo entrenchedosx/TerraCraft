@@ -7,6 +7,7 @@
 #include "world/world.h"
 #include "world/world_save.h"
 #include "world/worldgen_v4.h"
+#include "world/worldgen_v5.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -182,6 +183,8 @@ static int world_gen_height_v3(long seed, int wx, int wz)
 
 int world_gen_height_version(long seed, int wx, int wz, int terrain_version)
 {
+    if (terrain_version >= 5)
+        return worldgen5_height(seed, wx, wz);
     if (terrain_version >= 4)
         return worldgen_height(seed, wx, wz);
     if (terrain_version >= 3) {
@@ -206,6 +209,8 @@ int world_gen_height(long seed, int wx, int wz)
  */
 uint16_t world_gen_surface_version(long seed, int wx, int wz, int h, int terrain_version)
 {
+    if (terrain_version >= 5)
+        return worldgen5_surface(seed, wx, wz, h);
     if (terrain_version >= 4)
         return worldgen_surface(seed, wx, wz, h);
     int b = biome_at(seed, wx, wz, h);
@@ -295,6 +300,7 @@ static uint16_t gen_ore(long seed, int wx, int y, int wz)
  */
 bool world_gen_tree_version(long seed, int tx, int tz, int terrain_version, int *out_trunk)
 {
+    if (terrain_version >= 5) return worldgen5_tree(seed, tx, tz, out_trunk);
     /* Reject most profile-4 columns before an expensive density column
      * query. This is the same lottery used
      * below, and .022 is the maximum
@@ -335,6 +341,7 @@ bool world_gen_tree(long seed, int tx, int tz, int *out_trunk)
 /* Vegetation for a surface column: plant/flower or AIR (pure function). */
 uint16_t world_gen_vegetation_version(long seed, int wx, int wz, int h, int terrain_version)
 {
+    if (terrain_version >= 5) return worldgen5_vegetation(seed, wx, wz, h);
     if (h <= WORLD_SEA_LEVEL + 1) {
         return BLOCK_AIR;
     }
@@ -470,7 +477,7 @@ int world_generate_chunk(World *w, int cx, int cz)
     }
     long seed = w->seed;
     if (w->terrain_version >= 4) {
-        worldgen_fill(c, seed);
+        worldgen_fill_profile(c, seed, w->terrain_version);
         int tops[16][16];
         for (int z = 0; z < 16; ++z)
             for (int x = 0; x < 16; ++x) {
@@ -479,14 +486,14 @@ int world_generate_chunk(World *w, int cx, int cz)
                     --h;
                 tops[z][x] = h;
             }
-        stamp_trees(c, seed, 4);
+        stamp_trees(c, seed, w->terrain_version);
         for (int z = 0; z < 16; ++z)
             for (int x = 0; x < 16; ++x) {
                 int wx = cx * 16 + x, wz = cz * 16 + z;
                 int h = tops[z][x];
                 if (h + 1 < CHUNK_Y && chunk_get_block(c, x, h, z) == BLOCK_GRASS &&
                     chunk_get_block(c, x, h + 1, z) == BLOCK_AIR)
-                    chunk_set_block(c, x, h + 1, z, world_gen_vegetation_version(seed, wx, wz, h, 4));
+                    chunk_set_block(c, x, h + 1, z, world_gen_vegetation_version(seed, wx, wz, h, w->terrain_version));
             }
         c->dirty = true;
         c->save_dirty = false;

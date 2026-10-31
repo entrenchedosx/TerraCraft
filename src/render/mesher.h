@@ -5,12 +5,11 @@
  * CPU-only (no GL) so unit tests run headless.
  * Right-handed, Y-up. World-space positions (chunk origin baked).
  *
- * Vertex format (interleaved, 9 floats = VoxelVertex):
- *   pos xyz | normal xyz | uv uv | ao
+ * Vertex format (interleaved, 11 floats = VoxelVertex):
+ *   pos xyz | normal xyz | uv uv | ao | skylight | block light
  * UVs address the 256x256 texture atlas tile for (block, face).
- * AO holds the combined per-vertex light-occlusion multiplier
- * (geometry AO level x sun-visibility factor); the shader multiplies it
- * into the lit color. Cross-chunk neighbors are resolved via the World so
+ * Geometry AO and the two propagated light channels remain independent.
+ * Cross-chunk neighbors are resolved via the World so
  * chunk borders shade seamlessly.
  *
  * Pass rule: WATER and GLASS faces go to the transparent mesh (blended);
@@ -24,36 +23,28 @@
 /* Forward declarations (full types in world headers). */
 typedef struct Chunk Chunk;
 typedef struct World World;
+typedef struct VoxelLightBake VoxelLightBake;
 
-/* Textured voxel vertex (9 floats, tightly packed). */
+/* Textured voxel vertex (11 floats, tightly packed). */
 typedef struct VoxelVertex {
     float pos[3];  /* World-space position. */
     float norm[3]; /* Outward face normal (unit axis). */
     float uv[2];   /* Atlas UVs (u right, v up). */
-    float ao;      /* Combined AO x sun multiplier (0.0..1.0). */
+    float ao;      /* Geometry ambient occlusion (0.0..1.0). */
+    float sky;     /* Propagated skylight (0.0..1.0). */
+    float block;   /* Propagated emissive light (0.0..1.0). */
 } VoxelVertex;
 
 /* Number of floats per vertex (sizeof(VoxelVertex)/sizeof(float)). */
-#define MESHER_FLOATS_PER_VERTEX 9
+#define MESHER_FLOATS_PER_VERTEX 11
 
 /* AO brightness table indexed by AO level 0..3 (darkest -> brightest).
  * Level 1 is reserved by the M4 heuristic (see mesher_vertex_ao). */
 #define MESHER_AO_LEVELS 4
 
-/* Sun-visibility multipliers folded into the AO channel per face. */
-#define MESHER_SUN_FULL 1.0f
-#define MESHER_SUN_SHADE 0.45f
-
-/* Skylight probe height (cells above the face): covers trees and roofs;
- * anything past it reads as open sky for gameplay shading (bounding the
- * per-face column scan — a full 256-cell scan per face costs ~1M
- * wasted lookups per open-terrain chunk).
- */
-#define MESHER_SKY_PROBE 12
-
 /* CPU mesh: caller owns vertices/indices, frees via mesher_free(). */
 typedef struct MeshData {
-    float *vertices; /* Interleaved VoxelVertex data, vertex_count*9 floats. */
+    float *vertices; /* Interleaved VoxelVertex data, vertex_count*11 floats. */
     unsigned int *indices; /* Triangles, index_count entries. */
     size_t vertex_count; /* Number of vertices (not floats). */
     size_t index_count; /* Number of indices. */
@@ -106,6 +97,10 @@ MeshData *mesher_build_chunk_mesh(const Chunk *c, const World *w);
  * Returns: owned MeshData on success, NULL on bad args/OOM.
  */
 MeshData *mesher_build_transparent_mesh(const Chunk *c, const World *w);
+
+/* Renderer shares one bake between opaque and transparent passes. */
+MeshData *mesher_build_lit_mesh(const Chunk *c, const World *w,
+                               const VoxelLightBake *light, bool transparent);
 
 /* Free a mesh and its arrays. NULL-safe.
  *

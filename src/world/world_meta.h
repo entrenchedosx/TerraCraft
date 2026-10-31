@@ -18,7 +18,7 @@
  * Bump only on breaking layout change (see BACKLOG policy).
  */
 #define WORLD_META_VERSION 1
-#define WORLD_TERRAIN_VERSION_CURRENT 4
+#define WORLD_TERRAIN_VERSION_CURRENT 5
 
 /* World display-name capacity (incl. terminator). */
 #define WORLD_NAME_LEN 64
@@ -46,7 +46,7 @@ typedef struct WorldMeta {
     char name[WORLD_NAME_LEN]; /* Display name (NUL-terminated). */
     int64_t seed;              /* World seed (stored 64-bit; cast to long in use). */
     int mode;                  /* WorldMode value. */
-    int terrain_version;       /* 1..3 frozen; 4 = climate/density worldgen. */
+    int terrain_version;       /* 1..4 frozen; 5 = revised climate/density worldgen. */
     float px, py, pz;          /* Player feet position. */
     float yaw, pitch;          /* Player look angles, radians. */
     float day;                 /* Time-of-day progress 0..1. */

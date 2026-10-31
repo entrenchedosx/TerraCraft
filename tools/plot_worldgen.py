@@ -1,5 +1,6 @@
 """Render worldgen_probe CSV/PPM output. Requires numpy and matplotlib."""
 import argparse
+import json
 from pathlib import Path
 import numpy as np
 import matplotlib
@@ -11,6 +12,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("prefix", type=Path)
 args = parser.parse_args()
 prefix = str(args.prefix)
+metadata = Path(prefix + "-meta.json")
+profile = json.loads(metadata.read_text())["profile"] if metadata.exists() else 4
 data = np.genfromtxt(prefix + "-fields.csv", delimiter=",", names=True)
 side = int(np.sqrt(data.size))
 fields = ["height", "biome", "continentalness", "erosion", "temperature", "humidity", "weirdness", "mountain", "river"]
@@ -23,7 +26,7 @@ for ax, field in zip(axes.flat, fields):
                     vmin=0 if field == "biome" else None, vmax=6 if field == "biome" else None)
     ax.set_title(field)
     fig.colorbar(img, ax=ax, shrink=.75)
-fig.suptitle("TerraCraft profile 4 — 4096 × 4096 blocks, 8-block samples")
+fig.suptitle(f"TerraCraft profile {profile} — 4096 × 4096 blocks, 8-block samples")
 fig.savefig(prefix + "-atlas.png", dpi=130)
 plt.close(fig)
 from PIL import Image
