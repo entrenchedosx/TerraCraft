@@ -2,6 +2,12 @@
 
 Future tasks. M0-M4 done. **M5 done (verified MSVC, 63/63 tests, warning-free /W4).**
 
+Current continuation: [lighting and profile-5 terrain](LIGHTING_AND_WORLDGEN_PASS.md).
+Historical milestone checkboxes below describe their original implementation,
+not present-day Java parity. Lighting now separates propagated sky/block
+light from AO; new worlds use profile 5, while saved profiles 1–4 stay frozen.
+Manual acceptance and remaining limitations are recorded in the pass report.
+
 ## Milestone 1 — Voxel Data Structures & Naive Meshing (DONE)
 - [x] Finalize `Chunk` layout: 16x256x16 flat uint16_t, `(y*256)+(z*16)+x`, heap create/destroy.
 - [x] Implement `chunk_get_block/set_block/fill/is_empty` with bounds validation + tests (legacy u8 wrappers kept).

@@ -1,4 +1,41 @@
-# World generation, profile 4
+# World generation, profiles 4 and 5
+
+## Current new-world profile: 5
+
+The active behavioral target is **Minecraft Java Edition 1.21.11**. This is
+an original approximation, not its source code, random streams, exact ore
+configuration, or seed parity. Existing worlds retain their saved profile,
+including unvisited chunks. Profiles 1–4 are not upgraded automatically.
+
+Profile 5 retains the cached density lattice, aquifers, ore/material pipeline,
+and generated-block spawn validation. It changes the relationships that
+shape geography:
+
+- A broad continental shelf/coast/inland spline and continuous float warps.
+- Erosion-conditioned rolling terrain, foothills, and resistant mountain zones.
+- A shared weirdness field for valley zero contours and flanking ridge crests,
+  replacing profile 4's saturated central peak response and unrelated rivers.
+- Graded dry mountain valleys and narrower wet lowland channels.
+- Rounded paired cave fields, smoothly varying noodle width, and reduced
+  volumetric roughness in eroded terrain.
+- Slope-aware rock/snow surfaces and moisture/slope/elevation woodland patches.
+
+Implementation: `src/world/worldgen_v5.c`, with explicitly versioned shared
+sampling/material functions in `worldgen_v4.c`. Public profile-4 samplers
+still force profile 4. Eight full-chunk golden hashes, captured before the
+refactor, guard its output. Tests also compare saved and unvisited chunks
+after profile-4/5 reload, negative coordinates, and reversed generation order.
+
+The probe accepts `worldgen_probe PREFIX SEED SPAWN_COUNT PROFILE`, with
+profile `4` or `5` (default `5`). `--hash4` prints compatibility hashes.
+`tools/plot_worldgen.py PREFIX` renders its CSV/PPM outputs and reads profile
+labels from the generated metadata. See [the pass report](LIGHTING_AND_WORLDGEN_PASS.md)
+for measurements, maps, source references, and outstanding runtime checks.
+
+The remainder of this document records **profile 4's historical design and
+26.3 reference**; it is not a claim that profile 5 reproduces Java exactly.
+
+## Frozen profile 4
 
 Profile 4 replaces the runtime terrain pipeline for **new worlds**. Worlds
 saved with profiles 1, 2 or 3 continue using their original generator,

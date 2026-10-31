@@ -1,11 +1,12 @@
 # Java gameplay fidelity audit
 
-**Reference target:** observable single-player Survival and Creative behavior
-from Minecraft: Java Edition 26.3, the release named in the project brief.
-The official [26.3 release notes](https://www.minecraft.net/en-us/article/minecraft-java-edition-26-3)
-identify that edition and its release date. The numerical behavior targets
-below are carried over from the fidelity brief and still need direct
-in-game measurement against that release. TerraCraft does not copy
+**Active lighting/terrain reference:** Minecraft Java Edition **1.21.11**,
+as requested for the October 2026 continuation pass. See the
+[lighting and terrain report](LIGHTING_AND_WORLDGEN_PASS.md). Profile 4's
+historical reference was 26.3; its saved-world rules remain unchanged.
+The numerical gameplay targets below were carried over from earlier briefs
+and still need direct in-game measurement against a consistent reference.
+TerraCraft does not copy
 Mojang's source code or require its assets.
 
 This page records what the current source does, not a claim of parity. The

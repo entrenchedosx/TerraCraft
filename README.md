@@ -30,7 +30,8 @@ open.
 - New-world density generation with coherent continents, climate regions,
   three cave scales, local aquifers, eight ore types, mineral veins and
   tested safe spawn selection. See [World Generation](docs/WORLD_GENERATION.md)
-  for the Java 26.3 reference, adaptations, maps and verification results.
+  for the Java 1.21.11 behavioral target, profile-5 refinements, maps and
+  compatibility checks. Profiles 1–4 remain frozen for existing saves.
 - Versioned terrain profiles for legacy-save continuity, with connected
   mountain belts, sharper peaks, varied foothills, and lowland river channels
   in newly created worlds.

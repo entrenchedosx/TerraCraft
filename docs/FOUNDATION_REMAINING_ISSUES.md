@@ -1,5 +1,10 @@
 # Foundation remaining issues
 
+2026-10-31 continuation: lighting propagation and versioned profile-5 terrain
+are implemented; see [current results and remaining visual gates](LIGHTING_AND_WORLDGEN_PASS.md).
+The dated Phase 4/5 audit below describes the pre-pass source, not the new
+renderer lighting cache or terrain dispatch. Other phases remain open.
+
 2026-10-30: **OPEN unless explicitly marked otherwise.** Phases2–8 have
 not been represented as finished. Current source and reproducible runtime
 observations take precedence over historical milestone claims.

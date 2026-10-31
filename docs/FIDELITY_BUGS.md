@@ -203,23 +203,28 @@ the affected behavior has been reproduced and checked in a running build.
   policy; target-model tests remain to be added.
 - **Human verified?:** No.
 
-## TC-FID-008 — Lighting and water behavior remain simplified (open)
+## TC-FID-008 — Night lighting and fluid fidelity (partially verified; open)
 
 - **Subsystem:** World lighting and fluids.
-- **Observed TerraCraft behavior:** Lighting uses global sun intensity, a
-  column-occlusion heuristic, and AO. Water is static and has no swim or
-  oxygen state.
+- **Observed TerraCraft behavior:** The original night shader removed direct
+  sun, used the nearly black sky as ambient light, then multiplied roof
+  shade and AO again. Torches did not illuminate neighboring blocks.
 - **Expected Java-like behavior:** Separate sky/block light responds to
   propagation and removal; water flows and supports the expected player
   states.
 - **Reproduction:** Observe a torch in a cave and around a corner, remove it,
   then compare water movement and player behavior in water.
-- **Root cause:** No per-voxel light channels, update queue, fluid simulation,
-  or swimming state exists.
-- **Fix:** None yet.
-- **Test added:** Current tests cover AO, global time lighting, and static
-  water ray behavior; propagation/flow tests remain to be added.
-- **Human verified?:** No.
+- **Fix:** Independent propagated skylight/block-light channels, full-height
+  roof scans, torch/lava emission, cross-chunk edit invalidation, moonlit
+  ambient/direct light, weaker night AO and camera-light-sensitive fog.
+  See [the pass report](LIGHTING_AND_WORLDGEN_PASS.md).
+- **Tests:** Roof/shaft, glass/water attenuation, torch wall occlusion/removal,
+  negative-coordinate seams and interior-edit invalidation. Water flow,
+  buoyancy and shore escape already existed; the old static-water claim
+  was outdated. Oxygen/swimming-pose parity is not established.
+- **Visual verification:** The Release outdoor night/shoreline/roofed-passage
+  scene was launched and inspected. Full natural-cave, underwater traversal,
+  and torch edit playtests remain open until recorded in the pass report.
 
 ## TC-FID-009 — Cow appearance, melee targeting, and first-person swing (playtest open)
 
