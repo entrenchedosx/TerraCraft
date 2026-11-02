@@ -35,5 +35,14 @@ typedef enum JFillBlock {
 /* Vanilla registry name of a fill block ("minecraft:stone"). */
 const char *jfill_block_name(JFillBlock b);
 
+/* NoiseChunk.aquifer(): kept alive after the fill so carvers can ask it for
+ * the fluid in a carved block (Aquifer.computeSubstance). */
+typedef struct Aquifer JAquifer;
+JAquifer *jaquifer_create(JChunk *chunk);
+void jaquifer_free(JAquifer *a);
+/* Aquifer.computeSubstance(pos, density): a JFillBlock (air/water/lava) or
+ * -1 for "null" (keep the existing block). */
+int jaquifer_substance(JAquifer *a, int x, int y, int z, double density);
+
 /* Fill out[16 * 16 * JFILL_HEIGHT]. Returns false on bad arguments. */
 bool jchunk_fill(JChunk *chunk, uint8_t *out);

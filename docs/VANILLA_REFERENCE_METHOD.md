@@ -63,3 +63,22 @@ Done after the jar became available (2026-11-02):
   rendered pixels; no frame-vs-frame comparison has been run yet.
 - The world-generation reference data now exists locally but no differential
   harness has been written yet (see WORLDGEN_PARITY.md).
+
+## Method used for carvers (worldgen stage 4c)
+
+1. `tools/reference/javap_mapped.py` extracts classes from the server jar,
+   disassembles them with `javap -c -p`, and rewrites class/field/method
+   references through `server_mappings.txt` so the bytecode of `WorldCarver`,
+   `CaveWorldCarver`, `CanyonWorldCarver`, `NoiseBasedChunkGenerator.applyCarvers`,
+   `Mth`, the value providers and `WorldgenRandom` reads with Mojang names.
+   The C port (`src/world/jcarver.c`) follows that bytecode, including its
+   float/double mixing and argument evaluation order.
+2. `tools/reference/WorldgenCarverDump.java` runs the real classes: it stores the
+   NoiseChunk fill in a real `ProtoChunk`, then replays the `applyCarvers` loop
+   (17 x 17 neighbour chunks, carver biome from the multi-noise sampler, real
+   `ConfiguredWorldCarver.carve` with the NoiseChunk's own aquifer and
+   `CarvingMask`). The registry lookup used by the tool has no tags bound, so
+   `#minecraft:overworld_carver_replaceables` is rebuilt from the data pack tag
+   JSON and patched into each carver config.
+3. `ONLY=carver tools/reference/run_worldgen_ref.sh` regenerates just the carver
+   fixtures (`carvers.csv`, `carver_counts.csv`, `carver_starts.csv`).

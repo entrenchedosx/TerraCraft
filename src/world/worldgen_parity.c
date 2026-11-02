@@ -1,6 +1,7 @@
 #include "world/worldgen_parity.h"
 
 #include "world/jbiome.h"
+#include "world/jcarver.h"
 #include "world/jdensity.h"
 #include "world/jfill.h"
 #include "world/jnoise.h"
@@ -593,6 +594,135 @@ static void run_chunks(const char *dir, const char *datapack, Ctx *c)
     fclose(f);
 }
 
+/* ---- carvers.csv: seed,chunk_x,chunk_z,section,name_hash,mask_hash ------------- */
+typedef struct StartRow {
+    char seed[32];
+    int cx, cz, index, count;
+} StartRow;
+
+static void run_carvers(const char *dir, const char *datapack, Ctx *c)
+{
+    FILE *f = open_fixture(dir, "carvers.csv", c->stats);
+    if (f == NULL) {
+        return;
+    }
+    char line[LINE_MAX_LEN];
+    char *fld[FIELDS_MAX];
+    c->suite = "carver_blocks";
+
+    StartRow *rows = NULL;
+    int row_count = 0, row_cap = 0;
+    FILE *fs = open_fixture(dir, "carver_starts.csv", c->stats);
+    if (fs != NULL) {
+        fgets(line, sizeof(line), fs);
+        while (fgets(line, sizeof(line), fs) != NULL) {
+            if (split_csv(line, fld) < 5) {
+                continue;
+            }
+            if (row_count == row_cap) {
+                row_cap = row_cap != 0 ? row_cap * 2 : 64;
+                rows = (StartRow *)realloc(rows, (size_t)row_cap * sizeof(StartRow));
+            }
+            StartRow *r = &rows[row_count++];
+            snprintf(r->seed, sizeof(r->seed), "%s", fld[0]);
+            r->cx = atoi(fld[1]);
+            r->cz = atoi(fld[2]);
+            r->index = atoi(fld[3]);
+            r->count = atoi(fld[4]);
+        }
+        fclose(fs);
+    }
+
+    JCarvers *cv = datapack != NULL ? jcarvers_load(datapack) : NULL;
+    fgets(line, sizeof(line), f);
+    char cur[64] = "";
+    char last_seed[32] = "";
+    JRandomState *rs = NULL;
+    JChunk *ch = NULL;
+    uint64_t name_hash[24], mask_hash[24];
+    uint8_t *blocks = (uint8_t *)malloc((size_t)16 * 16 * JFILL_HEIGHT);
+    uint8_t *mask = (uint8_t *)malloc((size_t)16 * 16 * JFILL_HEIGHT);
+    bool have = false;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (split_csv(line, fld) < 6) {
+            continue;
+        }
+        if (datapack == NULL) {
+            c->stats->skipped++;
+            continue;
+        }
+        char group[64];
+        snprintf(group, sizeof(group), "%s/%s/%s", fld[0], fld[1], fld[2]);
+        if (strcmp(group, cur) != 0) {
+            snprintf(cur, sizeof(cur), "%s", group);
+            jchunk_free(ch);
+            ch = NULL;
+            if (rs == NULL || strcmp(last_seed, fld[0]) != 0) {
+                jrs_destroy(rs);
+                rs = jrs_create(datapack, "overworld", (int64_t)strtoll(fld[0], NULL, 10));
+                snprintf(last_seed, sizeof(last_seed), "%s", fld[0]);
+            }
+            have = false;
+            int cx = atoi(fld[1]), cz = atoi(fld[2]);
+            ch = rs != NULL ? jchunk_create(rs, cx, cz) : NULL;
+            if (ch != NULL && cv != NULL && blocks != NULL && mask != NULL && jchunk_fill(ch, blocks)) {
+                memset(mask, 0, (size_t)16 * 16 * JFILL_HEIGHT);
+                JAquifer *aq = jaquifer_create(ch);
+                int starts[JCARVER_MAX];
+                if (aq != NULL && jchunk_carve(ch, cv, aq, blocks, mask, starts)) {
+                    have = true;
+                    for (int m = 0; m < jcarvers_count(cv); ++m) {
+                        int expect = 0;
+                        for (int i = 0; i < row_count; ++i) {
+                            if (rows[i].cx == cx && rows[i].cz == cz && rows[i].index == m && strcmp(rows[i].seed, fld[0]) == 0) {
+                                expect = rows[i].count;
+                            }
+                        }
+                        char key[96];
+                        snprintf(key, sizeof(key), "%s/starts%d", group, m);
+                        const char *saved = c->suite;
+                        c->suite = "carver_starts";
+                        record(c, key, (uint64_t)expect, (uint64_t)starts[m]);
+                        c->suite = saved;
+                    }
+                    for (int sec = 0; sec < 24; ++sec) {
+                        uint64_t hn = 1125899906842597ULL, hm = 1125899906842597ULL;
+                        for (int yy = 0; yy < 16; ++yy) {
+                            int y = -64 + sec * 16 + yy;
+                            for (int zz = 0; zz < 16; ++zz) {
+                                for (int xx = 0; xx < 16; ++xx) {
+                                    int b = blocks[JFILL_INDEX(xx, zz, y)];
+                                    hn = 31u * hn + (uint64_t)(int64_t)jr_java_string_hash(jfill_block_name((JFillBlock)b));
+                                    hm = 31u * hm + (mask[JFILL_INDEX(xx, zz, y)] != 0 ? 1u : 0u);
+                                }
+                            }
+                        }
+                        name_hash[sec] = hn;
+                        mask_hash[sec] = hm;
+                    }
+                }
+                jaquifer_free(aq);
+            }
+        }
+        int sec = atoi(fld[3]);
+        char label[96];
+        snprintf(label, sizeof(label), "%s/sec%d", group, sec);
+        uint64_t exp_names = (uint64_t)strtoll(fld[4], NULL, 10);
+        record(c, label, exp_names, have && sec >= 0 && sec < 24 ? name_hash[sec] : ~exp_names);
+        c->suite = "carver_mask";
+        uint64_t exp_mask = (uint64_t)strtoll(fld[5], NULL, 10);
+        record(c, label, exp_mask, have && sec >= 0 && sec < 24 ? mask_hash[sec] : ~exp_mask);
+        c->suite = "carver_blocks";
+    }
+    free(rows);
+    free(blocks);
+    free(mask);
+    jcarvers_free(cv);
+    jchunk_free(ch);
+    jrs_destroy(rs);
+    fclose(f);
+}
+
 uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root, FILE *report,
                              WorldgenParityStats *stats)
 {
@@ -616,5 +746,6 @@ uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root,
     run_router(fixture_dir, datapack_root, &c);
     run_biomes(fixture_dir, datapack_root, &c);
     run_chunks(fixture_dir, datapack_root, &c);
+    run_carvers(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }

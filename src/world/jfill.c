@@ -472,6 +472,21 @@ const char *jfill_block_name(JFillBlock b)
     return (b >= 0 && b < JB_COUNT) ? NAMES[b] : "minecraft:air";
 }
 
+JAquifer *jaquifer_create(JChunk *chunk)
+{
+    return chunk != NULL ? aquifer_create(chunk) : NULL;
+}
+
+void jaquifer_free(JAquifer *a)
+{
+    aquifer_free(a);
+}
+
+int jaquifer_substance(JAquifer *a, int x, int y, int z, double density)
+{
+    return a != NULL ? aquifer_substance(a, x, y, z, density) : -1;
+}
+
 bool jchunk_fill(JChunk *c, uint8_t *out)
 {
     if (c == NULL || out == NULL) {

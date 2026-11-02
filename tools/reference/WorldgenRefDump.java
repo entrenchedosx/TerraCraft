@@ -31,6 +31,9 @@ public class WorldgenRefDump {
     /** key: mojClass + "#" + mojName + "(" + args + ")" -> obf member name */
     static final Map<String, String> METHOD_OBF = new HashMap<>();
 
+    /** key: mojClass + "#" + mojName -> obf field name */
+    static final Map<String, String> FIELD_OBF = new HashMap<>();
+
     static void loadMappings(Path file) throws IOException {
         String cls = null;
         for (String line : Files.readAllLines(file)) {
@@ -39,7 +42,12 @@ public class WorldgenRefDump {
                 int arrow = line.indexOf(" -> ");
                 cls = line.substring(0, arrow);
                 CLASS_OBF.put(cls, line.substring(arrow + 4, line.length() - 1));
-            } else if (line.contains("(")) {
+            } else if (!line.contains("(")) {
+                String s = line.trim();
+                int arrow = s.indexOf(" -> ");
+                String sig = s.substring(0, arrow);
+                FIELD_OBF.put(cls + "#" + sig.substring(sig.indexOf(' ') + 1), s.substring(arrow + 4));
+            } else {
                 String s = line.trim();
                 // optional "12:34:" line-number prefix
                 while (!s.isEmpty() && Character.isDigit(s.charAt(0))) {
@@ -88,6 +96,15 @@ public class WorldgenRefDump {
         }
         m.setAccessible(true);
         return m;
+    }
+
+    /** Value of a static or instance field by its Mojang name. */
+    static Object field(String mojClass, String mojName, Object target) throws Exception {
+        String obf = FIELD_OBF.get(mojClass + "#" + mojName);
+        if (obf == null) throw new IllegalStateException("no field mapping " + mojClass + "." + mojName);
+        java.lang.reflect.Field f = cls(mojClass).getDeclaredField(obf);
+        f.setAccessible(true);
+        return f.get(target);
     }
 
     static Constructor<?> ctor(String mojClass, Class<?>... ps) throws Exception {

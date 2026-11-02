@@ -8,7 +8,7 @@ dependencies (explained per stage).
 | 1 | First-person hand/animation | **Math + timing done**, pixel comparison pending | – |
 | 1b | Hand remainder: offhand, slim arm, sprite extrusion, bow golden test, spear animation, `bobHurt`, hand FOV modifier | Open | 1 |
 | 2 | **Vanilla 20 TPS player physics** (`vphys`: travel, move/collide with step 0.6, sneak edge, jump, water, fall distance) — core done; remaining: block friction/jump factors, ladders/vines, flowing water, lava, non-cube collision shapes, a Java reference dump for differential checks | **Core done**, extras open | tick-driven sim with render interpolation |
-| 3 | World-gen differential harness + RNG/noise/density/biome stages | **In progress**: harness + RNG, noise, density router, climate + biome lookup, NoiseChunk fill with aquifers and ore veins done and exact (stages 1-4b); carvers, surface, features open | - |
+| 3 | World-gen differential harness + RNG/noise/density/biome stages | **In progress**: harness + RNG, noise, density router, climate + biome lookup, NoiseChunk fill with aquifers and ore veins and cave/canyon carvers done and exact (stages 1-4c); surface rules, bedrock, features open | - |
 | 4 | Block rendering, lighting, sky, fog fidelity with frame-compare tool | Open | needs a screenshot/capture path in the game (none exists) |
 | 5 | HUD/inventory fidelity pass using supplied GUI sprites | Open | 4 (capture tool) |
 | 6 | Gameplay breadth: registries, recipes, entities, redstone, dimensions | Open | 3 for content that depends on generation |

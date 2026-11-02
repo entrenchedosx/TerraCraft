@@ -78,6 +78,7 @@ struct JRandomState {
     int flat_count, interp_count;
     JrPositional aquifer_rand, ore_rand;
     int sea_level;
+    int64_t seed;
     JDensity *interp_nodes[16];
     JDensity *flat_nodes[64];
 };
@@ -851,6 +852,11 @@ double jdf_compute(const JDensity *df, int x, int y, int z)
 
 /* ---- router ----------------------------------------------------------------------- */
 
+int64_t jrs_seed(const JRandomState *rs)
+{
+    return rs != NULL ? rs->seed : 0;
+}
+
 JRandomState *jrs_create(const char *datapack_root, const char *settings, int64_t seed)
 {
     if (datapack_root == NULL || settings == NULL) {
@@ -861,6 +867,7 @@ JRandomState *jrs_create(const char *datapack_root, const char *settings, int64_
         return NULL;
     }
     rs->root = dup_str(datapack_root);
+    rs->seed = seed;
     char path[1024];
     snprintf(path, sizeof(path), "%s/data/minecraft/worldgen/noise_settings/%s.json", datapack_root, settings);
     JJson *ns = jj_parse_file(path);

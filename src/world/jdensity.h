@@ -54,6 +54,7 @@ double jchunk_eval_router(JChunk *c, const char *key, int x, int y, int z, bool 
 
 /* RandomState extras used by the fill stage. */
 int jrs_sea_level(const JRandomState *rs);
+int64_t jrs_seed(const JRandomState *rs);
 const JrPositional *jrs_aquifer_random(const JRandomState *rs);
 const JrPositional *jrs_ore_random(const JRandomState *rs);
 const JRandomState *jchunk_state(const JChunk *c);
