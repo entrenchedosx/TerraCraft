@@ -7,6 +7,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 /* Snapping epsilon for collision clamps (keeps flush faces non-overlapping). */
 #define PLAYER_EPS 0.001f
@@ -115,6 +116,13 @@ void player_init(Player *p)
     p->mine_held = ITEM_NONE;
     p->mine_progress = 0.0f;
     p->mine_need = 0.0f;
+    memset(&p->ph, 0, sizeof(p->ph));
+    p->ph_init = false;
+    p->ph_accum = 0.0f;
+    p->ph_pos_mirror = p->pos;
+    p->ph_vel_mirror = p->vel;
+    p->eye_prev = p->eye_height;
+    p->eye_cur = p->eye_height;
 }
 
 /* Find a safe spawn column top.

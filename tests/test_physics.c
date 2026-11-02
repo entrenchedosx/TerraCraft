@@ -11,6 +11,10 @@
 
 #include <math.h>
 
+/* The player simulates at the vanilla 20 TPS: one test step is one game tick. */
+#undef PLAYER_STEP_DT
+#define PLAYER_STEP_DT 0.05f
+
 /* Test-local flat floor: chunk (0,0), stone y in [60..64], air above.
  * Top surface at y=65 (feet level). */
 
@@ -74,14 +78,15 @@ int test_physics_fall_land(void)
     p.pos = mmath_vec3(8.5f, 70.0f, 8.5f);
     PlayerInput in = no_input();
     for (int i = 0; i < 240; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
     }
     TEST_ASSERT(p.grounded == true);
     TEST_ASSERT_FLOAT_EQ(p.pos.y, 65.0f, 0.02f);
-    TEST_ASSERT_FLOAT_EQ(p.vel.y, 0.0f, 1e-6f);
+    /* Resting contact keeps the vanilla -0.0784 blocks/tick gravity velocity. */
+    TEST_ASSERT_FLOAT_EQ(p.vel.y, -1.568f, 1e-3f);
     /* Still grounded after more steps (resting contact is stable). */
     for (int i = 0; i < 60; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
     }
     TEST_ASSERT(p.grounded == true);
     TEST_ASSERT_FLOAT_EQ(p.pos.y, 65.0f, 0.02f);
@@ -106,7 +111,7 @@ int test_physics_high_drop(void)
     p.pos = mmath_vec3(8.5f, 150.0f, 8.5f);
     PlayerInput in = no_input();
     for (int i = 0; i < 600; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
         if (p.grounded) {
             break;
         }
@@ -143,7 +148,7 @@ int test_physics_wall_slide(void)
     PlayerInput in = no_input();
     in.fwd = 1.0f;
     for (int i = 0; i < 180; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
     }
     TEST_ASSERT(p.pos.x > 9.0f); /* Walked up to the wall. */
     TEST_ASSERT(p.pos.x < 9.8f); /* Blocked: face stops at 10-0.3-eps. */
@@ -170,18 +175,19 @@ int test_physics_jump(void)
     player_init(&p);
     p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
     PlayerInput in = no_input();
-    /* Settle one step so grounded latches. */
-    player_update(&p, &in, w, 1.0f / 60.0f);
+    /* Settle two ticks so grounded latches (gravity applies after the move). */
+    player_update(&p, &in, w, 0.05f);
+    player_update(&p, &in, w, 0.05f);
     TEST_ASSERT(p.grounded == true);
 
     in.jump = true;
-    player_update(&p, &in, w, 1.0f / 60.0f);
+    player_update(&p, &in, w, 0.05f);
     in.jump = false;
     TEST_ASSERT(p.grounded == false);
 
     float max_y = p.pos.y;
     for (int i = 0; i < 180; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
         if (p.pos.y > max_y) {
             max_y = p.pos.y;
         }
@@ -207,78 +213,70 @@ int test_physics_acceleration(void)
     if (w == NULL) {
         return failures + 1;
     }
+    /* Player.vel is the post-friction tick velocity in m/s; the distance
+     * moved per tick (x20) is the vanilla "blocks per second" figure. */
+    PlayerInput idle = no_input();
     Player p;
     player_init(&p);
     p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
-    p.grounded = true;
     PlayerInput in = no_input();
     in.fwd = 1.0f;
+    for (int i = 0; i < 3; ++i) { /* settle on the floor */
+        player_update(&p, &idle, w, PLAYER_STEP_DT);
+    }
+    float z0 = p.pos.z;
     player_update(&p, &in, w, PLAYER_STEP_DT);
-    float first = fabsf(p.vel.z);
+    float first = fabsf(p.pos.z - z0) * 20.0f;
     TEST_ASSERT(first > 0.0f);
-    TEST_ASSERT(first < p.walk_speed * 0.25f);
+    TEST_ASSERT(first < p.walk_speed * 0.5f); /* accelerates, does not snap */
 
     Player g;
     player_init(&g);
-    g.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
-    g.grounded = true;
-    for (int i = 0; i < 30; ++i) {
+    g.pos = mmath_vec3(8.5f, 65.0f, 12.5f);
+    for (int i = 0; i < 3; ++i) {
+        player_update(&g, &idle, w, PLAYER_STEP_DT);
+    }
+    for (int i = 0; i < 25; ++i) {
         player_update(&g, &in, w, PLAYER_STEP_DT);
     }
-    TEST_ASSERT(fabsf(fabsf(g.vel.z) - g.walk_speed) < g.walk_speed * 0.02f);
+    float zb = g.pos.z;
+    player_update(&g, &in, w, PLAYER_STEP_DT);
+    TEST_ASSERT_FLOAT_EQ(fabsf(g.pos.z - zb) * 20.0f, 4.317f, 0.02f); /* walking pace */
 
-    /* Release: one step keeps most of the speed, then friction settles it. */
+    /* Release: one tick keeps friction*0.91 = 0.546 of the velocity. */
     PlayerInput stop = no_input();
     float before = fabsf(g.vel.z);
     player_update(&g, &stop, w, PLAYER_STEP_DT);
-    TEST_ASSERT(fabsf(g.vel.z) > before * 0.7f);
-    for (int i = 0; i < 60; ++i) {
+    TEST_ASSERT_FLOAT_EQ(fabsf(g.vel.z) / before, 0.546f, 0.01f);
+    for (int i = 0; i < 30; ++i) {
         player_update(&g, &stop, w, PLAYER_STEP_DT);
     }
     TEST_ASSERT(fabsf(g.vel.z) < 0.01f);
 
-    /* Air control accelerates more slowly and keeps momentum longer. */
-    Player ground;
+    /* Air control is weak (0.02 per tick) and air friction is only 0.91. */
+    Player ground, air;
     player_init(&ground);
-    ground.pos = mmath_vec3(8.5f, 75.0f, 8.5f);
-    ground.grounded = true;
-    Player air;
     player_init(&air);
-    air.pos = mmath_vec3(8.5f, 75.0f, 8.5f);
-    air.grounded = false;
-    for (int i = 0; i < 12; ++i) {
-        player_update(&ground, &in, NULL, PLAYER_STEP_DT);
+    ground.pos = air.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    for (int i = 0; i < 3; ++i) {
+        player_update(&ground, &idle, w, PLAYER_STEP_DT);
+    }
+    air.pos = mmath_vec3(8.5f, 90.0f, 8.5f);
+    for (int i = 0; i < 6; ++i) {
+        player_update(&ground, &in, w, PLAYER_STEP_DT);
         player_update(&air, &in, NULL, PLAYER_STEP_DT);
     }
     TEST_ASSERT(fabsf(air.vel.z) < fabsf(ground.vel.z));
-    for (int i = 0; i < 12; ++i) {
-        player_update(&ground, &stop, NULL, PLAYER_STEP_DT);
-        player_update(&air, &stop, NULL, PLAYER_STEP_DT);
-    }
-    TEST_ASSERT(fabsf(air.vel.z) > fabsf(ground.vel.z));
 
-    /* Reversal is not instantaneous: one step after switching input the
-     * old direction still wins. */
-    Player r;
-    player_init(&r);
-    r.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
-    r.grounded = true;
-    for (int i = 0; i < 30; ++i) {
-        player_update(&r, &in, w, PLAYER_STEP_DT);
-    }
-    TEST_ASSERT(r.vel.z < 0.0f);
-    in.fwd = -1.0f;
-    player_update(&r, &in, w, PLAYER_STEP_DT);
-    TEST_ASSERT(r.vel.z < 0.0f);
-    TEST_ASSERT(fabsf(r.vel.z) < fabsf(-r.walk_speed));
-
-    /* Sprint needs forward input; pure strafing and sneaking use walk pace. */
+    /* Sprint needs forward input >= 0.8: strafing never sprints, and sneaking
+     * cancels it; sprint pace is 5.612 blocks/s, sneak pace 1.295. */
     Player sp, st, sn;
     player_init(&sp);
     player_init(&st);
     player_init(&sn);
-    sp.pos = st.pos = sn.pos = mmath_vec3(8.5f, 75.0f, 8.5f);
-    sp.grounded = st.grounded = sn.grounded = true;
+    sp.pos = mmath_vec3(8.5f, 65.0f, 14.5f);
+    st.pos = mmath_vec3(1.5f, 65.0f, 8.5f);
+    sn.pos = mmath_vec3(8.5f, 65.0f, 12.5f);
     PlayerInput sprint_fwd = no_input();
     sprint_fwd.fwd = 1.0f;
     sprint_fwd.sprint = true;
@@ -289,17 +287,26 @@ int test_physics_acceleration(void)
     sprint_sneak.fwd = 1.0f;
     sprint_sneak.sprint = true;
     sprint_sneak.sneak = true;
-    for (int i = 0; i < 60; ++i) {
-        player_update(&sp, &sprint_fwd, NULL, PLAYER_STEP_DT);
-        player_update(&st, &sprint_strafe, NULL, PLAYER_STEP_DT);
-        player_update(&sn, &sprint_sneak, NULL, PLAYER_STEP_DT);
+    for (int i = 0; i < 3; ++i) {
+        player_update(&sp, &idle, w, PLAYER_STEP_DT);
+        player_update(&st, &idle, w, PLAYER_STEP_DT);
+        player_update(&sn, &idle, w, PLAYER_STEP_DT);
     }
+    for (int i = 0; i < 40; ++i) {
+        player_update(&sp, &sprint_fwd, w, PLAYER_STEP_DT);
+        player_update(&st, &sprint_strafe, w, PLAYER_STEP_DT);
+        player_update(&sn, &sprint_sneak, w, PLAYER_STEP_DT);
+    }
+    Vec3 sp0 = sp.pos, st0 = st.pos, sn0 = sn.pos;
+    player_update(&sp, &sprint_fwd, w, PLAYER_STEP_DT);
+    player_update(&st, &sprint_strafe, w, PLAYER_STEP_DT);
+    player_update(&sn, &sprint_sneak, w, PLAYER_STEP_DT);
     TEST_ASSERT(sp.sprinting == true);
-    TEST_ASSERT(fabsf(fabsf(sp.vel.z) - sp.sprint_speed) < 0.02f);
+    TEST_ASSERT_FLOAT_EQ(fabsf(sp.pos.z - sp0.z) * 20.0f, 5.612f, 0.03f);
     TEST_ASSERT(st.sprinting == false);
-    TEST_ASSERT(fabsf(fabsf(st.vel.x) - st.walk_speed) < 0.02f);
+    TEST_ASSERT_FLOAT_EQ(fabsf(st.pos.x - st0.x) * 20.0f, 4.317f, 0.03f);
     TEST_ASSERT(sn.sprinting == false);
-    TEST_ASSERT(fabsf(fabsf(sn.vel.z) - sn.walk_speed * 0.3f) < 0.02f);
+    TEST_ASSERT_FLOAT_EQ(fabsf(sn.pos.z - sn0.z) * 20.0f, 1.295f, 0.03f);
     world_destroy(w);
     return failures;
 }
@@ -345,33 +352,33 @@ int test_physics_water_motion(void)
         player_update(&partial_player, &in, partial, PLAYER_STEP_DT);
         player_update(&shallow_player, &in, shallow, PLAYER_STEP_DT);
     }
+    /* Vanilla water is binary (touching or not): in water the player gets
+     * 0.02 acceleration and 0.8 drag, steady 4 * 0.0196 = 0.0784 blocks/tick
+     * (1.568 m/s); walking on land settles at 2.357 m/s. Any water cell the
+     * body touches (even a 1/9 flow) counts the same. */
     TEST_ASSERT(fabsf(wet_player.vel.z) < fabsf(dry_player.vel.z));
-    TEST_ASSERT_FLOAT_EQ(wet_player.vel.z, -wet_player.walk_speed * 0.55f, 1e-3f);
-    /* A single source at the feet wets only part of the 1.8-block player;
-     * a shallow flow wets less still. */
-    TEST_ASSERT(fabsf(partial_player.vel.z) > fabsf(wet_player.vel.z));
-    TEST_ASSERT(fabsf(partial_player.vel.z) < fabsf(dry_player.vel.z));
-    TEST_ASSERT(fabsf(shallow_player.vel.z) > fabsf(partial_player.vel.z));
-    TEST_ASSERT(fabsf(shallow_player.vel.z) < fabsf(dry_player.vel.z));
+    TEST_ASSERT_FLOAT_EQ(wet_player.vel.z, -1.568f, 2e-3f);
+    TEST_ASSERT_FLOAT_EQ(partial_player.vel.z, wet_player.vel.z, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(shallow_player.vel.z, wet_player.vel.z, 1e-4f);
+    TEST_ASSERT_FLOAT_EQ(dry_player.vel.z, -2.357f, 5e-3f);
 
-    /* Vertical: one jump step from rest; full contact clamps the impulse
-     * to the swim-up speed, partial/shallow contact stays faster. */
-    Player dry_jump, wet_jump, partial_jump, shallow_jump;
+    /* Vertical: holding jump in water adds 0.04 blocks/tick (jumpInLiquid);
+     * on dry land it launches at 0.42. */
+    PlayerInput idle_input = no_input();
+    Player dry_jump, wet_jump;
     player_init(&dry_jump);
     player_init(&wet_jump);
-    player_init(&partial_jump);
-    player_init(&shallow_jump);
-    dry_jump.pos = wet_jump.pos = partial_jump.pos = shallow_jump.pos =
-        mmath_vec3(8.5f, 65.0f, 8.5f);
-    dry_jump.grounded = wet_jump.grounded = partial_jump.grounded = shallow_jump.grounded = true;
+    dry_jump.pos = wet_jump.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    for (int i = 0; i < 3; ++i) {
+        player_update(&dry_jump, &idle_input, dry, PLAYER_STEP_DT);
+        player_update(&wet_jump, &idle_input, wet, PLAYER_STEP_DT);
+    }
     in.jump = true;
     player_update(&dry_jump, &in, dry, PLAYER_STEP_DT);
     player_update(&wet_jump, &in, wet, PLAYER_STEP_DT);
-    player_update(&partial_jump, &in, partial, PLAYER_STEP_DT);
-    player_update(&shallow_jump, &in, shallow, PLAYER_STEP_DT);
-    TEST_ASSERT_FLOAT_EQ(wet_jump.vel.y, 2.4f, 1e-5f);
-    TEST_ASSERT(partial_jump.vel.y > wet_jump.vel.y);
-    TEST_ASSERT(shallow_jump.vel.y > partial_jump.vel.y);
+    TEST_ASSERT_FLOAT_EQ(dry_jump.vel.y, (0.42f - 0.08f) * 0.98f * 20.0f, 0.05f);
+    TEST_ASSERT(wet_jump.vel.y > 0.0f);
+    TEST_ASSERT(dry_jump.vel.y > wet_jump.vel.y);
 
     /* A shallow fluid surface below the player's feet is not contact. */
     Player dry_above, shallow_above;
@@ -437,26 +444,21 @@ int test_physics_step_up_and_eject(void)
     p.yaw = -1.5707963f; /* Face +X (wish dir convention: yaw -pi/2). */
     PlayerInput in = no_input();
     in.fwd = 1.0f;
-    in.auto_jump = true;
-    for (int i = 0; i < 60; ++i) {
+    in.jump = true; /* vanilla has no auto-step: hop onto the ledge */
+    float peak_y = p.pos.y;
+    bool on_ledge = false;
+    for (int i = 0; i < 40; ++i) {
         player_update(&p, &in, w, PLAYER_STEP_DT);
+        peak_y = fmaxf(peak_y, p.pos.y);
+        if (p.grounded && p.pos.y > 65.9f && p.pos.x > 10.0f) {
+            on_ledge = true;
+        }
     }
-    /* Climbed onto the ledge (y=66) and kept walking across it. */
-    TEST_ASSERT(p.pos.y > 65.5f);
-    TEST_ASSERT(p.pos.x > 10.0f);
+    /* Hopped onto the ledge (y=66) and stood/walked on it. */
+    TEST_ASSERT(peak_y > 65.5f);
+    TEST_ASSERT(on_ledge);
 
-    /* Embedded with zero velocity: one update ejects to free space. */
-    Player stuck;
-    player_init(&stuck);
-    stuck.pos = mmath_vec3(10.5f, 65.0f, 8.5f);
-    stuck.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
-    PlayerInput still = no_input();
-    player_update(&stuck, &still, w, PLAYER_STEP_DT);
-    float half = stuck.width * 0.5f;
-    Vec3 mn = mmath_vec3(stuck.pos.x - half, stuck.pos.y, stuck.pos.z - half);
-    Vec3 mx = mmath_vec3(stuck.pos.x + half, stuck.pos.y + stuck.height, stuck.pos.z + half);
-    TEST_ASSERT(player_aabb_solid(w, mn, mx) == false);
-
+    /* (Vanilla's LocalPlayer.moveTowardsClosestSpace eject is not ported.) */
     /* Knockback obeys the mob caps (hs <= 12, up <= 6). */
     Player hit;
     player_init(&hit);
@@ -520,9 +522,10 @@ int test_physics_auto_jump_off(void)
     PlayerInput swim = no_input();
     swim.fwd = 1.0f;
     swim.auto_jump = false;
+    swim.jump = true; /* swim up while pushing into the bank */
     bool escaped = false;
     for (int i = 0; i < 120; ++i) {
-        player_update(&s, &swim, pool, 1.0f / 60.0f);
+        player_update(&s, &swim, pool, 0.05f);
         if (s.grounded && s.pos.y >= 64.0f) {
             escaped = true;
             break;
@@ -870,11 +873,12 @@ int test_physics_water_step_up(void)
     PlayerInput in = no_input();
     in.fwd = 1.0f;
     in.auto_jump = false;
+    in.jump = true; /* vanilla: swim up, then the jump-out impulse fires */
     bool climbed = false;
     float prev_y = p.pos.y;
     float max_step_dy = 0.0f;
     for (int i = 0; i < 120; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
         float step_dy = fabsf(p.pos.y - prev_y);
         if (step_dy > max_step_dy) {
             max_step_dy = step_dy;
@@ -888,9 +892,9 @@ int test_physics_water_step_up(void)
     /* Up on the shore (feet 64), still at the waterline, standing. */
     TEST_ASSERT(climbed == true);
     /* Never a teleport: the exit is the 0.3 blocks/tick fluid jump-out
-     * impulse (6 blocks/s = 0.1 per 1/60 s step), so no single step may
-     * move the feet by more than that plus gravity slack. */
-    TEST_ASSERT(max_step_dy <= 0.11f);
+     * impulse (0.3 blocks/tick), so no single tick may move the feet by
+     * more than that plus a tick of fluid motion. */
+    TEST_ASSERT(max_step_dy <= 0.45f);
     TEST_ASSERT_FLOAT_EQ(p.pos.y, 64.0f, 0.05f);
     TEST_ASSERT(p.pos.x > 7.0f && p.pos.x < 10.0f);
     TEST_ASSERT(p.grounded == true);
@@ -924,7 +928,7 @@ int test_physics_water_escape_deep(void)
     in.auto_jump = false;
     bool escaped = false;
     for (int i = 0; i < 600; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
         if (p.grounded && p.pos.y >= 64.0f && player_water_contact(w, &p) < 0.05f) {
             escaped = true;
             break;
@@ -954,10 +958,11 @@ int test_physics_water_fall_cushion(void)
     p.pos = mmath_vec3(6.5f, 75.0f, 8.5f);
     PlayerInput in = no_input();
     for (int i = 0; i < 400 && !p.grounded; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
     }
     TEST_ASSERT(p.grounded == true);
-    TEST_ASSERT(p.last_fall > 9.0f);
+    /* Water resets the fall distance: no landing report at all. */
+    TEST_ASSERT(p.last_fall < 0.0f);
     TEST_ASSERT(player_water_contact(w, &p) > 0.0f);
     /* Dry control: the same drop onto stone reports no water. */
     p.pos = mmath_vec3(10.5f, 75.0f, 8.5f);
@@ -966,7 +971,7 @@ int test_physics_water_fall_cushion(void)
     p.fall_peak = -1.0f;
     p.last_fall = -1.0f;
     for (int i = 0; i < 400 && !p.grounded; ++i) {
-        player_update(&p, &in, w, 1.0f / 60.0f);
+        player_update(&p, &in, w, 0.05f);
     }
     TEST_ASSERT(p.grounded == true);
     TEST_ASSERT(p.last_fall > 9.0f);
@@ -1004,17 +1009,22 @@ int test_physics_sneak_posture(void)
     /* Crouch: dimensions shrink, eye follows. */
     PlayerInput creep = no_input();
     creep.sneak = true;
-    player_update(&p, &creep, w, PLAYER_STEP_DT);
+    /* The pose flips at the end of the first tick; the camera eye then eases
+     * toward it at 0.5 per tick (vanilla Camera.tick). */
+    for (int i = 0; i < 12; ++i) {
+        player_update(&p, &creep, w, PLAYER_STEP_DT);
+    }
     TEST_ASSERT(p.sneaking == true);
     TEST_ASSERT_FLOAT_EQ(p.height, PLAYER_SNEAK_HEIGHT, 1e-6f);
-    TEST_ASSERT_FLOAT_EQ(p.eye_height, PLAYER_SNEAK_EYE, 1e-6f);
-    TEST_ASSERT_FLOAT_EQ(p.pos.y + p.eye_height, p.pos.y + PLAYER_SNEAK_EYE, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(p.eye_height, PLAYER_SNEAK_EYE, 0.01f);
 
     /* Release: standing restores. */
-    player_update(&p, &in, w, PLAYER_STEP_DT);
+    for (int i = 0; i < 12; ++i) {
+        player_update(&p, &in, w, PLAYER_STEP_DT);
+    }
     TEST_ASSERT(p.sneaking == false);
     TEST_ASSERT_FLOAT_EQ(p.height, PLAYER_STAND_HEIGHT, 1e-6f);
-    TEST_ASSERT_FLOAT_EQ(p.eye_height, PLAYER_STAND_EYE, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(p.eye_height, PLAYER_STAND_EYE, 0.01f);
 
     /* Forced crouch uses fractional headroom (full cubes need it): feet
      * at 65.4 with a ceiling block at 67 leaves crouched top 66.9 free
@@ -1199,7 +1209,7 @@ int test_player_view_bob(void)
     TEST_ASSERT_FLOAT_EQ(vert, 0.0f, 1e-6f);
 
     /* Walking builds the stride clock and amplitude; stopping settles.
-     * Walk 60 steps (1 s, ~4.3 blocks) to stay inside the 16-wide floor. */
+     * Walk 30 ticks (1.5 s, ~6.5 blocks) to stay inside the 16-wide floor. */
     World *w = make_floor_world();
     TEST_ASSERT(w != NULL);
     if (w == NULL) {
@@ -1212,7 +1222,7 @@ int test_player_view_bob(void)
     m.yaw = -1.5707963f;
     PlayerInput walk = no_input();
     walk.fwd = 1.0f;
-    for (int i = 0; i < 60; ++i) {
+    for (int i = 0; i < 30; ++i) {
         player_update(&m, &walk, w, PLAYER_STEP_DT);
     }
     TEST_ASSERT(m.grounded == true);

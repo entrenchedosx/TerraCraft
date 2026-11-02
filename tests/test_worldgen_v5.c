@@ -15,6 +15,10 @@
 #include <stdint.h>
 #include <string.h>
 
+/* The player simulates at the vanilla 20 TPS: one test step is one game tick. */
+#undef PLAYER_STEP_DT
+#define PLAYER_STEP_DT 0.05f
+
 /* Hash bytes explicitly so the compatibility fixture is independent of
  * host endianness and struct padding. These hashes predate profile 5. */
 static uint64_t block_hash(const Chunk *chunk)

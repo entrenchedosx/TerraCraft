@@ -25,17 +25,22 @@ Complements the matrix. Each entry: what differs, why, how it would be fixed.
 
 ## Physics
 
-- Movement is a 60 Hz continuous model with custom time constants; vanilla is
-  a 20 TPS discrete model (friction 0.6 × 0.91, 0.98 drag, 0.08 gravity,
-  0.42 jump, 0.1 acceleration constants, sprint ×1.3, etc.). Trajectories
-  will not match tick-for-tick.
-- Water exit: the old clamber (`pos.y += 1.0`) was a teleport and has been
-  replaced with vanilla's jump-out impulse (0.3 blocks/tick when blocked and
-  the body raised 0.6 is free). Surrounding fluid forces (drag 0.8, 0.02
-  acceleration, depth strider, sprint-swim) are still custom.
-- No swimming pose/collision shape, no ladders/vines/slime/honey/ice
-  behaviours, no step height 0.6 (only auto-jump 1.0 when enabled), no
-  collision shapes below full-cube.
+Walking, swimming and falling run the vanilla 20 TPS model (see
+[PHYSICS_PARITY.md](PHYSICS_PARITY.md)); creative flight still uses the old
+60 Hz velocity model. Not ported or approximated:
+
+- Water current pushing (flowing water), lava, bubble columns, cobwebs,
+  berry bushes and other `makeStuckInBlock` blocks.
+- Ladders / vines climbing, scaffolding, honey, slime, ice and soul-sand
+  friction/jump factors (all blocks use friction 0.6 and factor 1.0).
+- `moveTowardsClosestSpace` (ejection from embedded blocks) and
+  `minorHorizontalCollision` are approximated or absent.
+- Auto-jump is removed from the walking path (vanilla option, off by default).
+- Swimming pose exists in the state but sprint-swimming is not driven by
+  input; elytra, riding, spectator and creative flight differences remain.
+- Collision uses full unit cubes only (no slabs, stairs, fences, carpets).
+- No differential harness against real 1.21.11 physics: expected values are
+  derived from client bytecode and the well-known published figures.
 
 ## World / content
 
