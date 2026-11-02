@@ -808,7 +808,9 @@ static float *hand_emit_cube(float *dst, const HandBasis *b, const Mat4 *m, cons
         for (int k = 0; k < 4; ++k) {
             p[k] = mmath_vec3(cube->v[f][k].x, cube->v[f][k].y, cube->v[f][k].z);
             uv[k][0] = cube->v[f][k].u;
-            uv[k][1] = cube->v[f][k].v;
+            /* Skin textures are stored bottom-up (see mob_skin_part_uvs), while the
+             * cube uses vanilla's top-left origin. */
+            uv[k][1] = 1.0f - cube->v[f][k].v;
             if (tile_rect != NULL) {
                 uv[k][0] = tile_rect[0] + (tile_rect[2] - tile_rect[0]) * cu[k];
                 uv[k][1] = tile_rect[1] + (tile_rect[3] - tile_rect[1]) * cv[k];
