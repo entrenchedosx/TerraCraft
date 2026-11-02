@@ -15,6 +15,10 @@
 #include "core/noise.h"
 #include <string.h>
 #include <math.h>
+
+/* The player simulates at the vanilla 20 TPS: one test step is one game tick. */
+#undef PLAYER_STEP_DT
+#define PLAYER_STEP_DT 0.05f
 _Static_assert(TILE_LAVA == 72, "Lava shader expects atlas column 8, row 4");
 
 int test_worldgen_v4_determinism(void)

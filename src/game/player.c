@@ -1,4 +1,5 @@
 #include "game/player.h"
+#include "game/vphys.h"
 #include "core/log.h"
 #include "world/block.h"
 #include "world/chunk.h"
@@ -6,6 +7,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 /* Snapping epsilon for collision clamps (keeps flush faces non-overlapping). */
 #define PLAYER_EPS 0.001f
@@ -114,6 +116,13 @@ void player_init(Player *p)
     p->mine_held = ITEM_NONE;
     p->mine_progress = 0.0f;
     p->mine_need = 0.0f;
+    memset(&p->ph, 0, sizeof(p->ph));
+    p->ph_init = false;
+    p->ph_accum = 0.0f;
+    p->ph_pos_mirror = p->pos;
+    p->ph_vel_mirror = p->vel;
+    p->eye_prev = p->eye_height;
+    p->eye_cur = p->eye_height;
 }
 
 /* Find a safe spawn column top.
@@ -331,132 +340,6 @@ void player_view_bob_offset(const Player *p, float *out_lateral, float *out_vert
     }
 }
 
-/* Dry step-up: walking into a single-block ledge while grounded climbs it
- * instead of grinding. The candidate position is up one PLUS the blocked
- * horizontal motion applied: only a real 1-high obstacle ahead accepts the
- * step (a tall wall stays solid at the raised level, so the player cannot
- * elevator up it). The full raised box must be free (headroom included).
- * Sneaking never steps (ledge safety); ascending jumps never step either.
- */
-static bool player_try_step_up(Player *p, World *w, float dx, float dz)
-{
-    if (p->vel.y > 0.0f) {
-        return false;
-    }
-    Vec3 saved = p->pos;
-    p->pos.x = saved.x + dx;
-    p->pos.z = saved.z + dz;
-    p->pos.y = saved.y + 1.0f;
-    Vec3 mn, mx;
-    player_box(p, &mn, &mx);
-    if (player_aabb_solid(w, mn, mx)) {
-        p->pos = saved;
-        return false;
-    }
-    p->vel.y = 0.0f;
-    p->grounded = true;
-    return true;
-}
-
-/* Leave the water over a bank the way Java Edition does
- * (LivingEntity.travelInFluid): when horizontal motion is blocked and the
- * body shifted up 0.6 blocks (plus this step's vertical travel) is free, the
- * vertical velocity becomes 0.3 blocks/tick (6 blocks/s) and ordinary
- * movement carries the player up. The position is NEVER moved here, so there
- * is no teleport: collision resolution decides where the feet end up.
- */
-#define PLAYER_FLUID_JUMP_OUT_VEL 6.0f
-#define PLAYER_FLUID_JUMP_OUT_CLEARANCE 0.6f
-
-static bool player_try_water_step_up(Player *p, World *w, float dy)
-{
-    Vec3 mn, mx;
-    player_box(p, &mn, &mx);
-    float lift = PLAYER_FLUID_JUMP_OUT_CLEARANCE + dy;
-    mn.y += lift;
-    mx.y += lift;
-    if (player_aabb_solid(w, mn, mx)) {
-        return false;
-    }
-    if (p->vel.y < PLAYER_FLUID_JUMP_OUT_VEL) {
-        p->vel.y = PLAYER_FLUID_JUMP_OUT_VEL;
-    }
-    return true;
-}
-
-/* Resolve one axis after moving: snap out and zero velocity on hit.
- * is_y_down selects landing logic (sets grounded).
- */
-static void player_resolve_axis(Player *p, World *w, int axis, float delta, bool is_y_down)
-{
-    Vec3 mn, mx;
-    player_box(p, &mn, &mx);
-    if (!player_aabb_solid(w, mn, mx)) {
-        return;
-    }
-    float hw = p->width * 0.5f;
-    if (axis == 0) {
-        if (delta > 0.0f) {
-            p->pos.x = floorf(mx.x) - hw - PLAYER_EPS;
-        } else if (delta < 0.0f) {
-            p->pos.x = floorf(mn.x) + 1.0f + hw + PLAYER_EPS;
-        } else {
-            /* Embedded with no motion (spawn/teleport/fly-toggle inside a
-             * block): eject along the smallest penetration instead of
-             * sitting stuck with zeroed velocity forever. */
-            float out_neg = floorf(mn.x) + 1.0f + hw + PLAYER_EPS - p->pos.x;
-            float out_pos = floorf(mx.x) - hw - PLAYER_EPS - p->pos.x;
-            p->pos.x += (fabsf(out_neg) < fabsf(out_pos)) ? out_neg : out_pos;
-        }
-        p->vel.x = 0.0f;
-    } else if (axis == 2) {
-        if (delta > 0.0f) {
-            p->pos.z = floorf(mx.z) - hw - PLAYER_EPS;
-        } else if (delta < 0.0f) {
-            p->pos.z = floorf(mn.z) + 1.0f + hw + PLAYER_EPS;
-        } else {
-            float out_neg = floorf(mn.z) + 1.0f + hw + PLAYER_EPS - p->pos.z;
-            float out_pos = floorf(mx.z) - hw - PLAYER_EPS - p->pos.z;
-            p->pos.z += (fabsf(out_neg) < fabsf(out_pos)) ? out_neg : out_pos;
-        }
-        p->vel.z = 0.0f;
-    } else {
-        if (is_y_down) {
-            p->pos.y = floorf(mn.y) + 1.0f;
-            p->grounded = true;
-        } else {
-            p->pos.y = floorf(mx.y) - p->height - PLAYER_EPS;
-        }
-        p->vel.y = 0.0f;
-    }
-}
-
-/* Support test for sneak edge protection (MC Entity.moveEntity clip):
- * true when any solid block overlaps the 1-block slab directly under the
- * footprint, so a ledge with no ground beneath reads as unsupported.
- * Standing exactly on a block top counts (epsilon shrink is max-side only).
- */
-static bool player_has_support(const Player *p, const World *w)
-{
-    float hw = p->width * 0.5f;
-    Vec3 mn = mmath_vec3(p->pos.x - hw, p->pos.y - 1.0f, p->pos.z - hw);
-    Vec3 mx = mmath_vec3(p->pos.x + hw, p->pos.y, p->pos.z + hw);
-    return player_aabb_solid(w, mn, mx);
-}
-
-/* Support test at an arbitrary feet position (for pre-move corner checks).
- * Uses the player's width; y is the feet Y. */
-static bool player_has_support_at(const Player *p, const World *w, float x, float y, float z)
-{
-    if (p == NULL) {
-        return false;
-    }
-    float hw = p->width * 0.5f;
-    Vec3 mn = mmath_vec3(x - hw, y - 1.0f, z - hw);
-    Vec3 mx = mmath_vec3(x + hw, y, z + hw);
-    return player_aabb_solid(w, mn, mx);
-}
-
 /* Single fixed physics step.
  *
  * Args:
@@ -471,7 +354,6 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
     bool jump = in ? in->jump : false;
     bool sneak_in = in ? in->sneak : false;
     bool sprint = in ? in->sprint : false;
-    bool auto_jump = in ? in->auto_jump : false;
     const float dt = PLAYER_STEP_DT;
     p->anim_time += dt;
 
@@ -523,175 +405,116 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         return;
     }
 
-    /* Walk mode: horizontal velocity eases toward input; sneak is 0.3x
-     * (MC: 1.31 m/s vs 4.317 walk). */
-    float speed = p->sprinting ? p->sprint_speed : p->walk_speed;
-    if (sneak) {
-        speed *= 0.3f;
-    }
-    if (water_contact > 0.0f) {
-        speed *= 1.0f - 0.45f * water_contact;
-    }
-    Vec3 wish = player_wish_dir(p->yaw, fwd, strafe);
-    if (mmath_vec3_length_sq(wish) > 1e-8f) {
-        /* Ease toward the wish velocity: acceleration is finite on the
-         * ground and weak in the air, so taps and direction changes carry
-         * believable momentum instead of snapping. */
-        float tau;
-        if (water_contact > 0.0f) {
-            tau = PLAYER_ACCEL_WATER_TAU;
-        } else if (p->grounded) {
-            tau = PLAYER_ACCEL_GROUND_TAU;
-        } else {
-            tau = PLAYER_ACCEL_AIR_TAU;
-        }
-        float k = player_smoothing(dt, tau);
-        p->vel.x += (wish.x * speed - p->vel.x) * k;
-        p->vel.z += (wish.z * speed - p->vel.z) * k;
-    } else {
-        /* No input: retain horizontal momentum with MC-style friction. */
-        float dry_drag = p->grounded ? p->drag_ground : p->drag_air;
-        float d = dry_drag + (PLAYER_WATER_DRAG - dry_drag) * water_contact;
-        p->vel.x *= d;
-        p->vel.z *= d;
-        if (fabsf(p->vel.x) < 1e-4f) {
-            p->vel.x = 0.0f;
-        }
-        if (fabsf(p->vel.z) < 1e-4f) {
-            p->vel.z = 0.0f;
-        }
-    }
+}
 
-    /* Vertical: gravity integrate, terminal clamp, jump on grounded. */
-    float gravity = p->gravity * (1.0f - 0.88f * water_contact);
-    p->acc = mmath_vec3(0.0f, -gravity, 0.0f);
-    p->vel.y -= gravity * dt;
-    if (p->vel.y < PLAYER_TERMINAL_VEL) {
-        p->vel.y = PLAYER_TERMINAL_VEL;
-    }
-    if (jump && p->grounded) {
-        p->vel.y = p->jump_vel;
-        p->grounded = false;
-    }
-    if (water_contact > 0.0f) {
-        if (jump) {
-            p->vel.y += (2.4f - p->vel.y) * water_contact;
-        } else if (sneak) {
-            p->vel.y += (-2.4f - p->vel.y) * water_contact;
-        } else {
-            p->vel.y *= 1.0f - 0.20f * water_contact;
-        }
-    }
+/* ---- vanilla 20 TPS walking path -------------------------------------------- */
 
-    if (w == NULL) {
-        p->pos = mmath_vec3_add(p->pos, mmath_vec3_scale(p->vel, dt));
+#define RAD_TO_DEG 57.29577951308232f
+
+static bool vec3_differs(Vec3 a, Vec3 b, float eps)
+{
+    return fabsf(a.x - b.x) > eps || fabsf(a.y - b.y) > eps || fabsf(a.z - b.z) > eps;
+}
+
+/* Pull externally changed position/velocity (spawn, respawn, knockback) into
+ * the double-precision physics state. */
+static void player_phys_import(Player *p)
+{
+    if (!p->ph_init) {
+        vphys_init(&p->ph, (double)p->pos.x, (double)p->pos.y, (double)p->pos.z);
+        p->ph.vx = (double)p->vel.x / 20.0;
+        p->ph.vy = (double)p->vel.y / 20.0;
+        p->ph.vz = (double)p->vel.z / 20.0;
+        p->ph_init = true;
+        p->ph_pos_mirror = p->pos;
+        p->ph_vel_mirror = p->vel;
+        p->ph_accum = 0.0f;
+        p->eye_prev = p->eye_height;
+        p->eye_cur = p->eye_height;
         return;
     }
+    if (vec3_differs(p->pos, p->ph_pos_mirror, 1e-4f)) {
+        p->ph.x = p->ph.px = (double)p->pos.x;
+        p->ph.y = p->ph.py = (double)p->pos.y;
+        p->ph.z = p->ph.pz = (double)p->pos.z;
+        p->ph.fall_distance = 0.0;
+    }
+    if (vec3_differs(p->vel, p->ph_vel_mirror, 1e-4f)) {
+        p->ph.vx = (double)p->vel.x / 20.0;
+        p->ph.vy = (double)p->vel.y / 20.0;
+        p->ph.vz = (double)p->vel.z / 20.0;
+    }
+}
 
-    /* Axis-separated move + collide: X, then Z, then Y. */
-    bool was_grounded = p->grounded;
-    p->grounded = false;
-    float dx = p->vel.x * dt;
-    float dz = p->vel.z * dt;
-    float dy = p->vel.y * dt;
-    float pre_x = p->pos.x;
-    float pre_z = p->pos.z;
-    /* Diagonal corner-cut guard (MC Entity.moveEntity third loop): when
-     * both single-axis destinations are supported but the combined
-     * diagonal hangs over the void (outer L-corner), cancel both so the
-     * corner needs axis-aligned steps. Single-axis slides (narrow ledge
-     * along X, sideways Z unsupported) still pass through to the per-axis
-     * clips below. Tested at intended positions; walls do not count as
-     * support (slab is y-1..y only). */
-    if (sneak && was_grounded && dx != 0.0f && dz != 0.0f) {
-        bool x_only = player_has_support_at(p, w, pre_x + dx, p->pos.y, pre_z);
-        bool z_only = player_has_support_at(p, w, pre_x, p->pos.y, pre_z + dz);
-        bool both = player_has_support_at(p, w, pre_x + dx, p->pos.y, pre_z + dz);
-        if (x_only && z_only && !both) {
-            dx = 0.0f;
-            dz = 0.0f;
-            p->vel.x = 0.0f;
-            p->vel.z = 0.0f;
-        }
-    }
-    p->pos.x += dx;
-    player_resolve_axis(p, w, 0, dx, false);
-    /* Sneak edge protection (MC Entity.moveEntity clip: grounded +
-     * sneaking clips the move where the 1-below slab has no support,
-     * per axis). Stairs still descend: the lower step is inside the
-     * 1-below slab, so it counts. */
-    if (sneak && was_grounded && dx != 0.0f && !player_has_support(p, w)) {
-        p->pos.x = pre_x;
-        p->vel.x = 0.0f;
-    }
-    p->pos.z += dz;
-    player_resolve_axis(p, w, 2, dz, false);
-    if (sneak && was_grounded && dz != 0.0f && !player_has_support(p, w)) {
-        p->pos.z = pre_z;
-        p->vel.z = 0.0f;
-    }
-    /* Dry step-up: grounded, pushing a ledge, barely moving -> climb one
-     * block instead of grinding. Sneak never steps up (ledge safety).
-     * Gated on the autoJump setting (MC default off). */
-    if (auto_jump && water_contact <= 0.0f && !sneak && mmath_vec3_length_sq(wish) > 1e-8f) {
-        float moved = fabsf(p->pos.x - pre_x) + fabsf(p->pos.z - pre_z);
-        float wanted = fabsf(dx) + fabsf(dz);
-        if (wanted > 1e-6f && moved < wanted * 0.25f) {
-            player_try_step_up(p, w, dx, dz);
-        }
-    }
-    /* Shore clamber: swimming into a bank while partially immersed steps
-     * up one block instead of grinding against it. Gated on stalled
-     * horizontal motion with live input so open-water swimming never
-     * climbs. Deliberately NOT tied to autoJump: escaping water is basic
-     * movement (MC parity), unlike the optional dry 1-block auto-step. */
-    if (water_contact > 0.15f && water_contact < 0.75f &&
-        mmath_vec3_length_sq(wish) > 1e-8f) {
-        float hs = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
-        if (hs < 0.05f) {
-            if (player_try_water_step_up(p, w, dy)) {
-                /* The impulse takes effect this step; grounded resolution
-                 * below would otherwise cancel it before it moves anything. */
-                dy = p->vel.y * dt;
-            }
-        }
-    }
-    p->pos.y += dy;
-    player_resolve_axis(p, w, 1, dy, dy <= 0.0f);
+static void player_phys_tick(Player *p, const PlayerInput *in, World *w)
+{
+    VInput vi;
+    vi.forward = in != NULL ? in->fwd : 0.0f;
+    vi.left = in != NULL ? -in->strafe : 0.0f;
+    vi.jump = in != NULL && in->jump;
+    vi.shift = in != NULL && in->sneak;
+    vi.sprint_key = in != NULL && in->sprint;
+    float yaw_deg = 180.0f - p->yaw * RAD_TO_DEG;
+    float pitch_deg = -p->pitch * RAD_TO_DEG;
+    vphys_tick(&p->ph, &vi, w, yaw_deg, pitch_deg);
+    p->anim_time += VPHYS_TICK_SECONDS;
 
-    /* Fall tracking: peak while airborne, distance sampled on landing. */
+    p->pos = mmath_vec3((float)p->ph.x, (float)p->ph.y, (float)p->ph.z);
+    p->vel = mmath_vec3((float)(p->ph.vx * 20.0), (float)(p->ph.vy * 20.0), (float)(p->ph.vz * 20.0));
+    p->ph_pos_mirror = p->pos;
+    p->ph_vel_mirror = p->vel;
+    p->grounded = p->ph.on_ground;
+    p->sprinting = p->ph.sprinting;
+    p->sneaking = p->ph.pose == VPOSE_CROUCHING;
+    p->width = (float)p->ph.width;
+    p->height = (float)p->ph.height;
+    p->acc = mmath_vec3(0.0f, 0.0f, 0.0f);
+    p->water_contact = player_water_contact(w, p);
+    /* Camera eye height eases toward the pose's eye height (Camera.tick: 0.5/tick). */
+    p->eye_prev = p->eye_cur;
+    p->eye_cur += ((float)p->ph.eye_height - p->eye_cur) * 0.5f;
+    if (p->ph.landed_fall >= 0.0) {
+        p->last_fall = (float)p->ph.landed_fall;
+    }
+    p->fall_peak = -1.0f;
+
     float hspeed = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
     float bob_target = 0.0f;
     if (p->grounded) {
-        if (p->fall_peak >= 0.0f) {
-            p->last_fall = p->fall_peak - p->pos.y;
-            if (p->last_fall < 0.0f) {
-                p->last_fall = 0.0f;
-            }
-        }
-        p->fall_peak = -1.0f;
-        /* Stride phase for third-person limb swing (same cadence as mobs:
-         * distance-paced, so the swing matches ground speed at any rate). */
-        p->walk_phase += hspeed * dt * 4.0f;
-        /* View-bob amplitude chases locomotion (Java cameraYaw): full
-         * while striding on ground, calmer while sneaking, silent still. */
+        p->walk_phase += hspeed * VPHYS_TICK_SECONDS * 4.0f;
         if (hspeed > 0.5f) {
-            bob_target = sneak ? PLAYER_BOB_AMP_SNEAK : PLAYER_BOB_AMP_WALK;
+            bob_target = p->sneaking ? PLAYER_BOB_AMP_SNEAK : PLAYER_BOB_AMP_WALK;
         }
-    } else {
-        if (p->fall_peak < p->pos.y) {
-            p->fall_peak = p->pos.y;
-        }
-        /* Swimming strokes pace off the same distance clock so the body
-         * animates while stroking through water. */
-        if (water_contact > 0.3f && hspeed > 0.5f) {
-            p->walk_phase += hspeed * dt * 6.0f;
-        }
+    } else if (p->water_contact > 0.3f && hspeed > 0.5f) {
+        p->walk_phase += hspeed * VPHYS_TICK_SECONDS * 6.0f;
     }
-    p->bob_amp += (bob_target - p->bob_amp) * PLAYER_BOB_LERP;
+    p->bob_amp += (bob_target - p->bob_amp) * 0.4f;
 }
 
-/* Advance the player with fixed substeps.
+/* Smooth the render position/eye between the last two physics ticks.
+ * extra_seconds is frame time not yet simulated (0 right after a step). */
+void player_interpolate(Player *p, float extra_seconds)
+{
+    if (p == NULL) {
+        return;
+    }
+    if (!p->ph_init || p->flying) {
+        p->render_pos = p->pos;
+        return;
+    }
+    if (!isfinite(extra_seconds) || extra_seconds < 0.0f) {
+        extra_seconds = 0.0f;
+    }
+    float a = (p->ph_accum + extra_seconds) / VPHYS_TICK_SECONDS;
+    a = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a);
+    p->render_pos = mmath_vec3((float)(p->ph.px + (p->ph.x - p->ph.px) * (double)a),
+                               (float)(p->ph.py + (p->ph.y - p->ph.py) * (double)a),
+                               (float)(p->ph.pz + (p->ph.z - p->ph.pz) * (double)a));
+    p->eye_height = p->eye_prev + (p->eye_cur - p->eye_prev) * a;
+}
+
+/* Advance the player. Walking runs the vanilla 20 TPS movement (vphys);
+ * creative flight keeps its direct 60 Hz velocity model.
  *
  * Args:
  *   p: player.
@@ -704,7 +527,7 @@ void player_update(Player *p, const PlayerInput *in, World *w, float dt)
     if (p == NULL) {
         return;
     }
-    if (dt < 0.0f) {
+    if (dt < 0.0f || !isfinite(dt)) {
         dt = 0.0f;
     }
     if (dt > 0.25f) {
@@ -717,14 +540,30 @@ void player_update(Player *p, const PlayerInput *in, World *w, float dt)
     if (p->pitch < -PLAYER_PITCH_LIMIT) {
         p->pitch = -PLAYER_PITCH_LIMIT;
     }
-    p->step_accum += dt;
-    int steps = 0;
-    while (p->step_accum >= PLAYER_STEP_DT && steps < PLAYER_MAX_STEPS) {
-        player_step(p, in, w);
-        p->step_accum -= PLAYER_STEP_DT;
-        steps++;
+    if (p->flying) {
+        p->ph_init = false; /* Re-import position when walking resumes. */
+        p->step_accum += dt;
+        int steps = 0;
+        while (p->step_accum >= PLAYER_STEP_DT && steps < PLAYER_MAX_STEPS) {
+            player_step(p, in, w);
+            p->step_accum -= PLAYER_STEP_DT;
+            steps++;
+        }
+        if (steps == PLAYER_MAX_STEPS) {
+            p->step_accum = 0.0f; /* Spiral-of-death guard: drop excess time. */
+        }
+        return;
     }
-    if (steps == PLAYER_MAX_STEPS) {
-        p->step_accum = 0.0f; /* Spiral-of-death guard: drop excess time. */
+    player_phys_import(p);
+    p->ph_accum += dt;
+    int ticks = 0;
+    while (p->ph_accum >= VPHYS_TICK_SECONDS && ticks < PLAYER_MAX_STEPS) {
+        player_phys_tick(p, in, w);
+        p->ph_accum -= VPHYS_TICK_SECONDS;
+        ticks++;
     }
+    if (ticks == PLAYER_MAX_STEPS) {
+        p->ph_accum = 0.0f; /* Spiral-of-death guard: drop excess time. */
+    }
+    player_interpolate(p, 0.0f);
 }

@@ -109,6 +109,7 @@ set(TERRACRAFT_SOURCES
   src/game/player_animation.c
   src/game/player_model.c
   src/game/hand_view.c
+  src/game/vphys.c
   src/game/simulation_clock.c
   src/game/raycast.c
   src/game/interaction.c
@@ -230,6 +231,7 @@ add_executable(terracraft_tests
   tests/test_gamerules.c
   tests/test_hand_view.c
   tests/test_worldgen_parity.c
+  tests/test_vphys.c
 )
 target_link_libraries(terracraft_tests PRIVATE terracraft_core)
 target_compile_definitions(terracraft_tests PRIVATE TC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

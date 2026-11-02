@@ -14,6 +14,7 @@
 #include "math/mmath.h"
 
 #include "game/inventory.h"
+#include "game/vphys.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -122,6 +123,12 @@ typedef struct Player {
     ItemId mine_held;   /* Held item when started (slot switch resets). */
     float mine_progress; /* Seconds spent on target. */
     float mine_need;    /* Seconds required (from survival policy). */
+    VPhys ph;           /* Vanilla 20 TPS walking state (double precision). */
+    bool ph_init;       /* ph holds a live state. */
+    float ph_accum;     /* Seconds toward the next 20 Hz physics tick. */
+    Vec3 ph_pos_mirror; /* pos/vel as last written by the physics (external edits are re-imported). */
+    Vec3 ph_vel_mirror;
+    float eye_prev, eye_cur; /* Camera eye height at the previous / current tick. */
 } Player;
 
 /* Initialise a player with M3 defaults (survival walk mode, slot defaults).
@@ -245,3 +252,8 @@ void player_apply_knockback(Player *p, float kx, float ky, float kz);
  *   dt: frame time seconds (>= 0; clamped internally).
  */
 void player_update(Player *p, const PlayerInput *in, World *w, float dt);
+
+/* Interpolate render_pos / eye_height between the last two 20 Hz physics
+ * ticks. extra_seconds is un-simulated frame time (0 right after a step).
+ * Creative flight and un-ticked players render at pos. NULL-safe. */
+void player_interpolate(Player *p, float extra_seconds);

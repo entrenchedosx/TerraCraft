@@ -290,6 +290,13 @@ int main(void)
     RUN_TEST(test_hand_rest_pose_screen_placement);
     RUN_TEST(test_worldgen_parity_primitives);
     RUN_TEST(test_worldgen_parity_known_values);
+    RUN_TEST(test_vphys_walk_sprint_sneak_speeds);
+    RUN_TEST(test_vphys_jump_apex_and_air);
+    RUN_TEST(test_vphys_fall_distance_and_landing);
+    RUN_TEST(test_vphys_water_sinking_and_exit);
+    RUN_TEST(test_vphys_sneak_edge_and_collision);
+    RUN_TEST(test_vphys_diagonal_input_matches_vanilla_scaling);
+    RUN_TEST(test_vphys_mth_trig_table);
     RUN_TEST(test_menu_background_granularity);
 
     printf("==============================\n");
