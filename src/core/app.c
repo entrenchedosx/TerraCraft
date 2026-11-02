@@ -2605,6 +2605,7 @@ static void app_start_arm_swing(AppContext *app)
     app->arm_swing_started = app->last_frame_time;
     app->arm_swing_active = true;
     app->arm_swing_repeat_t = PLAYER_SWING_DURATION;
+    hand_view_swing(&app->hand);
     player_anim_notify_attacked(&app->panim);
 }
 
@@ -2896,6 +2897,7 @@ static bool app_try_attack(AppContext *app)
                 audio_play(&app->audio, AUDIO_TOOL_BREAK);
             }
             app->player.attack_cd = cd;
+            hand_view_reset_attack_strength(&app->hand);
             app_start_arm_swing(app);
             return true;
         }
@@ -2905,6 +2907,7 @@ static bool app_try_attack(AppContext *app)
             audio_play(&app->audio, AUDIO_TOOL_BREAK);
         }
         app->player.attack_cd = cd;
+        hand_view_reset_attack_strength(&app->hand);
         app_start_arm_swing(app);
         return true;
     }
@@ -2913,6 +2916,7 @@ static bool app_try_attack(AppContext *app)
         audio_play(&app->audio, AUDIO_TOOL_BREAK);
     }
     app->player.attack_cd = cd;
+    hand_view_reset_attack_strength(&app->hand);
     app_start_arm_swing(app);
     return true;
 }
@@ -3650,6 +3654,41 @@ static void app_tick_playing(AppContext *app, float dt)
         player_anim_update(&app->panim, &pai, dt);
     }
 
+    /* First-person hand: vanilla 20 Hz swing/equip/sway state fed from this
+     * play tick (the module owns the tick clock; rendering interpolates). */
+    {
+        const ItemStack *held = &app->player.inv.slots[app->player.hotbar_sel];
+        float dmg_unused = 0.0f;
+        float cd = 0.4f;
+        if (!stack_is_empty(held)) {
+            mob_tool_stats(held->item, &dmg_unused, &cd);
+        } else {
+            mob_tool_stats(0, &dmg_unused, &cd);
+        }
+        HandViewSample hs;
+        memset(&hs, 0, sizeof(hs));
+        hs.held_key = stack_is_empty(held) ? 0 : (int)held->item + 1;
+        hs.yaw_deg = -app->player.yaw * (180.0f / MMATH_PI);
+        hs.pitch_deg = -app->player.pitch * (180.0f / MMATH_PI);
+        if (app->hand_prev_valid) {
+            float ddx = app->player.pos.x - app->hand_prev_x;
+            float ddz = app->player.pos.z - app->hand_prev_z;
+            hs.step_dist = sqrtf(ddx * ddx + ddz * ddz);
+            if (hs.step_dist > 4.0f) {
+                hs.step_dist = 0.0f; /* Teleport/respawn: not walking. */
+            }
+        }
+        app->hand_prev_x = app->player.pos.x;
+        app->hand_prev_z = app->player.pos.z;
+        app->hand_prev_valid = true;
+        hs.on_ground = app->player.grounded;
+        hs.swimming = app->player.water_contact > 0.6f && app->player.sprinting;
+        hs.dead = app->player.dead;
+        hs.hands_busy = false;
+        hs.attack_delay_ticks = cd * 20.0f;
+        hand_view_advance(&app->hand, dt, &hs);
+    }
+
     /* Footsteps: distance cadence on ground (either mode, never flying,
      * never sneaking — Minecraft stays silent while sneaking). */
     if (controllable && app->player.grounded && !app->player.flying && !app->player.sneaking &&
@@ -3988,12 +4027,34 @@ static void app_render_playing(AppContext *app)
         uint16_t held_block = stack_is_empty(held) ? 0 : item_to_block(held->item);
         /* No floating arm in third-person: the real body is visible. */
         if (!app->third_person) {
-            float swing_phase = app->arm_swing_active
-                                    ? player_swing_phase((float)(app->last_frame_time - app->arm_swing_started))
-                                    : 1.0f;
-            PlayerAnimPose pose = player_anim_pose(&app->panim);
-            renderer_draw_player_arm(app->renderer, app->camera, aspect, &app->clock, held_tile,
-                                     held_block, swing_phase, &pose);
+            /* The drawn item lags the held one while the hand is lowered for a
+             * swap (ItemInHandRenderer.mainHandItem), so remember its art. */
+            int held_key = stack_is_empty(held) ? 0 : (int)held->item + 1;
+            if (app->hand.shown_key == held_key || app->hand.shown_key < 0) {
+                app->hand_shown_tile = held_tile;
+                app->hand_shown_block = held_block;
+            }
+            HandItemKind kind = HAND_ITEM_NONE;
+            if (app->hand_shown_tile >= 0) {
+                kind = app->hand_shown_block != 0 ? HAND_ITEM_BLOCK : HAND_ITEM_SPRITE;
+            }
+            HandViewUse use;
+            memset(&use, 0, sizeof(use));
+            if (app->player.eat_active) {
+                use.kind = HAND_USE_EAT;
+                use.duration_ticks = 32.0f;
+                use.remaining_ticks = use.duration_ticks * (1.0f - app->player.eat_t / SURVIVAL_EAT_TIME);
+            } else if (app->player.bow_drawing) {
+                use.kind = HAND_USE_BOW;
+                use.duration_ticks = 72000.0f;
+                use.remaining_ticks = use.duration_ticks - app->player.bow_t * 20.0f;
+            }
+            float partial = hand_view_partial_ahead(&app->hand, (float)app->simulation.accumulator);
+            HandViewFrame hframe;
+            hand_view_frame(&app->hand, partial, -app->player.yaw * (180.0f / MMATH_PI),
+                            -app->player.pitch * (180.0f / MMATH_PI), kind, &use, &hframe);
+            renderer_draw_player_arm(app->renderer, app->camera, aspect, &app->clock,
+                                     app->hand_shown_tile, app->hand_shown_block, &hframe);
         }
     }
     bool vitals = !survival_is_creative(&app->player);
@@ -4024,22 +4085,13 @@ static void app_position_camera(AppContext *app)
 {
     Vec3 eye = player_eye_pos(&app->player);
     if (!app->third_person) {
-        /* Gentle first-person view bob (MC viewBobbing, default ON):
-         * distance-driven from walk_phase via player_view_bob_offset,
-         * independent of the hand controller. Lateral rides camera-right,
-         * vertical is a downward dip. Gameplay rays still start at the
-         * unbobbled eye (pure presentation). */
-        if (app->settings.view_bobbing) {
-            float lat = 0.0f;
-            float vert = 0.0f;
-            player_view_bob_offset(&app->player, &lat, &vert);
-            if (lat != 0.0f || vert != 0.0f) {
-                float cy = app->player.yaw;
-                Vec3 right = mmath_vec3(cosf(cy), 0.0f, -sinf(cy));
-                eye = mmath_vec3_add(eye, mmath_vec3_scale(right, lat));
-                eye.y += vert;
-            }
-        }
+        /* GameRenderer.bobView (viewBobbing, default ON): the vanilla bob matrix
+         * is multiplied into the camera view, so world and hand share it.
+         * Gameplay rays still start at the unbobbed eye (pure presentation). */
+        Mat4 bob = hand_view_bob_matrix(
+            &app->hand, hand_view_partial_ahead(&app->hand, (float)app->simulation.accumulator),
+            app->settings.view_bobbing);
+        camera_set_view_bob(app->camera, &bob);
         camera_set_position(app->camera, eye);
     } else {
         HitResult back = raycast_from_eye(eye, app->player.yaw + MMATH_PI, -app->player.pitch,
@@ -4052,6 +4104,7 @@ static void app_position_camera(AppContext *app)
         Vec3 fwd = mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch),
                                     -cosf(app->player.yaw) * cp);
         camera_set_position(app->camera, mmath_vec3_sub(eye, mmath_vec3_scale(fwd, d)));
+        camera_set_view_bob(app->camera, NULL);
     }
     camera_set_yaw_pitch(app->camera, app->player.yaw, app->player.pitch);
 }

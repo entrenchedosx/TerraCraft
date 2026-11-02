@@ -362,6 +362,18 @@ int test_gamerules_session_create(void);
 int test_gamerules_lan_framing(void);
 int test_gamerules_codecs(void);
 int test_death_gate_states(void);
+int test_hand_golden_arm_matrices(void);
+int test_hand_golden_item_matrices(void);
+int test_hand_golden_eat_and_bob(void);
+int test_hand_swing_timeline(void);
+int test_hand_swing_retrigger_rule(void);
+int test_hand_equip_transition(void);
+int test_hand_attack_cooldown_dip(void);
+int test_hand_tick_rate_independence(void);
+int test_hand_walk_bob_state(void);
+int test_hand_yaw_wrap_does_not_spike_sway(void);
+int test_hand_cube_matches_modelpart(void);
+int test_hand_rest_pose_screen_placement(void);
 int test_menu_background_granularity(void);
 
 /* Atlas tile tests (defined in test_texture.c). */

@@ -12,6 +12,8 @@ struct Camera {
     float fov_y_rad;
     float near_z;
     float far_z;
+    Mat4 view_bob;  /* GameRenderer.bobView matrix, applied after the look-at. */
+    bool has_bob;
 };
 
 /* Clamp pitch to +/-89 deg. */
@@ -96,7 +98,23 @@ Mat4 camera_get_view(const Camera *cam)
     }
     Vec3 fwd = yaw_pitch_forward(cam->yaw, cam->pitch);
     Vec3 center = mmath_vec3_add(cam->position, fwd);
-    return mmath_mat4_lookat(cam->position, center, mmath_vec3(0.0f, 1.0f, 0.0f));
+    Mat4 view = mmath_mat4_lookat(cam->position, center, mmath_vec3(0.0f, 1.0f, 0.0f));
+    if (cam->has_bob) {
+        view = mmath_mat4_mul(cam->view_bob, view);
+    }
+    return view;
+}
+
+/* Set or clear (NULL) the view-bob matrix. */
+void camera_set_view_bob(Camera *cam, const Mat4 *bob)
+{
+    if (cam == NULL) {
+        return;
+    }
+    cam->has_bob = bob != NULL;
+    if (bob != NULL) {
+        cam->view_bob = *bob;
+    }
 }
 
 /* Get projection matrix.

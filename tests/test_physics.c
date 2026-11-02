@@ -871,8 +871,15 @@ int test_physics_water_step_up(void)
     in.fwd = 1.0f;
     in.auto_jump = false;
     bool climbed = false;
+    float prev_y = p.pos.y;
+    float max_step_dy = 0.0f;
     for (int i = 0; i < 120; ++i) {
         player_update(&p, &in, w, 1.0f / 60.0f);
+        float step_dy = fabsf(p.pos.y - prev_y);
+        if (step_dy > max_step_dy) {
+            max_step_dy = step_dy;
+        }
+        prev_y = p.pos.y;
         if (p.grounded && p.pos.y > 63.5f) {
             climbed = true;
             break;
@@ -880,6 +887,10 @@ int test_physics_water_step_up(void)
     }
     /* Up on the shore (feet 64), still at the waterline, standing. */
     TEST_ASSERT(climbed == true);
+    /* Never a teleport: the exit is the 0.3 blocks/tick fluid jump-out
+     * impulse (6 blocks/s = 0.1 per 1/60 s step), so no single step may
+     * move the feet by more than that plus gravity slack. */
+    TEST_ASSERT(max_step_dy <= 0.11f);
     TEST_ASSERT_FLOAT_EQ(p.pos.y, 64.0f, 0.05f);
     TEST_ASSERT(p.pos.x > 7.0f && p.pos.x < 10.0f);
     TEST_ASSERT(p.grounded == true);

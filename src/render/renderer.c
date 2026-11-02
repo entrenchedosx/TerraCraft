@@ -15,6 +15,7 @@
 #include "game/player.h"
 #include "game/projectile.h"
 #include "game/player_animation.h"
+#include "game/hand_view.h"
 
 #include "game/player_model.h"
 #include "game/time_system.h"
@@ -741,33 +742,127 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
     mob_draw_batch(r, cam, aspect, ts, o, skinned ? r->player_skin_tex : r->atlas);
 }
 
-/* Rebase one view-model vertex from camera-local coordinates into world
- * space after applying the shared shoulder swing. */
-static void player_arm_transform_vertex(float *v, Vec3 eye, Vec3 right, Vec3 up, Vec3 forward,
-                                        Vec3 base_shoulder, const PlayerViewmodelPose *pose,
-                                        float viewmodel_scale)
+/* Camera-space (vanilla: +X right, +Y up, -Z forward) to world space for the
+ * first-person viewmodel. Only the screen axes carry the FOV rescale, so the
+ * hand keeps its 70-degree framing whatever the user's FOV setting is. */
+typedef struct HandBasis {
+    Vec3 eye, right, up, forward;
+    float scale;
+} HandBasis;
+
+static Vec3 hand_to_world(const HandBasis *b, Vec3 c)
 {
-    Vec3 p = mmath_vec3(v[0], v[1], v[2]);
-    p = player_viewmodel_pose_transform_point(p, base_shoulder, pose);
-    Vec3 n = mmath_vec3(v[3], v[4], v[5]);
-    n = mob_rot_y(mob_rot_x(mob_rot_z(n, pose->roll), pose->swing_x), pose->swing_y);
-    /* Uniformly scaling xyz would cancel under perspective. Scale only the
-     * screen axes, leaving depth intact, to keep the authored framing. */
-    p.x *= viewmodel_scale;
-    p.y *= viewmodel_scale;
-    n.x /= viewmodel_scale;
-    n.y /= viewmodel_scale;
-    n = mmath_vec3_normalize(n);
-    Vec3 wp = mmath_vec3_add(eye, mmath_vec3_add(mmath_vec3_scale(right, p.x),
-                         mmath_vec3_add(mmath_vec3_scale(up, p.y), mmath_vec3_scale(forward, p.z))));
-    Vec3 wn = mmath_vec3_add(mmath_vec3_scale(right, n.x),
-                         mmath_vec3_add(mmath_vec3_scale(up, n.y), mmath_vec3_scale(forward, n.z)));
-    v[0] = wp.x;
-    v[1] = wp.y;
-    v[2] = wp.z;
-    v[3] = wn.x;
-    v[4] = wn.y;
-    v[5] = wn.z;
+    return mmath_vec3_add(b->eye, mmath_vec3_add(mmath_vec3_scale(b->right, c.x * b->scale),
+                         mmath_vec3_add(mmath_vec3_scale(b->up, c.y * b->scale),
+                                        mmath_vec3_scale(b->forward, -c.z))));
+}
+
+static Vec3 hand_dir_to_world(const HandBasis *b, Vec3 d)
+{
+    d.x /= b->scale;
+    d.y /= b->scale;
+    d = mmath_vec3_normalize(d);
+    return mmath_vec3_add(mmath_vec3_scale(b->right, d.x),
+                          mmath_vec3_add(mmath_vec3_scale(b->up, d.y),
+                                         mmath_vec3_scale(b->forward, -d.z)));
+}
+
+/* Emit one quad (corners in perimeter order) as two triangles. */
+static float *hand_emit_quad(float *dst, const HandBasis *b, const Mat4 *m, const Vec3 p[4],
+                             Vec3 n, const float uv[4][2])
+{
+    static const int tri[6] = {0, 1, 2, 0, 2, 3};
+    Vec3 wn = hand_dir_to_world(b, hand_mat_dir(m, n));
+    Vec3 wp[4];
+    for (int i = 0; i < 4; ++i) {
+        wp[i] = hand_to_world(b, hand_mat_point(m, p[i]));
+    }
+    for (int k = 0; k < 6; ++k) {
+        int i = tri[k];
+        dst[0] = wp[i].x;
+        dst[1] = wp[i].y;
+        dst[2] = wp[i].z;
+        dst[3] = wn.x;
+        dst[4] = wn.y;
+        dst[5] = wn.z;
+        dst[6] = uv[i][0];
+        dst[7] = uv[i][1];
+        dst[8] = 1.0f;
+        dst[9] = 1.0f;
+        dst[10] = 0.0f;
+        dst += MESHER_FLOATS_PER_VERTEX;
+    }
+    return dst;
+}
+
+/* Emit a ModelPart cube. When tile_rect is non-NULL every face samples that
+ * atlas rect instead of the skin texels (no-skin fallback). */
+static float *hand_emit_cube(float *dst, const HandBasis *b, const Mat4 *m, const HandCube *cube,
+                             const float *tile_rect)
+{
+    static const float cu[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+    static const float cv[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    for (int f = 0; f < 6; ++f) {
+        Vec3 p[4];
+        float uv[4][2];
+        for (int k = 0; k < 4; ++k) {
+            p[k] = mmath_vec3(cube->v[f][k].x, cube->v[f][k].y, cube->v[f][k].z);
+            uv[k][0] = cube->v[f][k].u;
+            uv[k][1] = cube->v[f][k].v;
+            if (tile_rect != NULL) {
+                uv[k][0] = tile_rect[0] + (tile_rect[2] - tile_rect[0]) * cu[k];
+                uv[k][1] = tile_rect[1] + (tile_rect[3] - tile_rect[1]) * cv[k];
+            }
+        }
+        Vec3 n = mmath_vec3(cube->v[f][0].nx, cube->v[f][0].ny, cube->v[f][0].nz);
+        dst = hand_emit_quad(dst, b, m, p, n, uv);
+    }
+    return dst;
+}
+
+/* Held block as the block/block model: a unit cube with per-face tiles. */
+static float *hand_emit_block(float *dst, const HandBasis *b, const Mat4 *m, uint16_t block)
+{
+    /* Face order -X,+X,-Y,+Y,-Z,+Z; corners TL,TR,BR,BL as seen from outside. */
+    static const float C[6][4][3] = {
+        {{0, 1, 0}, {0, 1, 1}, {0, 0, 1}, {0, 0, 0}},
+        {{1, 1, 1}, {1, 1, 0}, {1, 0, 0}, {1, 0, 1}},
+        {{0, 0, 1}, {1, 0, 1}, {1, 0, 0}, {0, 0, 0}},
+        {{0, 1, 0}, {1, 1, 0}, {1, 1, 1}, {0, 1, 1}},
+        {{1, 1, 0}, {0, 1, 0}, {0, 0, 0}, {1, 0, 0}},
+        {{0, 1, 1}, {1, 1, 1}, {1, 0, 1}, {0, 0, 1}},
+    };
+    static const float N[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
+    static const float CU[4] = {0.0f, 1.0f, 1.0f, 0.0f};
+    static const float CV[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    for (int f = 0; f < 6; ++f) {
+        float u0, v0, u1, v1;
+        texture_atlas_tile_uv(block_tile_for_face(block, f), &u0, &v0, &u1, &v1);
+        Vec3 p[4];
+        float uv[4][2];
+        for (int k = 0; k < 4; ++k) {
+            p[k] = mmath_vec3(C[f][k][0], C[f][k][1], C[f][k][2]);
+            uv[k][0] = u0 + (u1 - u0) * CU[k];
+            uv[k][1] = v0 + (v1 - v0) * CV[k];
+        }
+        dst = hand_emit_quad(dst, b, m, p, mmath_vec3(N[f][0], N[f][1], N[f][2]), uv);
+    }
+    return dst;
+}
+
+/* Held flat item as item/generated: a 1/16-thick sprite plane (front and
+ * back faces; the per-pixel extruded rim is not modelled yet). */
+static float *hand_emit_sprite(float *dst, const HandBasis *b, const Mat4 *m, int tile)
+{
+    float u0, v0, u1, v1;
+    texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
+    const float z0 = 7.5f / 16.0f;
+    const float z1 = 8.5f / 16.0f;
+    const float uv[4][2] = {{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
+    const Vec3 south[4] = {{0, 1, z1}, {1, 1, z1}, {1, 0, z1}, {0, 0, z1}};
+    const Vec3 north[4] = {{1, 1, z0}, {0, 1, z0}, {0, 0, z0}, {1, 0, z0}};
+    dst = hand_emit_quad(dst, b, m, south, mmath_vec3(0, 0, 1), uv);
+    return hand_emit_quad(dst, b, m, north, mmath_vec3(0, 0, -1), uv);
 }
 
 /* Draw one arm/item batch with a chosen skin or atlas texture. The arm
@@ -797,74 +892,47 @@ static bool renderer_draw_player_arm_batch(Renderer *r, const Camera *cam, float
     return drew;
 }
 
-/* Draw the skinned first-person right arm, or the procedural sleeve/hand
- * fallback, with a separately textured held item. */
+/* Draw the first-person arm (empty hand) or held item using the composed
+ * vanilla matrices from hand_view_frame(). */
 void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
                               const TimeSystem *ts, int held_tile, uint16_t held_block,
-                              float swing_phase, const PlayerAnimPose *pose)
+                              const HandViewFrame *frame)
 {
-    if (r == NULL || cam == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
+    if (r == NULL || cam == NULL || frame == NULL || r->mob_verts == NULL || r->mob_idx == NULL) {
         return;
     }
-    bool has_skin = r->player_skin_tex != 0;
-    bool has_item = held_tile >= 0 && held_tile <= 255;
-    int arm_parts = has_skin ? 1 : 2;
-    int item_part = arm_parts;
-    int count = arm_parts + (has_item ? 1 : 0);
-    MobModelPart parts[3];
-    /* The arm's local +Y axis runs from wrist to shoulder. The rest roll
-     * places the wrist toward the crosshair and the shoulder off-screen at
-     * bottom-right. The held item shares this exact pivot and rotation. */
-    parts[0] = (MobModelPart){{0.34f, -0.44f, 0.575f}, {0.07f, 0.41f, 0.075f},
-                              TILE_PLAYER_SLEEVE, -1, 0.0f, MOB_ANIM_NONE};
-    if (!has_skin) {
-        parts[1] = (MobModelPart){{0.34f, -0.44f, 0.57f}, {0.07f, 0.07f, 0.08f},
-                                  TILE_PLAYER_SKIN, -1, 0.0f, MOB_ANIM_NONE};
-    }
-    if (has_item) {
-        /* Gripped at the lower local end of the arm; the shared transform
-         * carries it beside the wrist instead of leaving it upright.
-         * Blocks read as a held cube; flat item sprites face the camera. */
-        parts[item_part] = (MobModelPart){{0.34f, -0.52f, 0.57f},
-                                          held_block != 0 ? mmath_vec3(0.17f, 0.17f, 0.17f)
-                                                          : mmath_vec3(0.16f, 0.16f, 0.02f),
-                                          held_tile, -1, 0.0f, MOB_ANIM_NONE};
-    }
-    /* The shoulder sits off-frame bottom-right and the hand reaches up-left
-     * toward the crosshair. A shared -3/4 PI rest roll poses the arm and held
-     * item; the punch adds a forward pitch. */
-    const float rest_roll = -2.36f;
-    PlayerViewmodelPose arm_pose = player_viewmodel_pose(pose, player_swing_weight(swing_phase), rest_roll);
-    Vec3 base_shoulder = mmath_vec3(0.42f, -0.33f, 0.60f);
-    Vec3 eye = camera_get_position(cam);
-    Vec3 forward = camera_get_forward(cam);
-    Vec3 right = camera_get_right(cam);
-    Vec3 up = mmath_vec3_normalize(mmath_vec3_cross(right, forward));
-    float viewmodel_scale = camera_get_viewmodel_xy_scale(cam, 70.0f);
-    size_t vertex_count = (size_t)count * 36;
-    const MobSkin *player_skin = player_body_skin();
-    for (int p = 0; p < count; ++p) {
-        float fuv[6][4];
-        if (has_skin && p == 0) {
-            mob_skin_part_uvs(player_skin, player_viewmodel_arm_skin_part(), fuv);
-        } else if (has_item && p == item_part && held_block != 0) {
-            for (int face = 0; face < 6; ++face) {
-                int tile = block_tile_for_face(held_block, face);
-                texture_atlas_tile_uv(tile, &fuv[face][0], &fuv[face][1],
-                                      &fuv[face][2], &fuv[face][3]);
-            }
+    HandBasis basis;
+    basis.eye = camera_get_position(cam);
+    basis.forward = camera_get_forward(cam);
+    basis.right = camera_get_right(cam);
+    basis.up = mmath_vec3_normalize(mmath_vec3_cross(basis.right, basis.forward));
+    basis.scale = camera_get_viewmodel_xy_scale(cam, 70.0f);
+
+    float *dst = r->mob_verts;
+    unsigned int texture = r->atlas;
+    if (frame->kind == HAND_ITEM_NONE) {
+        Mat4 m = mmath_mat4_mul(frame->arm, hand_arm_part_matrix());
+        HandCube arm, sleeve;
+        hand_arm_cube(&arm);
+        hand_sleeve_cube(&sleeve);
+        if (r->player_skin_tex != 0) {
+            texture = r->player_skin_tex;
+            dst = hand_emit_cube(dst, &basis, &m, &arm, NULL);
+            dst = hand_emit_cube(dst, &basis, &m, &sleeve, NULL);
         } else {
-            mob_tile_uvs(&parts[p], fuv);
+            float rect[4];
+            texture_atlas_tile_uv(TILE_PLAYER_SKIN, &rect[0], &rect[1], &rect[2], &rect[3]);
+            dst = hand_emit_cube(dst, &basis, &m, &arm, rect);
         }
-        float *dst = r->mob_verts + (size_t)p * 36 * MESHER_FLOATS_PER_VERTEX;
-        /* mob_emit_part adds its standard PI-facing rotation internally;
-         * cancel it so camera-local X/Z and Steve's front-facing UV stay put. */
-        mob_emit_part(dst, mmath_vec3(0.0f, 0.0f, 0.0f), -3.14159265f, &parts[p], 0.0f, false, fuv);
-        for (size_t v = 0; v < 36; ++v) {
-            player_arm_transform_vertex(dst + v * MESHER_FLOATS_PER_VERTEX, eye, right, up, forward,
-                                        base_shoulder, &arm_pose, viewmodel_scale);
-        }
+    } else if (frame->kind == HAND_ITEM_BLOCK && held_block != 0) {
+        dst = hand_emit_block(dst, &basis, &frame->item, held_block);
+    } else if (held_tile >= 0 && held_tile <= 255) {
+        dst = hand_emit_sprite(dst, &basis, &frame->item, held_tile);
+    } else {
+        return;
     }
+    size_t vertex_count = (size_t)(dst - r->mob_verts) / MESHER_FLOATS_PER_VERTEX;
+
     GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);
     GLboolean cull_was_enabled = glIsEnabled(GL_CULL_FACE);
     GLboolean depth_mask_was_enabled = GL_TRUE;
@@ -873,16 +941,7 @@ void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
     glClear(GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    if (has_skin) {
-        renderer_draw_player_arm_batch(r, cam, aspect, ts, r->mob_verts, 36,
-                                       r->player_skin_tex);
-        if (has_item) {
-            float *item_verts = r->mob_verts + (size_t)item_part * 36 * MESHER_FLOATS_PER_VERTEX;
-            renderer_draw_player_arm_batch(r, cam, aspect, ts, item_verts, 36, r->atlas);
-        }
-    } else {
-        renderer_draw_player_arm_batch(r, cam, aspect, ts, r->mob_verts, vertex_count, r->atlas);
-    }
+    renderer_draw_player_arm_batch(r, cam, aspect, ts, r->mob_verts, vertex_count, texture);
     if (depth_was_enabled) {
         glEnable(GL_DEPTH_TEST);
     } else {

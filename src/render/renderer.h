@@ -33,6 +33,7 @@
 #include <stdint.h>
 
 #include "game/player_animation.h"
+#include "game/hand_view.h"
 
 /* Forward declarations. */
 typedef struct GlContext GlContext;
@@ -264,14 +265,14 @@ typedef struct Player Player;
 void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const TimeSystem *ts,
                           const Player *p, float move_blend, const PlayerAnim *anim);
 
-/* Draw the original blocky first-person sleeve and hand after world effects
- * but before the HUD. held_tile is -1 for an empty hand; held_block is 0 for
- * a non-block item and otherwise supplies its per-face block textures.
- * swing_phase is 0..1 (legacy punch drive; ignored when pose is set).
- * pose carries the animation controller output (NULL reads as no offset). */
+/* Draw the first-person right arm (empty hand) or the held item after world
+ * effects but before the HUD. The frame carries the vanilla ItemInHandRenderer
+ * matrices from hand_view_frame(). held_tile is -1 for an empty hand;
+ * held_block is 0 for a non-block item and otherwise supplies the per-face
+ * block textures. No-op on bad args. */
 void renderer_draw_player_arm(Renderer *r, const Camera *cam, float aspect,
                               const TimeSystem *ts, int held_tile, uint16_t held_block,
-                              float swing_phase, const PlayerAnimPose *pose);
+                              const HandViewFrame *frame);
 
 /* Draw live projectiles as small oriented shafts (one transient upload
  * per call from renderer-owned scratch: no per-frame heap churn).

@@ -37,6 +37,11 @@ void camera_destroy(Camera *cam);
  */
 Mat4 camera_get_view(const Camera *cam);
 
+/* Set (or clear with NULL) the vanilla view-bob matrix that is multiplied
+ * onto the view (the world and the first-person hand share it, so the hand
+ * stays fixed relative to the world image). */
+void camera_set_view_bob(Camera *cam, const Mat4 *bob);
+
 /* Get the perspective projection matrix.
  *
  * Args:

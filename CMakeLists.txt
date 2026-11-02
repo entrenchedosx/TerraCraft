@@ -101,6 +101,7 @@ set(TERRACRAFT_SOURCES
   src/game/player.c
   src/game/player_animation.c
   src/game/player_model.c
+  src/game/hand_view.c
   src/game/simulation_clock.c
   src/game/raycast.c
   src/game/interaction.c
@@ -220,6 +221,7 @@ add_executable(terracraft_tests
   tests/test_lan.c
   tests/test_pvp.c
   tests/test_gamerules.c
+  tests/test_hand_view.c
 )
 target_link_libraries(terracraft_tests PRIVATE terracraft_core)
 

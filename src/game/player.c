@@ -358,27 +358,29 @@ static bool player_try_step_up(Player *p, World *w, float dx, float dz)
     return true;
 }
 
-/* Clamber onto a shore while pushing against it from the water (only
- * when partially immersed: full submersion never steps). The blocked
- * horizontal motion is applied at the raised level so the feet end up
- * above the bank instead of straddling its edge; the following Y resolve
- * then lands them on top. Requires headroom at the raised level, like
- * the mob step-up.
+/* Leave the water over a bank the way Java Edition does
+ * (LivingEntity.travelInFluid): when horizontal motion is blocked and the
+ * body shifted up 0.6 blocks (plus this step's vertical travel) is free, the
+ * vertical velocity becomes 0.3 blocks/tick (6 blocks/s) and ordinary
+ * movement carries the player up. The position is NEVER moved here, so there
+ * is no teleport: collision resolution decides where the feet end up.
  */
-static bool player_try_water_step_up(Player *p, World *w, float dx, float dz)
+#define PLAYER_FLUID_JUMP_OUT_VEL 6.0f
+#define PLAYER_FLUID_JUMP_OUT_CLEARANCE 0.6f
+
+static bool player_try_water_step_up(Player *p, World *w, float dy)
 {
-    Vec3 saved = p->pos;
-    p->pos.x = saved.x + dx;
-    p->pos.y = saved.y + 1.0f;
-    p->pos.z = saved.z + dz;
     Vec3 mn, mx;
     player_box(p, &mn, &mx);
+    float lift = PLAYER_FLUID_JUMP_OUT_CLEARANCE + dy;
+    mn.y += lift;
+    mx.y += lift;
     if (player_aabb_solid(w, mn, mx)) {
-        p->pos = saved;
         return false;
     }
-    p->vel.y = 0.0f;
-    p->grounded = true;
+    if (p->vel.y < PLAYER_FLUID_JUMP_OUT_VEL) {
+        p->vel.y = PLAYER_FLUID_JUMP_OUT_VEL;
+    }
     return true;
 }
 
@@ -647,7 +649,11 @@ static void player_step(Player *p, const PlayerInput *in, World *w)
         mmath_vec3_length_sq(wish) > 1e-8f) {
         float hs = sqrtf(p->vel.x * p->vel.x + p->vel.z * p->vel.z);
         if (hs < 0.05f) {
-            player_try_water_step_up(p, w, dx, dz);
+            if (player_try_water_step_up(p, w, dy)) {
+                /* The impulse takes effect this step; grounded resolution
+                 * below would otherwise cancel it before it moves anything. */
+                dy = p->vel.y * dt;
+            }
         }
     }
     p->pos.y += dy;

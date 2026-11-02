@@ -276,6 +276,18 @@ int main(void)
     RUN_TEST(test_gamerules_lan_framing);
     RUN_TEST(test_gamerules_codecs);
     RUN_TEST(test_death_gate_states);
+    RUN_TEST(test_hand_golden_arm_matrices);
+    RUN_TEST(test_hand_golden_item_matrices);
+    RUN_TEST(test_hand_golden_eat_and_bob);
+    RUN_TEST(test_hand_swing_timeline);
+    RUN_TEST(test_hand_swing_retrigger_rule);
+    RUN_TEST(test_hand_equip_transition);
+    RUN_TEST(test_hand_attack_cooldown_dip);
+    RUN_TEST(test_hand_tick_rate_independence);
+    RUN_TEST(test_hand_walk_bob_state);
+    RUN_TEST(test_hand_yaw_wrap_does_not_spike_sway);
+    RUN_TEST(test_hand_cube_matches_modelpart);
+    RUN_TEST(test_hand_rest_pose_screen_placement);
     RUN_TEST(test_menu_background_granularity);
 
     printf("==============================\n");

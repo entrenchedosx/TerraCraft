@@ -21,6 +21,7 @@
 #include "game/particle.h"
 #include "game/projectile.h"
 #include "game/game_state.h"
+#include "game/hand_view.h"
 #include "game/inventory.h"
 #include "game/player.h"
 #include "game/player_animation.h"
@@ -159,7 +160,12 @@ typedef struct AppContext {
     double arm_swing_started; /* Start time of the current first-person punch. */
     float arm_swing_repeat_t; /* Repeat gate for held mining/attacking. */
     bool arm_swing_active; /* A first-person swing has been triggered. */
-    PlayerAnim panim;    /* First-person hand animation controller. */
+    PlayerAnim panim;    /* Third-person body animation controller. */
+    HandView hand;       /* First-person hand/swing/equip state (20 Hz tick clock). */
+    float hand_prev_x, hand_prev_z; /* Feet XZ at the previous hand sample. */
+    bool hand_prev_valid; /* hand_prev_* hold a real position. */
+    int hand_shown_tile;  /* Atlas tile of the item currently drawn in hand (-1 none). */
+    uint16_t hand_shown_block; /* Block id of the drawn item (0 = flat sprite). */
     ItemStack cursor;     /* Inventory cursor-held stack (UI drag). */
     Vec3 spawn_point;     /* Stable world spawn feet (persisted). */
     bool has_spawn_point; /* True once a spawn was recorded. */
