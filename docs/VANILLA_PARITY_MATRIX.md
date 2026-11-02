@@ -30,6 +30,6 @@ Status as of the 2026-11-02 parity pass. Rules for this file:
 | Redstone, fire, farming, brewing, enchanting, villagers, portals, Nether/End | **Missing** | – | – | Medium |
 | Persistence | Supported (own format, versioned) | Anvil/NBT | Own tests only; not vanilla-format compatible | Medium |
 | Multiplayer | Partial (own LAN protocol; not vanilla protocol) | Java protocol | – | Low |
-| Differential test harness vs vanilla | **Partial**: hand math only (`tools/reference/HandGolden.java`). 1.21.11 jars and data-generator dumps present locally; world-gen harness implemented through stage 2 (see WORLDGEN_PARITY.md) | `reference/1.21.11/` | 15,096 exact comparisons, 0 mismatches | Critical |
+| Differential test harness vs vanilla | **Partial**: hand math (`HandGolden.java`) and world-gen stages 1-2 (`WorldgenRefDump.java`, `WorldgenRouterDump.java`). 1.21.11 jars and data-generator dumps present locally; world-gen harness implemented through stage 2 (see WORLDGEN_PARITY.md) | `reference/1.21.11/` | 15,096 exact comparisons, 0 mismatches | Critical |
 
 See [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md) for ordering.
