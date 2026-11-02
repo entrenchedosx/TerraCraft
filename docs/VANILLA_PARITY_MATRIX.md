@@ -24,12 +24,12 @@ Status as of the 2026-11-02 parity pass. Rules for this file:
 | Sky, fog, clouds, weather | Procedural approximation | `LevelRenderer` sky/fog classes | Pending | High |
 | HUD, hotbar, inventory | Partial – shared textured UI (commit 18c2e36) | `gui` sprites, `Gui`, `InventoryScreen` | Pending | High |
 | Creative inventory, recipes, containers | Partial (32 items, small recipe set) | Registries | Pending | High |
-| Blocks and items | Partial (~tens, vs ~1100+ block states) | Registries | Pending | High |
+| Blocks and items | Partial (tens, vs 1,166 blocks / 29,671 states / 1,505 items in 1.21.11) | Registries | Pending | High |
 | Entities and animation | Partial (cow, zombie, skeleton; 3rd-person player) | Entity models/AI | Pending | High |
 | 1.21.11 content (spear, nautilus, zombie nautilus, camel husk, parched) | **Missing** (supplied `mcassets` also has no spear item models) | 1.21.11 | – | Medium |
 | Redstone, fire, farming, brewing, enchanting, villagers, portals, Nether/End | **Missing** | – | – | Medium |
 | Persistence | Supported (own format, versioned) | Anvil/NBT | Own tests only; not vanilla-format compatible | Medium |
 | Multiplayer | Partial (own LAN protocol; not vanilla protocol) | Java protocol | – | Low |
-| Differential test harness vs vanilla | **Partial**: hand math only (`tools/reference/HandGolden.java`). World-gen harness Missing (no 1.21.11 jar present) | – | – | Critical |
+| Differential test harness vs vanilla | **Partial**: hand math only (`tools/reference/HandGolden.java`). 1.21.11 jars and data-generator dumps now present locally; world-gen harness not yet written | `reference/1.21.11/` | – | Critical |
 
 See [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md) for ordering.

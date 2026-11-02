@@ -13,13 +13,12 @@ Complements the matrix. Each entry: what differs, why, how it would be fixed.
   applies a sprint/speed FOV modifier to the hand projection.
 - Lighting uses TerraCraft's vertex light, not vanilla's `lightCoords` + entity
   diffuse.
-- Equip dip after attacks uses TerraCraft's per-tool cooldown seconds ×20 as
-  the attack delay; vanilla uses 20 / attack-speed (bare hand 5 ticks; we use
-  8). Tool cooldowns should be re-derived from item attribute modifiers.
-- `attackStrengthTicker` resets on entity hits only; vanilla also resets on
-  air-swing misses.
-- Equip logic follows 1.21.11 from knowledge; the installed 26.3 jar differs
-  (`getItemSwapScale`). Not verifiable without a 1.21.11 jar.
+- The swap-dip rate uses TerraCraft's per-tool cooldown seconds ×20 as the
+  attack delay; vanilla uses 20 / attack-speed (bare hand 5 ticks; we use 8).
+  Tool cooldowns should be re-derived from item attribute modifiers.
+- Item identity for the swap check is the item type only. Vanilla also
+  suppresses the dip via `ItemModelResolver.shouldPlaySwapAnimation` for some
+  items; not ported.
 - Camera bob now follows vanilla `bobView`, but `walkDist`/`bob` are derived
   from TerraCraft's displacement per 20 Hz tick, not from vanilla
   `deltaMovement` after friction.
@@ -44,4 +43,7 @@ Complements the matrix. Each entry: what differs, why, how it would be fixed.
 - Only ~7 biomes, a small block/item set, 3 mob types, no redstone, fluids
   limited to bounded water, no lava physics, no Nether/End.
 - Saves and LAN protocol are TerraCraft's own formats.
-- Supplied `mcassets/` has no 1.21.11 spear/nautilus content models.
+- Supplied `mcassets/` predates 1.21.11 (0 spear models vs 7 in the 1.21.11
+  jar). Content scale: vanilla has 1,166 blocks / 29,671 block states, 1,505
+  items, 157 entity types (from the 1.21.11 data generator); TerraCraft has
+  tens of each.

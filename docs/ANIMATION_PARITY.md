@@ -28,7 +28,7 @@ drawing in `renderer_draw_player_arm()` (`src/render/renderer.c`), wiring in
 | Bow draw branch | same | Ported, **not golden-tested** |
 | Item display transforms (firstperson_righthand) for sprite and block models | supplied `models/item/generated.json`, `handheld.json`, `block/block.json` | Golden-tested (matrix) |
 | Swing: `swing()` restart rule, 6-tick duration, `getAttackAnim` interpolation | `LivingEntity` | Unit-tested |
-| Equip/unequip: 0.4/tick clamp, <0.1 swap, attack-strength³ dip, hands-busy | `ItemInHandRenderer.tick` (1.21.11 form from knowledge; 26.3 differs) | Unit-tested |
+| Equip/unequip: 0.4/tick clamp, <0.1 swap, `getItemSwapScale`³ dip; ticker reset on item-type change and air-swing miss, not on melee hits | `ItemInHandRenderer.tick`, `Player.tick`, `Minecraft.startAttack` - **read from the 1.21.11 jar** | Unit-tested |
 | Turn sway: xBob/yBob chase 0.5/tick, ×0.1 rotation | `LocalPlayer.aiStep`, `renderHandsWithItems` | Constants verified; yaw unwrapped to avoid seam spikes |
 | View bob (`bobView`): translate + roll 3° + pitch 5°, applied to **both** world view and hand | `GameRenderer.bobView` | Golden-tested; replaces the old custom eye-offset bob |
 | Only the item is drawn when something is held; arm only for empty hand | `submitArmWithItem` | Implemented |

@@ -194,12 +194,14 @@ int test_hand_equip_transition(void)
     run(&hv, &s, 1.0f, HAND_TICK_SECONDS);
     TEST_ASSERT_FLOAT_EQ(hv.main_hand_height, 1.0f, 1e-6f);
     TEST_ASSERT(hv.shown_key == 7);
-    /* Switch item: the old item lowers by at most 0.4 per tick, swaps below
-     * 0.1, then the new one rises. Sequence derived from the tick rules:
-     * 1.0 -> 0.6 -> 0.2 -> 0.0 (swap) -> 0.4 -> 0.8 -> 1.0. */
+    /* Switch item (1.21.11 bytecode: Player.tick resets itemSwapTicker when
+     * the item type changes; the hand rises along getItemSwapScale^3). The old
+     * item lowers by at most 0.4 per tick and swaps below 0.1; the new one
+     * then rises with scale (ticker + 1) / 5 cubed:
+     * 1.0 -> 0.6 -> 0.2 -> 0.0 (swap) -> 0.216 -> 0.512 -> 0.912 -> 1.0. */
     s.held_key = 9;
-    const float expect[6] = {0.6f, 0.2f, 0.0f, 0.4f, 0.8f, 1.0f};
-    for (int t = 0; t < 6; ++t) {
+    const float expect[7] = {0.6f, 0.2f, 0.0f, 0.216f, 0.512f, 0.912f, 1.0f};
+    for (int t = 0; t < 7; ++t) {
         hand_view_advance(&hv, HAND_TICK_SECONDS, &s);
         TEST_ASSERT_FLOAT_EQ(hv.main_hand_height, expect[t], 1e-5f);
         if (t == 2) {
@@ -215,16 +217,25 @@ int test_hand_attack_cooldown_dip(void)
 {
     int failures = 0;
     HandView hv;
-    HandViewSample s = base_sample(); /* delay 5 ticks (bare hand: 4.0 attack speed) */
+    HandViewSample s = base_sample(); /* delay 5 ticks */
     hand_view_init(&hv);
     hand_view_advance(&hv, 0.0f, &s);
     run(&hv, &s, 1.0f, HAND_TICK_SECONDS);
+
+    /* A melee hit (Player.onAttack -> resetOnlyAttackStrengthTicker) restarts
+     * the damage cooldown but must NOT dip the hand in 1.21.11. */
     hand_view_reset_attack_strength(&hv);
-    /* attackStrength = (ticker + 1) / 5, cubed, read before ticker++ :
-     * ticker 0 -> 0.2^3 = 0.008 -> height 0.6; ticker 1 -> 0.4^3 = 0.064 ->
-     * 0.6 + clamp(0.064 - 0.6) = 0.2; ticker 2 -> 0.6^3 = 0.216 -> 0.216;
-     * ticker 3 -> 0.8^3 = 0.512 -> 0.512 (rise 0.296 < 0.4); ticker 4 -> 1.0
-     * target -> 0.912. */
+    for (int t = 0; t < 5; ++t) {
+        hand_view_advance(&hv, HAND_TICK_SECONDS, &s);
+        TEST_ASSERT_FLOAT_EQ(hv.main_hand_height, 1.0f, 1e-6f);
+    }
+    TEST_ASSERT_FLOAT_EQ(hand_view_attack_strength(&hv, 0.0f), 1.0f, 1e-6f);
+
+    /* An air swing (Minecraft.startAttack MISS -> resetAttackStrengthTicker)
+     * restarts the item-swap ticker too. swapScale = (ticker + 1) / 5 read
+     * before the tick's increment: 0.2^3 = 0.008 -> height 0.6; 0.4^3 = 0.064
+     * -> 0.2; 0.6^3 = 0.216 -> 0.216; 0.8^3 = 0.512; target 1.0 -> 0.912. */
+    hand_view_reset_swap(&hv);
     const float expect[5] = {0.6f, 0.2f, 0.216f, 0.512f, 0.912f};
     for (int t = 0; t < 5; ++t) {
         hand_view_advance(&hv, HAND_TICK_SECONDS, &s);

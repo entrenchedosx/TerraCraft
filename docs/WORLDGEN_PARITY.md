@@ -13,9 +13,13 @@ therefore produces unrelated terrain to vanilla.
 
 ## What exact parity requires (ordered)
 
-1. Reference: obtain the 1.21.11 server/client jar (manifest lists `1.21.11`;
-   not installed – needs owner approval to download) and a headless dump tool
-   (Java) that, for fixed seeds (positive, negative, 0, max/min long), writes
+1. Reference: **available** - `reference/1.21.11/server.jar` plus the data
+   generator output in `reference/1.21.11/run/out/data/minecraft/worldgen/`
+   (`density_function`, `noise`, `noise_settings`,
+   `multi_noise_biome_source_parameter_list`, `biome`, `configured_carver`,
+   `configured_feature`, `placed_feature`, `structure`, `structure_set`).
+   Still to write: a headless dump tool (Java, run against the server jar's
+   `NoiseBasedChunkGenerator`) that, for fixed seeds (positive, negative, 0, max/min long), writes
    CSV of biome id, surface/ocean-floor/motion-blocking heights and block
    state at sampled coordinates plus per-chunk hashes.
 2. `JavaRandom` (48-bit LCG), `Xoroshiro128++` with seed upgrade
@@ -49,7 +53,7 @@ state: zero unexplained mismatches.** Until a stage passes, it is listed as
 - `tools/worldgen_diff.c` – loads CSV, runs the C generator, writes
   `build/parity/worldgen_mismatch_<seed>.csv`.
 
-## Not started this session
+## Status
 
-No generation code was changed. Existing profile-4/5 frozen-hash tests remain
+Reference data is in place; no harness or generation code was written yet. Existing profile-4/5 frozen-hash tests remain
 the only guard and test *internal* stability, not vanilla equivalence.

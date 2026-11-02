@@ -68,6 +68,9 @@ typedef struct HandView {
     float o_attack_anim;    /* LivingEntity.oAttackAnim. */
 
     float attack_ticker;    /* Player.attackStrengthTicker (ticks). */
+    float swap_ticker;      /* LivingEntity.itemSwapTicker (ticks; drives the hand dip). */
+    int last_held_key;      /* Player.lastItemInMainHand, by item identity. */
+    bool have_last_held;
 
     float main_hand_height;   /* ItemInHandRenderer.mainHandHeight. */
     float o_main_hand_height; /* ItemInHandRenderer.oMainHandHeight. */
@@ -94,10 +97,16 @@ void hand_view_advance(HandView *hv, float dt, const HandViewSample *sample);
  * half. Returns true when a new swing started. */
 bool hand_view_swing(HandView *hv);
 
-/* Player.resetAttackStrengthTicker(): a melee attack or air swing restarts
- * the cooldown that lowers the hand (the delay comes from the sample's
- * attack_delay_ticks, as getCurrentItemAttackStrengthDelay() does). */
+/* Player.onAttack() -> resetOnlyAttackStrengthTicker(): a melee hit restarts
+ * the attack cooldown only. In 1.21.11 this does NOT dip the hand (the dip is
+ * driven by the separate item-swap ticker). */
 void hand_view_reset_attack_strength(HandView *hv);
+
+/* Player.resetAttackStrengthTicker(): restarts both tickers. Called for an
+ * air swing (Minecraft.startAttack MISS) and, inside the tick, whenever the
+ * main-hand item type changes. The hand dips and re-raises at a rate set by
+ * the item's attack delay (getItemSwapScale). */
+void hand_view_reset_swap(HandView *hv);
 
 /* Fraction of a tick elapsed since the last whole tick (0..1). */
 float hand_view_partial(const HandView *hv);
@@ -112,6 +121,9 @@ float hand_view_swing_progress(const HandView *hv, float partial);
 
 /* Player.getAttackStrengthScale(partial) in 0..1. */
 float hand_view_attack_strength(const HandView *hv, float partial);
+
+/* Player.getItemSwapScale(partial) in 0..1 (what the hand height follows). */
+float hand_view_swap_scale(const HandView *hv, float partial);
 
 /* GameRenderer.bobView matrix (applied to both the world view and the hand).
  * Identity when bobbing is disabled. */

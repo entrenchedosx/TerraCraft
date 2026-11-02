@@ -188,22 +188,39 @@ float hand_view_swing_progress(const HandView *hv, float partial)
     return hv->o_attack_anim + f * partial;
 }
 
+static float current_delay(const HandView *hv)
+{
+    float delay = hv->have_sample ? hv->last.attack_delay_ticks : 5.0f;
+    return delay >= 1.0f ? delay : 1.0f;
+}
+
 float hand_view_attack_strength(const HandView *hv, float partial)
 {
     if (hv == NULL) {
         return 1.0f;
     }
-    float delay = hv->have_sample ? hv->last.attack_delay_ticks : 5.0f;
-    if (!(delay >= 1.0f)) {
-        delay = 1.0f;
+    return mth_clamp((hv->attack_ticker + partial) / current_delay(hv), 0.0f, 1.0f);
+}
+
+float hand_view_swap_scale(const HandView *hv, float partial)
+{
+    if (hv == NULL) {
+        return 1.0f;
     }
-    return mth_clamp((hv->attack_ticker + partial) / delay, 0.0f, 1.0f);
+    return mth_clamp((hv->swap_ticker + partial) / current_delay(hv), 0.0f, 1.0f);
+}
+
+void hand_view_reset_swap(HandView *hv)
+{
+    if (hv != NULL) {
+        hv->attack_ticker = 0.0f;
+        hv->swap_ticker = 0.0f;
+    }
 }
 
 /* One vanilla game tick (20 Hz). Minecraft.tick runs gameRenderer.tick()
  * (ItemInHandRenderer.tick) before the level ticks entities, so the equip
- * step reads attackStrengthTicker before this tick's Player.tick increments
- * it; the entity updates (swing, walkDist, bob) follow. */
+ * step reads itemSwapTicker before this tick's Player.tick increments it; the entity updates (swing, walkDist, bob) follow. */
 static void hand_view_tick(HandView *hv)
 {
     const HandViewSample *s = &hv->last;
@@ -222,7 +239,7 @@ static void hand_view_tick(HandView *hv)
     if (s->hands_busy) {
         hv->main_hand_height = mth_clamp(hv->main_hand_height - 0.4f, 0.0f, 1.0f);
     } else {
-        float f = hand_view_attack_strength(hv, 1.0f);
+        float f = hand_view_swap_scale(hv, 1.0f);
         float f1 = (hv->shown_key != s->held_key) ? 0.0f : f * f * f;
         hv->main_hand_height += mth_clamp(f1 - hv->main_hand_height, -0.4f, 0.4f);
     }
@@ -259,8 +276,16 @@ static void hand_view_tick(HandView *hv)
     hv->x_bob += (s->pitch_deg - hv->x_bob) * 0.5f;
     hv->y_bob += (yaw - hv->y_bob) * 0.5f;
 
-    /* Player.tick: attackStrengthTicker++ */
+    /* Player.tick: both tickers advance, then a changed main-hand item type
+     * restarts them (resetAttackStrengthTicker). */
     hv->attack_ticker += 1.0f;
+    hv->swap_ticker += 1.0f;
+    if (hv->have_last_held && hv->last_held_key != s->held_key) {
+        hv->attack_ticker = 0.0f;
+        hv->swap_ticker = 0.0f;
+    }
+    hv->last_held_key = s->held_key;
+    hv->have_last_held = true;
 
 }
 

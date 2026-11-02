@@ -3033,6 +3033,11 @@ static void app_tick_mining(AppContext *app, float dt)
     HitResult hit = raycast_from_eye(eye, app->player.yaw, app->player.pitch, app->world,
                                      survival_reach(false));
     if (!hit.hit) {
+        /* Minecraft.startAttack MISS: resetAttackStrengthTicker() also
+         * restarts the item-swap ticker, so an air swing dips the hand. */
+        if (pressed) {
+            hand_view_reset_swap(&app->hand);
+        }
         survival_mine_reset(&app->player);
         return;
     }
