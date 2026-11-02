@@ -374,6 +374,8 @@ int test_hand_walk_bob_state(void);
 int test_hand_yaw_wrap_does_not_spike_sway(void);
 int test_hand_cube_matches_modelpart(void);
 int test_hand_rest_pose_screen_placement(void);
+int test_worldgen_parity_primitives(void);
+int test_worldgen_parity_known_values(void);
 int test_menu_background_granularity(void);
 
 /* Atlas tile tests (defined in test_texture.c). */

@@ -288,6 +288,8 @@ int main(void)
     RUN_TEST(test_hand_yaw_wrap_does_not_spike_sway);
     RUN_TEST(test_hand_cube_matches_modelpart);
     RUN_TEST(test_hand_rest_pose_screen_placement);
+    RUN_TEST(test_worldgen_parity_primitives);
+    RUN_TEST(test_worldgen_parity_known_values);
     RUN_TEST(test_menu_background_granularity);
 
     printf("==============================\n");

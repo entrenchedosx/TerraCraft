@@ -93,6 +93,9 @@ set(TERRACRAFT_SOURCES
     src/world/world_gen.c
     src/world/worldgen_v4.c
     src/world/worldgen_v5.c
+  src/world/jrandom.c
+  src/world/jnoise.c
+  src/world/worldgen_parity.c
   src/world/streamer.c
   src/world/biome.c
   src/world/world_meta.c
@@ -222,8 +225,10 @@ add_executable(terracraft_tests
   tests/test_pvp.c
   tests/test_gamerules.c
   tests/test_hand_view.c
+  tests/test_worldgen_parity.c
 )
 target_link_libraries(terracraft_tests PRIVATE terracraft_core)
+target_compile_definitions(terracraft_tests PRIVATE TC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 # Tests link SDL2 transitively: on Windows the loader needs the DLL beside
 # the test exe too (ctest runs it directly, no PATH setup guaranteed).
@@ -268,6 +273,9 @@ endif()
 
 # --- Install (optional) ------------------------------------------------------
 install(TARGETS terracraft RUNTIME DESTINATION bin)
+add_executable(worldgen_diff tools/worldgen_diff.c)
+target_link_libraries(worldgen_diff PRIVATE terracraft_core)
+
 add_executable(worldgen_probe tools/worldgen_probe.c)
 target_link_libraries(worldgen_probe PRIVATE terracraft_core)
 if(WIN32 AND MINEC_SDL2_DLL)
