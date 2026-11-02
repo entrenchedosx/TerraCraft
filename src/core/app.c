@@ -4141,7 +4141,9 @@ static void app_prepare_world_render(AppContext *app)
      * chase added ~80 ms of floaty lag to hide 20 Hz stair-steps). Snap
      * on teleports is now the only special case, handled by the same
      * assignment. */
-    app->player.render_pos = app->player.pos;
+    /* The player simulates at the vanilla 20 TPS; interpolate between the
+     * last two ticks (frame time not yet simulated rides the clock). */
+    player_interpolate(&app->player, (float)app->simulation.accumulator);
     /* Mob render positions track the sim exactly (see player note). */
     {
         for (int i = 0; i < MOB_MAX; ++i) {

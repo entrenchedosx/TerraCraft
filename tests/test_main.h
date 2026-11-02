@@ -376,6 +376,13 @@ int test_hand_cube_matches_modelpart(void);
 int test_hand_rest_pose_screen_placement(void);
 int test_worldgen_parity_primitives(void);
 int test_worldgen_parity_known_values(void);
+int test_vphys_walk_sprint_sneak_speeds(void);
+int test_vphys_jump_apex_and_air(void);
+int test_vphys_fall_distance_and_landing(void);
+int test_vphys_water_sinking_and_exit(void);
+int test_vphys_sneak_edge_and_collision(void);
+int test_vphys_diagonal_input_matches_vanilla_scaling(void);
+int test_vphys_mth_trig_table(void);
 int test_menu_background_granularity(void);
 
 /* Atlas tile tests (defined in test_texture.c). */
