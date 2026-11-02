@@ -1,5 +1,6 @@
 #include "world/worldgen_parity.h"
 
+#include "world/jdensity.h"
 #include "world/jnoise.h"
 #include "world/jrandom.h"
 
@@ -326,7 +327,68 @@ static void run_perlin_normal(const char *dir, Ctx *c)
     fclose(f);
 }
 
-uint64_t worldgen_parity_run(const char *fixture_dir, FILE *report, WorldgenParityStats *stats)
+/* ---- router.csv: seed,field,x,y,z,value_hex ---------------------------------- */
+static const struct { const char *field; const char *key; } ROUTER_FIELDS[] = {
+    {"barrierNoise", "barrier"}, {"fluidLevelFloodednessNoise", "fluid_level_floodedness"},
+    {"fluidLevelSpreadNoise", "fluid_level_spread"}, {"lavaNoise", "lava"},
+    {"temperature", "temperature"}, {"vegetation", "vegetation"}, {"continents", "continents"},
+    {"erosion", "erosion"}, {"depth", "depth"}, {"ridges", "ridges"},
+    {"preliminarySurfaceLevel", "preliminary_surface_level"}, {"finalDensity", "final_density"},
+    {"veinToggle", "vein_toggle"}, {"veinRidged", "vein_ridged"}, {"veinGap", "vein_gap"},
+};
+
+static void run_router(const char *dir, const char *datapack, Ctx *c)
+{
+    FILE *f = open_fixture(dir, "router.csv", c->stats);
+    if (f == NULL) {
+        return;
+    }
+    char line[LINE_MAX_LEN];
+    char *fld[FIELDS_MAX];
+    c->suite = "router";
+    fgets(line, sizeof(line), f);
+    char cur_seed[32] = "";
+    JRandomState *rs = NULL;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (split_csv(line, fld) < 6) {
+            continue;
+        }
+        if (datapack == NULL) {
+            c->stats->skipped++;
+            continue;
+        }
+        if (strcmp(cur_seed, fld[0]) != 0) {
+            jrs_destroy(rs);
+            rs = jrs_create(datapack, "overworld", (int64_t)strtoll(fld[0], NULL, 10));
+            snprintf(cur_seed, sizeof(cur_seed), "%s", fld[0]);
+        }
+        const char *key = NULL;
+        for (size_t i = 0; i < sizeof(ROUTER_FIELDS) / sizeof(ROUTER_FIELDS[0]); ++i) {
+            if (strcmp(ROUTER_FIELDS[i].field, fld[1]) == 0) {
+                key = ROUTER_FIELDS[i].key;
+            }
+        }
+        const JDensity *df = rs != NULL && key != NULL ? jrs_router(rs, key) : NULL;
+        char label[160];
+        snprintf(label, sizeof(label), "%s/%s/%s_%s_%s", fld[0], fld[1], fld[2], fld[3], fld[4]);
+        uint64_t expected = hex64(fld[5]);
+        if (df == NULL) {
+            record(c, label, expected, ~expected);
+            continue;
+        }
+        double v = jdf_compute(df, atoi(fld[2]), atoi(fld[3]), atoi(fld[4]));
+        if (v != v) { /* NaN = depends on a node not implemented yet */
+            c->stats->skipped++;
+            continue;
+        }
+        record(c, label, expected, double_bits(v));
+    }
+    jrs_destroy(rs);
+    fclose(f);
+}
+
+uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root, FILE *report,
+                             WorldgenParityStats *stats)
 {
     WorldgenParityStats local;
     if (stats == NULL) {
@@ -345,5 +407,6 @@ uint64_t worldgen_parity_run(const char *fixture_dir, FILE *report, WorldgenPari
     run_positional(fixture_dir, &c);
     run_improved(fixture_dir, &c);
     run_perlin_normal(fixture_dir, &c);
+    run_router(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }

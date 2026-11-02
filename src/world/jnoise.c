@@ -172,6 +172,63 @@ bool jn_perlin_init(JPerlinNoise *n, JrRandom *r, int first_octave, const double
     return true;
 }
 
+double jn_perlin_wrap(double v)
+{
+    return perlin_wrap(v);
+}
+
+const JImprovedNoise *jn_perlin_octave(const JPerlinNoise *n, int i)
+{
+    int idx = n->count - 1 - i;
+    if (idx < 0 || idx >= n->count || !n->present[idx]) {
+        return NULL;
+    }
+    return &n->levels[idx];
+}
+
+/* RandomSource.consumeCount(262) as used by PerlinNoise.skipOctave. */
+static void skip_octave(JrRandom *r)
+{
+    for (int i = 0; i < 262; ++i) {
+        (void)jr_next_long(r);
+    }
+}
+
+bool jn_perlin_init_legacy(JPerlinNoise *n, JrRandom *r, int first_octave, const double *amplitudes, int count)
+{
+    if (n == NULL || r == NULL || amplitudes == NULL || count < 1 || count > JN_MAX_OCTAVES) {
+        return false;
+    }
+    memset(n, 0, sizeof(*n));
+    n->count = count;
+    n->first_octave = first_octave;
+    for (int k = 0; k < count; ++k) {
+        n->amplitudes[k] = amplitudes[k];
+    }
+    int j = -first_octave;
+    JImprovedNoise zero;
+    jn_improved_init(&zero, r); /* always consumed first */
+    if (j >= 0 && j < count && amplitudes[j] != 0.0) {
+        n->levels[j] = zero;
+        n->present[j] = true;
+    }
+    for (int k = j - 1; k >= 0; --k) {
+        if (k < count && amplitudes[k] != 0.0) {
+            jn_improved_init(&n->levels[k], r);
+            n->present[k] = true;
+        } else {
+            skip_octave(r);
+        }
+    }
+    if (j < count - 1) {
+        return false; /* "Positive octaves are temporarily disabled" */
+    }
+    n->lowest_freq_input_factor = pow(2.0, (double)first_octave);
+    n->lowest_freq_value_factor = pow(2.0, (double)(count - 1)) / (pow(2.0, (double)count) - 1.0);
+    n->max_value = perlin_edge_value(n, 2.0);
+    return true;
+}
+
 double jn_perlin_value(const JPerlinNoise *n, double x, double y, double z)
 {
     double d = 0.0;

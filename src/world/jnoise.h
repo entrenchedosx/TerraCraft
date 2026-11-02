@@ -41,6 +41,15 @@ typedef struct JPerlinNoise {
 /* PerlinNoise.create(random, firstOctave, amplitudes). Returns false on bad
  * arguments (count outside 1..JN_MAX_OCTAVES). */
 bool jn_perlin_init(JPerlinNoise *n, JrRandom *r, int first_octave, const double *amplitudes, int count);
+/* PerlinNoise.createLegacyForBlendedNoise (pre-1.18 octave initialisation:
+ * zero octave first, then octaves downwards; used only by BlendedNoise).
+ * Amplitudes must be all non-zero in this port (vanilla would skip octaves
+ * with random.consumeCount(262), implemented for completeness). */
+bool jn_perlin_init_legacy(JPerlinNoise *n, JrRandom *r, int first_octave, const double *amplitudes, int count);
+/* PerlinNoise.getOctaveNoise(i): octaves are indexed from the highest frequency. */
+const JImprovedNoise *jn_perlin_octave(const JPerlinNoise *n, int i);
+/* PerlinNoise.wrap. */
+double jn_perlin_wrap(double v);
 double jn_perlin_value(const JPerlinNoise *n, double x, double y, double z);
 double jn_perlin_max_value(const JPerlinNoise *n);
 

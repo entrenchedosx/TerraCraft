@@ -95,6 +95,8 @@ set(TERRACRAFT_SOURCES
     src/world/worldgen_v5.c
   src/world/jrandom.c
   src/world/jnoise.c
+  src/world/jjson.c
+  src/world/jdensity.c
   src/world/worldgen_parity.c
   src/world/streamer.c
   src/world/biome.c

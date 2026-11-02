@@ -11,49 +11,56 @@ spline definitions, multi-noise biome parameter table, carvers, aquifer
 algorithm, surface rules, or feature/structure placement. A given seed
 therefore produces unrelated terrain to vanilla.
 
-## What exact parity requires (ordered)
+## Differential harness (implemented)
 
-1. Reference: **available** - `reference/1.21.11/server.jar` plus the data
-   generator output in `reference/1.21.11/run/out/data/minecraft/worldgen/`
-   (`density_function`, `noise`, `noise_settings`,
-   `multi_noise_biome_source_parameter_list`, `biome`, `configured_carver`,
-   `configured_feature`, `placed_feature`, `structure`, `structure_set`).
-   Still to write: a headless dump tool (Java, run against the server jar's
-   `NoiseBasedChunkGenerator`) that, for fixed seeds (positive, negative, 0, max/min long), writes
-   CSV of biome id, surface/ocean-floor/motion-blocking heights and block
-   state at sampled coordinates plus per-chunk hashes.
-2. `JavaRandom` (48-bit LCG), `Xoroshiro128++` with seed upgrade
-   (`RandomSupport.upgradeSeedTo128bit`, splitmix/mixStafford13) and
-   positional forks (`forkPositional`, `at(x,y,z)`, `fromHashOf(name)`), with
-   64-bit wraparound written via `uint64_t`/`int64_t` casts.
-3. `ImprovedNoise`/`PerlinNoise`/`NormalNoise` with the data-pack noise
-   parameters (first octave, amplitudes) and Java's evaluation order.
-4. Density-function graph + noise router for the overworld
-   (`overworld.json` from the 1.21.11 data pack), cubic splines for
-   continentalness/erosion/weirdness/ridges, final density and
-   `NoiseChunk` interpolation (cell sizes 4×8 blocks, 4×4×8 interpolation).
-5. Multi-noise biome source with the climate parameter list; `Climate`
-   quantisation (×10000, `(long)` truncation).
-6. Aquifers, ore veins, noodle/cheese/spaghetti caves from the router, carvers.
-7. Surface rules, bedrock, then ordered feature decoration steps with
-   per-feature seeded populations; structure sets and placements.
-8. Nether and End.
+- **Reference side** - `tools/reference/WorldgenRefDump.java` and
+  `WorldgenRouterDump.java` run the *real 1.21.11 server jar's own classes*
+  by reflection, resolving names through Mojang's mapping file
+  (`RandomSource`, `PositionalRandomFactory`, `ImprovedNoise`,
+  `PerlinNoise`, `NormalNoise`, and the full `RandomState` +
+  `NoiseRouter` of the overworld built from the vanilla data pack).
+  `tools/reference/run_worldgen_ref.sh` regenerates the fixtures.
+- **Fixtures** - `tests/fixtures/worldgen/*.csv` (about 0.9 MB, numbers only,
+  hex-encoded doubles). 8 seeds: `0, 1, 42, -1, 123456789012345,
+  Long.MIN_VALUE, Long.MAX_VALUE, -8760239871234567`.
+- **C side** - `src/world/jrandom.[ch]`, `jnoise.[ch]`, `jjson.[ch]`,
+  `jdensity.[ch]`, `worldgen_parity.[ch]`; CLI `worldgen_diff`
+  (`worldgen_diff <fixtures> [mismatches.csv|-] [datapack_root]`); unit test
+  `test_worldgen_parity_primitives`. Comparisons are exact bit patterns, no
+  tolerance. The router stage loads the vanilla data pack at run time from
+  `reference/1.21.11/run/out` (git-ignored, produced by the vanilla data
+  generator); without it the stage is reported as skipped. No Mojang data is
+  compiled into or committed with the game.
 
-Each step gets its own differential test (biome → heights → block states →
-heightmaps → fluids → features → structures → chunk hashes) with a
-machine-readable mismatch report (`x,z,y,expected,actual`). **Required end
-state: zero unexplained mismatches.** Until a stage passes, it is listed as
-*Missing* in the parity matrix.
+## Status by stage (2026-11-02)
 
-## Harness layout (planned, not yet created)
+| Stage | Result |
+|---|---|
+| 1. `LegacyRandomSource`, `XoroshiroRandomSource` (incl. 128-bit seeds, all-zero fix-up), `nextInt/Long/Boolean/Float/Double/Gaussian`, positional `at/fromHashOf/fromSeed` (MD5), `Mth.getSeed`, `String.hashCode` | **Pass**: 3,400+ exact comparisons, 0 mismatches |
+| 1. `ImprovedNoise`, `PerlinNoise`, `NormalNoise` (value + max value, y-fudge variant) | **Pass**: 160 + 880 comparisons, 0 mismatches |
+| 2. Density-function graph + noise router for the overworld: `barrier`, `fluid_level_floodedness`, `fluid_level_spread`, `lava`, `temperature`, `vegetation`, `continents`, `erosion`, `depth`, `ridges`, `preliminary_surface_level`, `final_density`, `vein_toggle`, `vein_ridged`, `vein_gap` (28 node types incl. splines, `old_blended_noise`, `find_top_surface`, `weird_scaled_sampler`) | **Pass**: 10,800 point evaluations (8 seeds x 15 outputs x 90 points, y from -64 to 319), 0 mismatches, 0 skipped. Debug and Release |
+| 3. Climate sampling -> multi-noise biome lookup | Not started |
+| 4. `NoiseChunk` cell interpolation, `NoiseBasedChunkGenerator` fill, aquifers, ore veins, carvers | Not started |
+| 5. Surface rules, bedrock, heightmaps | Not started |
+| 6. Features / decorators / structures | Not started |
+| 7. Nether, End (End islands, legacy random source settings) | Not started |
 
-- `tools/reference/WorldDump.java` – runs against a 1.21.11 jar, no game code
-  shipped.
-- `tests/fixtures/worldgen/seed_<n>.csv` – small committed samples (not the jar).
-- `tools/worldgen_diff.c` – loads CSV, runs the C generator, writes
-  `build/parity/worldgen_mismatch_<seed>.csv`.
+**Important:** stage 2 proves the *point-evaluated* router. It does not yet
+mean TerraCraft generates vanilla chunks: the live game still uses its own
+profile-4/5 generator. Chunk-level parity (stages 3-6) must pass before the
+game switches over.
 
-## Status
+## Remaining steps (ordered)
 
-Reference data is in place; no harness or generation code was written yet. Existing profile-4/5 frozen-hash tests remain
-the only guard and test *internal* stability, not vanilla equivalence.
+3. `Climate.Sampler` (quantisation x10000, `TargetPoint`), `Climate.ParameterList`
+   nearest-point search over `reports/biome_parameters/.../overworld.json`;
+   differential biome id test at quart positions.
+4. `NoiseChunk`: 4x8 cell interpolation of `final_density` (the router above is
+   evaluated at cell corners and trilinearly interpolated), `NoiseBasedChunkGenerator.doFill`,
+   aquifers, ore veins; compare block states at world coordinates and chunk hashes.
+5. `SurfaceSystem` + surface rules, bedrock; heightmaps; compare.
+6. Carvers, features, structures in vanilla's decoration order.
+7. Nether/End.
+
+Each step adds a reference dump (Java, reflection on the server jar) and a C
+comparison; a stage is marked *Pass* only with zero mismatches.
