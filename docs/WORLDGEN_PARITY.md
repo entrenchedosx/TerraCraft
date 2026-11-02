@@ -14,17 +14,16 @@ therefore produces unrelated terrain to vanilla.
 ## Differential harness (implemented)
 
 - **Reference side** - `tools/reference/WorldgenRefDump.java` and
-  `WorldgenRouterDump.java` run the *real 1.21.11 server jar's own classes*
+  `WorldgenRouterDump.java`, `WorldgenBiomeDump.java` run the *real 1.21.11 server jar's own classes*
   by reflection, resolving names through Mojang's mapping file
   (`RandomSource`, `PositionalRandomFactory`, `ImprovedNoise`,
   `PerlinNoise`, `NormalNoise`, and the full `RandomState` +
   `NoiseRouter` of the overworld built from the vanilla data pack).
   `tools/reference/run_worldgen_ref.sh` regenerates the fixtures.
-- **Fixtures** - `tests/fixtures/worldgen/*.csv` (about 0.9 MB, numbers only,
-  hex-encoded doubles). 8 seeds: `0, 1, 42, -1, 123456789012345,
+- **Fixtures** - `tests/fixtures/worldgen/*.csv` (about 1.3 MB, numbers and biome ids only). 8 seeds: `0, 1, 42, -1, 123456789012345,
   Long.MIN_VALUE, Long.MAX_VALUE, -8760239871234567`.
 - **C side** - `src/world/jrandom.[ch]`, `jnoise.[ch]`, `jjson.[ch]`,
-  `jdensity.[ch]`, `worldgen_parity.[ch]`; CLI `worldgen_diff`
+  `jdensity.[ch]`, `jbiome.[ch]`, `worldgen_parity.[ch]`; CLI `worldgen_diff`
   (`worldgen_diff <fixtures> [mismatches.csv|-] [datapack_root]`); unit test
   `test_worldgen_parity_primitives`. Comparisons are exact bit patterns, no
   tolerance. The router stage loads the vanilla data pack at run time from
@@ -39,7 +38,7 @@ therefore produces unrelated terrain to vanilla.
 | 1. `LegacyRandomSource`, `XoroshiroRandomSource` (incl. 128-bit seeds, all-zero fix-up), `nextInt/Long/Boolean/Float/Double/Gaussian`, positional `at/fromHashOf/fromSeed` (MD5), `Mth.getSeed`, `String.hashCode` | **Pass**: 3,400+ exact comparisons, 0 mismatches |
 | 1. `ImprovedNoise`, `PerlinNoise`, `NormalNoise` (value + max value, y-fudge variant) | **Pass**: 160 + 880 comparisons, 0 mismatches |
 | 2. Density-function graph + noise router for the overworld: `barrier`, `fluid_level_floodedness`, `fluid_level_spread`, `lava`, `temperature`, `vegetation`, `continents`, `erosion`, `depth`, `ridges`, `preliminary_surface_level`, `final_density`, `vein_toggle`, `vein_ridged`, `vein_gap` (28 node types incl. splines, `old_blended_noise`, `find_top_surface`, `weird_scaled_sampler`) | **Pass**: 10,800 point evaluations (8 seeds x 15 outputs x 90 points, y from -64 to 319), 0 mismatches, 0 skipped. Debug and Release |
-| 3. Climate sampling -> multi-noise biome lookup | Not started |
+| 3. Climate sampling (`Climate.Sampler`, quantisation x10000 in float) and multi-noise biome lookup through the 7-D `Climate.RTree` (7,593 overworld leaves, built with vanilla's sort/bucketize order, last-result shortcut included) | **Pass**: leaf list count + order-sensitive hash equal; 4,000 random targets (54 distinct biomes; the R-tree and brute force disagree on 62, and C reproduces both exactly); 2,496 sampler-derived points over 8 seeds (42 distinct biomes) with all six quantised climate values and the biome identical; 0 mismatches |
 | 4. `NoiseChunk` cell interpolation, `NoiseBasedChunkGenerator` fill, aquifers, ore veins, carvers | Not started |
 | 5. Surface rules, bedrock, heightmaps | Not started |
 | 6. Features / decorators / structures | Not started |
@@ -52,9 +51,10 @@ game switches over.
 
 ## Remaining steps (ordered)
 
-3. `Climate.Sampler` (quantisation x10000, `TargetPoint`), `Climate.ParameterList`
-   nearest-point search over `reports/biome_parameters/.../overworld.json`;
-   differential biome id test at quart positions.
+3. ~~Climate sampler and biome lookup~~ - done (exact). Note: vanilla's R-tree keeps a
+   thread-local last result that decides exact distance ties, so biome results at ties depend on
+   query order; the harness replays queries in the reference order. A world generator must
+   therefore query in the same order as vanilla's chunk generation to be tie-exact.
 4. `NoiseChunk`: 4x8 cell interpolation of `final_density` (the router above is
    evaluated at cell corners and trilinearly interpolated), `NoiseBasedChunkGenerator.doFill`,
    aquifers, ore veins; compare block states at world coordinates and chunk hashes.

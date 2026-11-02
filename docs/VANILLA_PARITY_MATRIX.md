@@ -17,7 +17,7 @@ Status as of the 2026-11-02 parity pass. Rules for this file:
 | Player physics (walk/sprint/jump/gravity/friction) | **Partial – custom 60 Hz model, not vanilla tick** | `LivingEntity.travel`, 20 TPS | Fail (documented: velocity assigned from input, custom drag/τ constants) | Critical |
 | Water movement | Partial. Exit no longer teleports (jump-out impulse 0.3 b/tick); rest of fluid model is custom | `LivingEntity.travelInFluid`, `FlowingFluid` | No-teleport regression test only; vanilla trajectory comparison Pending | Critical |
 | Terrain generation | **Partial**: the game still uses its own profile-4/5 generator, but a vanilla-exact RNG/noise/density-function/router library now exists (`jrandom`, `jnoise`, `jdensity`) | `NoiseBasedChunkGenerator`, noise router, splines | Router: **Pass** (10,800 exact point evaluations over 8 seeds). Chunk fill, biomes, surface, features: not yet wired / Fail | Critical |
-| Biome selection | Approximation (7 biomes, custom climate) | Multi-noise climate parameters, 60+ biomes | Fail | Critical |
+| Biome selection | **Partial**: game still uses its own 7-biome selector; a vanilla-exact climate sampler + 7,593-leaf multi-noise R-tree exists (`jbiome`) but is not wired into the game | Multi-noise climate parameters, 65 overworld biomes | Library: **Pass** (25,474 exact biome/climate comparisons, 0 mismatches). Game output: Fail until wired | Critical |
 | Caves / aquifers / ores / features / structures | Approximation (3 cave scales, local aquifers, 8 ores; no structures) | Carvers, `aquifer`, configured/placed features | Fail | High |
 | Lighting | Custom propagation + moonlit profile | `LightEngine`, `lightmap.fsh` | Pending – no reference frames | High |
 | Water rendering / transparency | Partial | `translucent` render type | Pending | Critical |
@@ -30,6 +30,6 @@ Status as of the 2026-11-02 parity pass. Rules for this file:
 | Redstone, fire, farming, brewing, enchanting, villagers, portals, Nether/End | **Missing** | – | – | Medium |
 | Persistence | Supported (own format, versioned) | Anvil/NBT | Own tests only; not vanilla-format compatible | Medium |
 | Multiplayer | Partial (own LAN protocol; not vanilla protocol) | Java protocol | – | Low |
-| Differential test harness vs vanilla | **Partial**: hand math (`HandGolden.java`) and world-gen stages 1-2 (`WorldgenRefDump.java`, `WorldgenRouterDump.java`). 1.21.11 jars and data-generator dumps present locally; world-gen harness implemented through stage 2 (see WORLDGEN_PARITY.md) | `reference/1.21.11/` | 15,096 exact comparisons, 0 mismatches | Critical |
+| Differential test harness vs vanilla | **Partial**: hand math (`HandGolden.java`) and world-gen stages 1-3 (`WorldgenRefDump.java`, `WorldgenRouterDump.java`). 1.21.11 jars and data-generator dumps present locally; world-gen harness implemented through stage 2 (see WORLDGEN_PARITY.md) | `reference/1.21.11/` | 40,570 exact comparisons, 0 mismatches | Critical |
 
 See [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md) for ordering.

@@ -22,7 +22,8 @@ PY
 SEP=";"; case "$(uname -s)" in Linux*|Darwin*) SEP=":";; esac
 LIBS="$(find "$R/bundle/META-INF/libraries" -name '*.jar' | tr '\n' "$SEP")"
 CP="$WORK$SEP$R/bundle/META-INF/versions/1.21.11/server-1.21.11.jar$SEP$LIBS"
-javac -d "$WORK" "$ROOT/tools/reference/WorldgenRefDump.java" "$ROOT/tools/reference/WorldgenRouterDump.java"
+javac -d "$WORK" "$ROOT/tools/reference/WorldgenRefDump.java" "$ROOT/tools/reference/WorldgenRouterDump.java" "$ROOT/tools/reference/WorldgenBiomeDump.java"
 mkdir -p "$OUT"
 java -cp "$CP" tcref.WorldgenRefDump "$R/server_mappings.txt" "$OUT"
 (cd "$WORK" && java -cp "$CP" tcref.WorldgenRouterDump "$R/server_mappings.txt" "$OUT")
+(cd "$WORK" && java -cp "$CP" tcref.WorldgenBiomeDump "$R/server_mappings.txt" "$OUT")

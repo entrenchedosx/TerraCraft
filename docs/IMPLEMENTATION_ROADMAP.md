@@ -8,7 +8,7 @@ dependencies (explained per stage).
 | 1 | First-person hand/animation | **Math + timing done**, pixel comparison pending | – |
 | 1b | Hand remainder: offhand, slim arm, sprite extrusion, bow golden test, spear animation, `bobHurt`, hand FOV modifier | Open | 1 |
 | 2 | **Vanilla 20 TPS player physics** (`LivingEntity.travel`, `Entity.collide` Y-then-dominant-axis order, step 0.6, friction by block, sneak edge, ladders/vines, slime/honey/ice, fall damage) and full fluid model; water exit already fixed without teleport | Open (next) | tick-driven sim with render interpolation (the hand module already shows the pattern) |
-| 3 | World-gen differential harness + RNG/noise/density/biome stages | **In progress**: harness + RNG, noise, density router done and exact (stages 1-2); biome lookup, NoiseChunk fill, surface, features open | - |
+| 3 | World-gen differential harness + RNG/noise/density/biome stages | **In progress**: harness + RNG, noise, density router, climate + biome lookup done and exact (stages 1-3); NoiseChunk fill, surface, features open | - |
 | 4 | Block rendering, lighting, sky, fog fidelity with frame-compare tool | Open | needs a screenshot/capture path in the game (none exists) |
 | 5 | HUD/inventory fidelity pass using supplied GUI sprites | Open | 4 (capture tool) |
 | 6 | Gameplay breadth: registries, recipes, entities, redstone, dimensions | Open | 3 for content that depends on generation |

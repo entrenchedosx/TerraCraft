@@ -70,7 +70,7 @@ public class WorldgenRefDump {
             case "boolean": return boolean.class;
             case "double[]": return double[].class;
             case "java.lang.String": return String.class;
-            default: return cls(t);
+            default: return CLASS_OBF.containsKey(t) ? cls(t) : Class.forName(t);
         }
     }
 

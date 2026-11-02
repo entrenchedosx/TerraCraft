@@ -1,5 +1,6 @@
 #include "world/worldgen_parity.h"
 
+#include "world/jbiome.h"
 #include "world/jdensity.h"
 #include "world/jnoise.h"
 #include "world/jrandom.h"
@@ -9,7 +10,7 @@
 #include <string.h>
 
 #define LINE_MAX_LEN 512
-#define FIELDS_MAX 8
+#define FIELDS_MAX 12
 
 typedef struct Ctx {
     FILE *report;
@@ -387,6 +388,109 @@ static void run_router(const char *dir, const char *datapack, Ctx *c)
     fclose(f);
 }
 
+/* ---- biome stage -------------------------------------------------------------- */
+static void record_str(Ctx *c, const char *key, const char *expected, const char *actual)
+{
+    c->stats->checked++;
+    if (strcmp(expected, actual) != 0) {
+        c->stats->mismatched++;
+        if (c->report != NULL) {
+            fprintf(c->report, "%s,%s,%s,%s\n", c->suite, key, expected, actual);
+        }
+    }
+}
+
+/* biome_list.csv: count,hash. biome_random.csv then biome_climate.csv are
+ * replayed in the order the reference issued them against ONE R-tree, because
+ * vanilla's RTree keeps a last-result shortcut that decides exact ties. */
+static void run_biomes(const char *dir, const char *datapack, Ctx *c)
+{
+    FILE *fl = open_fixture(dir, "biome_list.csv", c->stats);
+    FILE *fr = open_fixture(dir, "biome_random.csv", c->stats);
+    FILE *fc = open_fixture(dir, "biome_climate.csv", c->stats);
+    char line[LINE_MAX_LEN];
+    char *fld[FIELDS_MAX + 8];
+    JBiomeList *list = datapack != NULL ? jbiome_load(datapack) : NULL;
+    if (fl != NULL && fr != NULL && fc != NULL) {
+        c->suite = "biome_list";
+        fgets(line, sizeof(line), fl);
+        if (fgets(line, sizeof(line), fl) != NULL && split_csv(line, fld) >= 2) {
+            if (list == NULL) {
+                c->stats->skipped++;
+            } else {
+                record(c, "count", (uint64_t)strtoull(fld[0], NULL, 10), (uint64_t)jbiome_leaf_count(list));
+                record(c, "hash", (uint64_t)strtoll(fld[1], NULL, 10), (uint64_t)jbiome_list_hash(list));
+            }
+        }
+        c->suite = "biome_random";
+        fgets(line, sizeof(line), fr);
+        int row = 0;
+        while (fgets(line, sizeof(line), fr) != NULL) {
+            char *f2[FIELDS_MAX + 8];
+            if (split_csv(line, f2) < 8) {
+                continue;
+            }
+            row++;
+            if (list == NULL) {
+                c->stats->skipped++;
+                continue;
+            }
+            JTargetPoint t = {strtoll(f2[0], NULL, 10), strtoll(f2[1], NULL, 10), strtoll(f2[2], NULL, 10),
+                              strtoll(f2[3], NULL, 10), strtoll(f2[4], NULL, 10), strtoll(f2[5], NULL, 10)};
+            char key[64];
+            snprintf(key, sizeof(key), "rtree/%d", row);
+            record_str(c, key, f2[6], jbiome_find(list, &t));
+            snprintf(key, sizeof(key), "brute/%d", row);
+            record_str(c, key, f2[7], jbiome_find_brute(list, &t));
+        }
+        c->suite = "biome_climate";
+        fgets(line, sizeof(line), fc);
+        char cur_seed[32] = "";
+        JRandomState *rs = NULL;
+        while (fgets(line, sizeof(line), fc) != NULL) {
+            char *f3[FIELDS_MAX + 8];
+            if (split_csv(line, f3) < 11) {
+                continue;
+            }
+            if (list == NULL || datapack == NULL) {
+                c->stats->skipped++;
+                continue;
+            }
+            if (strcmp(cur_seed, f3[0]) != 0) {
+                jrs_destroy(rs);
+                rs = jrs_create(datapack, "overworld", (int64_t)strtoll(f3[0], NULL, 10));
+                snprintf(cur_seed, sizeof(cur_seed), "%s", f3[0]);
+            }
+            char key[96];
+            snprintf(key, sizeof(key), "%s/%s_%s_%s", f3[0], f3[1], f3[2], f3[3]);
+            if (rs == NULL) {
+                record_str(c, key, f3[10], "<no router>");
+                continue;
+            }
+            JTargetPoint t = jclimate_sample(rs, atoi(f3[1]), atoi(f3[2]), atoi(f3[3]));
+            char sub[110];
+            const int64_t got[6] = {t.temperature, t.humidity, t.continentalness, t.erosion, t.depth, t.weirdness};
+            for (int i = 0; i < 6; ++i) {
+                snprintf(sub, sizeof(sub), "%s/p%d", key, i);
+                record(c, sub, (uint64_t)strtoll(f3[4 + i], NULL, 10), (uint64_t)got[i]);
+            }
+            snprintf(sub, sizeof(sub), "%s/biome", key);
+            record_str(c, sub, f3[10], jbiome_find(list, &t));
+        }
+        jrs_destroy(rs);
+    }
+    if (fl != NULL) {
+        fclose(fl);
+    }
+    if (fr != NULL) {
+        fclose(fr);
+    }
+    if (fc != NULL) {
+        fclose(fc);
+    }
+    jbiome_free(list);
+}
+
 uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root, FILE *report,
                              WorldgenParityStats *stats)
 {
@@ -408,5 +512,6 @@ uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root,
     run_improved(fixture_dir, &c);
     run_perlin_normal(fixture_dir, &c);
     run_router(fixture_dir, datapack_root, &c);
+    run_biomes(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }
