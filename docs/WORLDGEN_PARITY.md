@@ -20,7 +20,7 @@ therefore produces unrelated terrain to vanilla.
   `PerlinNoise`, `NormalNoise`, and the full `RandomState` +
   `NoiseRouter` of the overworld built from the vanilla data pack).
   `tools/reference/run_worldgen_ref.sh` regenerates the fixtures.
-- **Fixtures** - `tests/fixtures/worldgen/*.csv` (about 1.3 MB, numbers and biome ids only). 8 seeds: `0, 1, 42, -1, 123456789012345,
+- **Fixtures** - `tests/fixtures/worldgen/*.csv` (about 1.6 MB, numbers and biome ids only). 8 seeds: `0, 1, 42, -1, 123456789012345,
   Long.MIN_VALUE, Long.MAX_VALUE, -8760239871234567`.
 - **C side** - `src/world/jrandom.[ch]`, `jnoise.[ch]`, `jjson.[ch]`,
   `jdensity.[ch]`, `jbiome.[ch]`, `worldgen_parity.[ch]`; CLI `worldgen_diff`
@@ -40,7 +40,7 @@ therefore produces unrelated terrain to vanilla.
 | 2. Density-function graph + noise router for the overworld: `barrier`, `fluid_level_floodedness`, `fluid_level_spread`, `lava`, `temperature`, `vegetation`, `continents`, `erosion`, `depth`, `ridges`, `preliminary_surface_level`, `final_density`, `vein_toggle`, `vein_ridged`, `vein_gap` (28 node types incl. splines, `old_blended_noise`, `find_top_surface`, `weird_scaled_sampler`) | **Pass**: 10,800 point evaluations (8 seeds x 15 outputs x 90 points, y from -64 to 319), 0 mismatches, 0 skipped. Debug and Release |
 | 3. Climate sampling (`Climate.Sampler`, quantisation x10000 in float) and multi-noise biome lookup through the 7-D `Climate.RTree` (7,593 overworld leaves, built with vanilla's sort/bucketize order, last-result shortcut included) | **Pass**: leaf list count + order-sensitive hash equal; 4,000 random targets (54 distinct biomes; the R-tree and brute force disagree on 62, and C reproduces both exactly); 2,496 sampler-derived points over 8 seeds (42 distinct biomes) with all six quantised climate values and the biome identical; 0 mismatches |
 | 4a. `NoiseChunk` wrapping: 4x8x4 cell interpolation of `interpolated` nodes (Mth.lerp3 form of the CacheAllInCell fill and the Y,X,Z chain form), `FlatCache` quart lattice, corner memo | **Pass**: bit-exact per-block final density for 40 chunks (8 seeds x 5 chunks, all 24 sections, 3.9 M values): 960 section hashes, 0 mismatches |
-| 4b. `Aquifer` (barrier walls, water/lava pockets), ore veins, final block state per block, `doFill` | Not started. Vanilla blocks with density <= 0 can still be stone (aquifer barriers), so the solid mask cannot be derived from density alone. The vanilla fill of the 40 reference chunks has stone, water, lava, tuff, granite, copper/iron ore (`tests/fixtures/worldgen/chunk_counts.csv`; per-section block-name hashes in `chunks.csv`) |
+| 4b. `Aquifer.NoiseBasedAquifer` (nearest-4 aquifer centres on the 16x12x16 grid, `computeFluid` with the 13 surface-sampling offsets, surface level via floodedness/spread/erosion/depth, lava noise, barrier pressure), `OreVeinifier` (copper/iron veins, granite/tuff filler, raw ore blocks), material rule list and default block - i.e. `doFill` block states | **Pass**: 128 chunks (8 seeds x 16 chunks, 12.6 M blocks: air, stone, water, lava, tuff, granite, copper/iron ore, raw copper/iron blocks): per-section hashes of density bits, solid mask and block names (3,072 section triples) all identical, 0 mismatches. Debug and Release |
 | 4c. Carvers | Not started |
 | 5. Surface rules, bedrock, heightmaps | Not started |
 | 6. Features / decorators / structures | Not started |
@@ -57,8 +57,8 @@ game switches over.
    thread-local last result that decides exact distance ties, so biome results at ties depend on
    query order; the harness replays queries in the reference order. A world generator must
    therefore query in the same order as vanilla's chunk generation to be tie-exact.
-4. ~~`NoiseChunk` density~~ - done (exact). Next: `Aquifer.NoiseBasedAquifer` + `OreVeinifier` so the
-   per-block name hashes in `chunks.csv` match; then carvers.
+4. ~~`NoiseChunk` density, aquifers, ore veins (`doFill`)~~ - done (exact; `jfill.c`). Next: carvers
+   (cave/canyon carvers run after surface rules), then surface rules and bedrock.
 5. `SurfaceSystem` + surface rules, bedrock; heightmaps; compare.
 6. Carvers, features, structures in vanilla's decoration order.
 7. Nether/End.

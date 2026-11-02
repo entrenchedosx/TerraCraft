@@ -26,7 +26,8 @@ import java.util.Map;
  */
 public class WorldgenChunkDump {
     static final long[] SEEDS = WorldgenRouterDump.SEEDS;
-    static final int[][] CHUNKS = {{0, 0}, {-1, -1}, {5, -7}, {31, 12}, {-20, 3}};
+    static final int[][] CHUNKS = {{0, 0}, {-1, -1}, {5, -7}, {31, 12}, {-20, 3}, {100, 100}, {-64, 17}, {7, -130},
+            {250, -33}, {-200, -200}, {13, 13}, {-5, 40}, {64, -64}, {3, 99}, {-99, -3}, {150, 1}};
 
     static Object call(String cls, String name, String args, Object target, Object... a) throws Exception {
         return WorldgenRefDump.method(cls, name, args).invoke(target, a);

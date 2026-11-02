@@ -76,6 +76,8 @@ struct JRandomState {
     int unsupported;
     bool failed;
     int flat_count, interp_count;
+    JrPositional aquifer_rand, ore_rand;
+    int sea_level;
     JDensity *interp_nodes[16];
     JDensity *flat_nodes[64];
 };
@@ -874,6 +876,15 @@ JRandomState *jrs_create(const char *datapack_root, const char *settings, int64_
     JrRandom base;
     jr_xoroshiro_init(&base, seed);
     rs->random = jr_fork_positional(&base);
+    {
+        /* RandomState: aquiferRandom / oreRandom = random.fromHashOf("aquifer"/"ore").forkPositional() */
+        JrRandom ra = jr_pos_from_hash_of(&rs->random, "minecraft:aquifer");
+        rs->aquifer_rand = jr_fork_positional(&ra);
+        JrRandom ro = jr_pos_from_hash_of(&rs->random, "minecraft:ore");
+        rs->ore_rand = jr_fork_positional(&ro);
+        const JJson *sl = jj_get(ns, "sea_level");
+        rs->sea_level = sl != NULL ? (int)jj_double(sl) : 63;
+    }
     for (int i = 0; i < 15 && !rs->failed; ++i) {
         rs->router_keys[i] = ROUTER_KEYS[i];
         const JJson *m = jj_get(router, ROUTER_KEYS[i]);
@@ -991,4 +1002,34 @@ void jrs_destroy(JRandomState *rs)
     free(rs->refs);
     free(rs->root);
     free(rs);
+}
+
+int jrs_sea_level(const JRandomState *rs)
+{
+    return rs != NULL ? rs->sea_level : 63;
+}
+
+const JrPositional *jrs_aquifer_random(const JRandomState *rs)
+{
+    return &rs->aquifer_rand;
+}
+
+const JrPositional *jrs_ore_random(const JRandomState *rs)
+{
+    return &rs->ore_rand;
+}
+
+const JRandomState *jchunk_state(const JChunk *c)
+{
+    return c->rs;
+}
+
+int jchunk_min_x(const JChunk *c)
+{
+    return c->min_x;
+}
+
+int jchunk_min_z(const JChunk *c)
+{
+    return c->min_z;
 }

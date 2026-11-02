@@ -98,6 +98,7 @@ set(TERRACRAFT_SOURCES
   src/world/jjson.c
   src/world/jdensity.c
   src/world/jbiome.c
+  src/world/jfill.c
   src/world/worldgen_parity.c
   src/world/streamer.c
   src/world/biome.c

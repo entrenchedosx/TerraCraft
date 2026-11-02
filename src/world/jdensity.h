@@ -12,6 +12,8 @@
  * identity at point evaluation, as in the reference.
  */
 
+#include "world/jrandom.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -49,3 +51,11 @@ double jchunk_final_density(JChunk *c, int x, int y, int z);
  * NoiseInterpolator Y,X,Z lerp chain (used by ore-vein noises) instead of the
  * cell-cache Mth.lerp3 form. */
 double jchunk_eval_router(JChunk *c, const char *key, int x, int y, int z, bool chain_lerp);
+
+/* RandomState extras used by the fill stage. */
+int jrs_sea_level(const JRandomState *rs);
+const JrPositional *jrs_aquifer_random(const JRandomState *rs);
+const JrPositional *jrs_ore_random(const JRandomState *rs);
+const JRandomState *jchunk_state(const JChunk *c);
+int jchunk_min_x(const JChunk *c);
+int jchunk_min_z(const JChunk *c);

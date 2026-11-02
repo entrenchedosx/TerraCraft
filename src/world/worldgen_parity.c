@@ -2,6 +2,7 @@
 
 #include "world/jbiome.h"
 #include "world/jdensity.h"
+#include "world/jfill.h"
 #include "world/jnoise.h"
 #include "world/jrandom.h"
 
@@ -506,6 +507,9 @@ static void run_chunks(const char *dir, const char *datapack, Ctx *c)
     JRandomState *rs = NULL;
     JChunk *ch = NULL;
     uint64_t solid_hash[24];
+    uint64_t name_hash[24];
+    uint64_t solid_mask_hash[24];
+    uint8_t *blocks = (uint8_t *)malloc(16 * 16 * JFILL_HEIGHT);
     int have_hashes = 0;
     char last_seed[32] = "";
     while (fgets(line, sizeof(line), f) != NULL) {
@@ -547,6 +551,26 @@ static void run_chunks(const char *dir, const char *datapack, Ctx *c)
                     solid_hash[sec] = h;
                 }
                 have_hashes = ch != NULL;
+                if (ch != NULL && blocks != NULL && jchunk_fill(ch, blocks)) {
+                    for (int sec = 0; sec < 24; ++sec) {
+                        uint64_t hn = 1125899906842597ULL, hs = 1125899906842597ULL;
+                        for (int yy = 0; yy < 16; ++yy) {
+                            int y = -64 + sec * 16 + yy;
+                            for (int zz = 0; zz < 16; ++zz) {
+                                for (int xx = 0; xx < 16; ++xx) {
+                                    int b = blocks[JFILL_INDEX(xx, zz, y)];
+                                    hn = 31u * hn + (uint64_t)(int64_t)jr_java_string_hash(jfill_block_name((JFillBlock)b));
+                                    bool solid = !(b == JB_AIR || b == JB_WATER || b == JB_LAVA);
+                                    hs = 31u * hs + (solid ? 1u : 0u);
+                                }
+                            }
+                        }
+                        name_hash[sec] = hn;
+                        solid_mask_hash[sec] = hs;
+                    }
+                } else {
+                    have_hashes = 0;
+                }
             }
         }
         int sec = atoi(fld[3]);
@@ -554,7 +578,16 @@ static void run_chunks(const char *dir, const char *datapack, Ctx *c)
         snprintf(label, sizeof(label), "%s/sec%d", group, sec);
         uint64_t expected = (uint64_t)strtoll(fld[6], NULL, 10);
         record(c, label, expected, have_hashes && sec >= 0 && sec < 24 ? solid_hash[sec] : ~expected);
+        const char *saved = c->suite;
+        c->suite = "chunk_blocks";
+        uint64_t exp_names = (uint64_t)strtoll(fld[5], NULL, 10);
+        record(c, label, exp_names, have_hashes && sec >= 0 && sec < 24 ? name_hash[sec] : ~exp_names);
+        c->suite = "chunk_solid";
+        uint64_t exp_solid = (uint64_t)strtoll(fld[4], NULL, 10);
+        record(c, label, exp_solid, have_hashes && sec >= 0 && sec < 24 ? solid_mask_hash[sec] : ~exp_solid);
+        c->suite = saved;
     }
+    free(blocks);
     jchunk_free(ch);
     jrs_destroy(rs);
     fclose(f);
