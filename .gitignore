@@ -63,4 +63,4 @@ test_tmp_*
 test_tmp_m5_settings*.cfg
 
 # Mojang 1.21.11 reference jars/mappings (local only, never commit)
-reference/
+/reference/
