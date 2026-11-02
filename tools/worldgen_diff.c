@@ -1,23 +1,73 @@
 /* worldgen_diff: compare TerraCraft's Java-compatible world-generation
  * primitives with fixtures produced by the vanilla 1.21.11 server jar.
  *
- *   worldgen_diff <fixture_dir> [mismatch_report.csv]
+ *   worldgen_diff <fixture_dir> [mismatch_report.csv|-] [datapack_root]
+ *   worldgen_diff --chunk <datapack_root> <seed> <cx> <cz> <full_dump.csv>
  *
- * Exit status 0 only when every compared value is bit-identical and every
- * fixture file was found. Mismatches are written as CSV
- * (suite,key,expected_hex,actual_hex) to the report path (default: stdout
- * is not used; no report file is written when the path is omitted).
+ * The first form exits 0 only when every compared value is bit-identical and
+ * every fixture file was found. Mismatches are written as CSV
+ * (suite,key,expected_hex,actual_hex) to the report path ("-" or omitted: no
+ * file). The optional datapack_root (the vanilla data generator output dir)
+ * enables the stages that need data-pack content.
+ *
+ * The second form is a debugging aid: it lists every block whose
+ * solid/non-solid state differs from a full vanilla chunk dump
+ * (WorldgenChunkDump with a 4th argument "<seed>_<cx>_<cz>").
  */
 
+#include "world/jdensity.h"
 #include "world/worldgen_parity.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+static int chunk_debug(char **argv)
+{
+    JRandomState *rs = jrs_create(argv[2], "overworld", (int64_t)strtoll(argv[3], NULL, 10));
+    if (rs == NULL) {
+        fprintf(stderr, "cannot load data pack\n");
+        return 2;
+    }
+    int cx = atoi(argv[4]), cz = atoi(argv[5]);
+    JChunk *ch = jchunk_create(rs, cx, cz);
+    FILE *f = fopen(argv[6], "r");
+    if (f == NULL || ch == NULL) {
+        fprintf(stderr, "cannot open dump\n");
+        return 2;
+    }
+    char line[256];
+    fgets(line, sizeof(line), f);
+    int diffs = 0;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        int x, z, y;
+        char name[128];
+        if (sscanf(line, "%d,%d,%d,%127s", &x, &z, &y, name) != 4) {
+            continue;
+        }
+        int solid = !(strstr(name, "air") || strstr(name, "water") || strstr(name, "lava"));
+        double d = jchunk_final_density(ch, cx * 16 + x, y, cz * 16 + z);
+        if ((d > 0.0) != (solid != 0)) {
+            if (diffs++ < 40) {
+                printf("x=%d y=%d z=%d vanilla=%s density=%.17g point=%.17g\n", cx * 16 + x, y, cz * 16 + z, name, d,
+                       jdf_compute(jrs_router(rs, "final_density"), cx * 16 + x, y, cz * 16 + z));
+            }
+        }
+    }
+    printf("total differing blocks: %d\n", diffs);
+    fclose(f);
+    jchunk_free(ch);
+    jrs_destroy(rs);
+    return diffs == 0 ? 0 : 1;
+}
 
 int main(int argc, char **argv)
 {
+    if (argc >= 7 && strcmp(argv[1], "--chunk") == 0) {
+        return chunk_debug(argv);
+    }
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <fixture_dir> [mismatch_report.csv] [datapack_root]\n", argv[0]);
+        fprintf(stderr, "usage: %s <fixture_dir> [mismatch_report.csv|-] [datapack_root]\n", argv[0]);
         return 2;
     }
     FILE *report = NULL;

@@ -491,6 +491,75 @@ static void run_biomes(const char *dir, const char *datapack, Ctx *c)
     jbiome_free(list);
 }
 
+/* ---- chunks.csv: seed,chunk_x,chunk_z,section,solid_hash,name_hash ------------- */
+static void run_chunks(const char *dir, const char *datapack, Ctx *c)
+{
+    FILE *f = open_fixture(dir, "chunks.csv", c->stats);
+    if (f == NULL) {
+        return;
+    }
+    char line[LINE_MAX_LEN];
+    char *fld[FIELDS_MAX];
+    c->suite = "chunk_density";
+    fgets(line, sizeof(line), f);
+    char cur[64] = "";
+    JRandomState *rs = NULL;
+    JChunk *ch = NULL;
+    uint64_t solid_hash[24];
+    int have_hashes = 0;
+    char last_seed[32] = "";
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (split_csv(line, fld) < 7) {
+            continue;
+        }
+        if (datapack == NULL) {
+            c->stats->skipped++;
+            continue;
+        }
+        char group[64];
+        snprintf(group, sizeof(group), "%s/%s/%s", fld[0], fld[1], fld[2]);
+        if (strcmp(group, cur) != 0) {
+            char seed_s[32];
+            snprintf(seed_s, sizeof(seed_s), "%s", fld[0]);
+            jchunk_free(ch);
+            ch = NULL;
+            if (rs == NULL || strcmp(last_seed, seed_s) != 0) {
+                jrs_destroy(rs);
+                rs = jrs_create(datapack, "overworld", (int64_t)strtoll(seed_s, NULL, 10));
+                snprintf(last_seed, sizeof(last_seed), "%s", seed_s);
+            }
+            snprintf(cur, sizeof(cur), "%s", group);
+            have_hashes = 0;
+            if (rs != NULL) {
+                ch = jchunk_create(rs, atoi(fld[1]), atoi(fld[2]));
+                int cx = atoi(fld[1]), cz = atoi(fld[2]);
+                for (int sec = 0; sec < 24 && ch != NULL; ++sec) {
+                    uint64_t h = 1125899906842597ULL;
+                    for (int yy = 0; yy < 16; ++yy) {
+                        int y = -64 + sec * 16 + yy;
+                        for (int zz = 0; zz < 16; ++zz) {
+                            for (int xx = 0; xx < 16; ++xx) {
+                                double d = jchunk_final_density(ch, cx * 16 + xx, y, cz * 16 + zz);
+                                h = 31u * h + double_bits(d);
+                            }
+                        }
+                    }
+                    solid_hash[sec] = h;
+                }
+                have_hashes = ch != NULL;
+            }
+        }
+        int sec = atoi(fld[3]);
+        char label[96];
+        snprintf(label, sizeof(label), "%s/sec%d", group, sec);
+        uint64_t expected = (uint64_t)strtoll(fld[6], NULL, 10);
+        record(c, label, expected, have_hashes && sec >= 0 && sec < 24 ? solid_hash[sec] : ~expected);
+    }
+    jchunk_free(ch);
+    jrs_destroy(rs);
+    fclose(f);
+}
+
 uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root, FILE *report,
                              WorldgenParityStats *stats)
 {
@@ -513,5 +582,6 @@ uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root,
     run_perlin_normal(fixture_dir, &c);
     run_router(fixture_dir, datapack_root, &c);
     run_biomes(fixture_dir, datapack_root, &c);
+    run_chunks(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }

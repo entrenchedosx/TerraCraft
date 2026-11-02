@@ -19,7 +19,7 @@ typedef enum Kind {
     K_CONST, K_ADD, K_MUL, K_MIN, K_MAX, K_ADD_C, K_MUL_C, K_MIN_C, K_MAX_C,
     K_ABS, K_SQUARE, K_CUBE, K_HALF_NEG, K_QUARTER_NEG, K_SQUEEZE, K_INVERT,
     K_CLAMP, K_YGRAD, K_NOISE, K_SHIFTED, K_SHIFT_A, K_SHIFT_B,
-    K_RANGE, K_WEIRD, K_SPLINE, K_PASS, K_BLEND_ALPHA, K_BLEND_OFFSET, K_BLENDED, K_FIND_TOP, K_UNSUPPORTED
+    K_RANGE, K_WEIRD, K_SPLINE, K_PASS, K_BLEND_ALPHA, K_BLEND_OFFSET, K_BLENDED, K_FIND_TOP, K_FLATCACHE, K_INTERP, K_UNSUPPORTED
 } Kind;
 
 typedef struct Blended {
@@ -47,6 +47,7 @@ struct JDensity {
     int mapper;            /* Weird sampler: 1 = type_1, 2 = type_2. */
     int ay, by;            /* Y gradient endpoints (find_top_surface: lower bound, cell height). */
     Blended *blended;
+    int cache_id;          /* K_FLATCACHE / K_INTERP index within the router. */
 };
 
 typedef struct NoiseEntry {
@@ -74,6 +75,9 @@ struct JRandomState {
     const char *router_keys[15];
     int unsupported;
     bool failed;
+    int flat_count, interp_count;
+    JDensity *interp_nodes[16];
+    JDensity *flat_nodes[64];
 };
 
 static const char *ROUTER_KEYS[15] = {
@@ -337,8 +341,26 @@ static JDensity *compile(JRandomState *rs, const JJson *j)
             return n;
         }
     }
-    if (strcmp(t, "interpolated") == 0 || strcmp(t, "flat_cache") == 0 || strcmp(t, "cache_2d") == 0 ||
-        strcmp(t, "cache_once") == 0 || strcmp(t, "cache_all_in_cell") == 0 || strcmp(t, "blend_density") == 0) {
+    if (strcmp(t, "interpolated") == 0 || strcmp(t, "flat_cache") == 0) {
+        bool interp = t[0] == 'i';
+        JDensity *x = compile_member(rs, j, "argument");
+        n = new_node(rs, interp ? K_INTERP : K_FLATCACHE);
+        if (n != NULL && x != NULL) {
+            n->a = x;
+            if (interp && rs->interp_count < 16) {
+                n->cache_id = rs->interp_count;
+                rs->interp_nodes[rs->interp_count++] = n;
+            } else if (!interp && rs->flat_count < 64) {
+                n->cache_id = rs->flat_count;
+                rs->flat_nodes[rs->flat_count++] = n;
+            } else {
+                rs->failed = true;
+            }
+        }
+        return n;
+    }
+    if (strcmp(t, "cache_2d") == 0 || strcmp(t, "cache_once") == 0 || strcmp(t, "cache_all_in_cell") == 0 ||
+        strcmp(t, "blend_density") == 0) {
         return compile_member(rs, j, "argument");
     }
     if (strcmp(t, "blend_alpha") == 0) {
@@ -516,9 +538,10 @@ static float spline_lerp(float d, float s, float e)
     return s + d * (e - s);
 }
 
-static double df_eval(const JDensity *n, int x, int y, int z);
+typedef struct JChunk JChunk;
+static double df_eval(const JDensity *n, int x, int y, int z, const JChunk *ch, bool cc);
 
-static float spline_eval(const Spline *s, int x, int y, int z)
+static float spline_eval(const Spline *s, int x, int y, int z, const JChunk *ch, bool cc)
 {
     if (s == NULL) {
         return 0.0f;
@@ -526,7 +549,7 @@ static float spline_eval(const Spline *s, int x, int y, int z)
     if (s->is_const) {
         return s->value;
     }
-    float f = (float)df_eval(s->coord, x, y, z);
+    float f = (float)df_eval(s->coord, x, y, z, ch, cc);
     /* findIntervalStart: first index where f < location, minus one. */
     int lo = 0, hi = s->n;
     while (lo < hi) {
@@ -541,7 +564,7 @@ static float spline_eval(const Spline *s, int x, int y, int z)
     int last = s->n - 1;
     if (i < 0 || i == last) {
         int k = i < 0 ? 0 : last;
-        float v = spline_eval(s->val[k], x, y, z);
+        float v = spline_eval(s->val[k], x, y, z, ch, cc);
         float g = s->deriv[k];
         return g == 0.0f ? v : v + g * (f - s->loc[k]);
     }
@@ -550,8 +573,8 @@ static float spline_eval(const Spline *s, int x, int y, int z)
     float k = (f - g) / (h - g);
     float l = s->deriv[i];
     float m = s->deriv[i + 1];
-    float nn = spline_eval(s->val[i], x, y, z);
-    float o = spline_eval(s->val[i + 1], x, y, z);
+    float nn = spline_eval(s->val[i], x, y, z, ch, cc);
+    float o = spline_eval(s->val[i + 1], x, y, z, ch, cc);
     float p = l * (h - g) - (o - nn);
     float q = -m * (h - g) + (o - nn);
     return spline_lerp(k, nn, o) + k * (1.0f - k) * spline_lerp(k, p, q);
@@ -563,6 +586,103 @@ static double rarity(int mapper, double d)
         return d < -0.5 ? 0.75 : (d < 0.0 ? 1.0 : (d < 0.5 ? 1.5 : 2.0));
     }
     return d < -0.75 ? 0.5 : (d < -0.5 ? 0.75 : (d < 0.5 ? 1.0 : (d < 0.75 ? 2.0 : 3.0)));
+}
+
+
+/* ---- NoiseChunk environment ------------------------------------------------------ */
+
+#define CHUNK_CELL_W 4
+#define CHUNK_CELL_H 8
+#define CHUNK_MIN_Y (-64)
+#define CHUNK_CELLS_XZ 4
+#define CHUNK_CELLS_Y 48
+#define CHUNK_CORNERS (5 * 5 * 49)
+#define FLAT_N 5
+
+struct JChunk {
+    const JRandomState *rs;
+    int chunk_x, chunk_z;
+    int min_x, min_z;
+    int lerp_mode;                 /* 0: Mth.lerp3 (CacheAllInCell fill), 1: Y,X,Z chain (plain interpolator). */
+    double *corner[16];            /* Interpolator corner values [cx][cz][cy]. */
+    unsigned char *corner_have[16];
+    double *flat[64];              /* FlatCache grids [5][5]. */
+    unsigned char *flat_have[64];
+};
+
+static double mth_lerp_d(double d, double s, double e)
+{
+    return s + d * (e - s);
+}
+
+static double chunk_corner(const JChunk *chc, const JDensity *n, int cx, int cz, int cy)
+{
+    JChunk *c = (JChunk *)chc;
+    int id = n->cache_id;
+    size_t idx = ((size_t)cx * 5 + (size_t)cz) * 49 + (size_t)cy;
+    if (!c->corner_have[id][idx]) {
+        int bx = c->min_x + cx * CHUNK_CELL_W;
+        int bz = c->min_z + cz * CHUNK_CELL_W;
+        int by = (cy - 8) * CHUNK_CELL_H;
+        c->corner[id][idx] = df_eval(n->a, bx, by, bz, chc, false);
+        c->corner_have[id][idx] = 1;
+    }
+    return c->corner[id][idx];
+}
+
+static double interp_eval(const JDensity *n, int x, int y, int z, const JChunk *ch)
+{
+    int ix = x - ch->min_x;
+    int iz = z - ch->min_z;
+    int iy = y - CHUNK_MIN_Y;
+    if (ix < 0 || ix >= 16 || iz < 0 || iz >= 16 || iy < 0 || iy >= CHUNK_CELLS_Y * CHUNK_CELL_H) {
+        return df_eval(n->a, x, y, z, ch, false);
+    }
+    int cx = ix / CHUNK_CELL_W, cz = iz / CHUNK_CELL_W, cy = iy / CHUNK_CELL_H;
+    double tx = (double)(ix % CHUNK_CELL_W) / (double)CHUNK_CELL_W;
+    double ty = (double)(iy % CHUNK_CELL_H) / (double)CHUNK_CELL_H;
+    double tz = (double)(iz % CHUNK_CELL_W) / (double)CHUNK_CELL_W;
+    double d000 = chunk_corner(ch, n, cx, cz, cy);
+    double d100 = chunk_corner(ch, n, cx + 1, cz, cy);
+    double d010 = chunk_corner(ch, n, cx, cz, cy + 1);
+    double d110 = chunk_corner(ch, n, cx + 1, cz, cy + 1);
+    double d001 = chunk_corner(ch, n, cx, cz + 1, cy);
+    double d101 = chunk_corner(ch, n, cx + 1, cz + 1, cy);
+    double d011 = chunk_corner(ch, n, cx, cz + 1, cy + 1);
+    double d111 = chunk_corner(ch, n, cx + 1, cz + 1, cy + 1);
+    if (ch->lerp_mode == 0) {
+        /* Mth.lerp3(tx, ty, tz, 000, 100, 010, 110, 001, 101, 011, 111) */
+        double a0 = mth_lerp_d(ty, mth_lerp_d(tx, d000, d100), mth_lerp_d(tx, d010, d110));
+        double a1 = mth_lerp_d(ty, mth_lerp_d(tx, d001, d101), mth_lerp_d(tx, d011, d111));
+        return mth_lerp_d(tz, a0, a1);
+    }
+    /* NoiseInterpolator.updateForY / X / Z chain. */
+    double p = mth_lerp_d(ty, d000, d010);
+    double q = mth_lerp_d(ty, d100, d110);
+    double r = mth_lerp_d(ty, d001, d011);
+    double s = mth_lerp_d(ty, d101, d111);
+    double t0 = mth_lerp_d(tx, p, q);
+    double u0 = mth_lerp_d(tx, r, s);
+    return mth_lerp_d(tz, t0, u0);
+}
+
+static double flat_eval(const JDensity *n, int x, int y, int z, const JChunk *chc)
+{
+    JChunk *ch = (JChunk *)chc;
+    int qx = (x >> 2) - (ch->min_x >> 2);
+    int qz = (z >> 2) - (ch->min_z >> 2);
+    if (qx < 0 || qz < 0 || qx >= FLAT_N || qz >= FLAT_N) {
+        return df_eval(n->a, x, y, z, chc, false);
+    }
+    int id = n->cache_id;
+    size_t idx = (size_t)qx * FLAT_N + (size_t)qz;
+    if (!ch->flat_have[id][idx]) {
+        int bx = ((ch->min_x >> 2) + qx) * 4;
+        int bz = ((ch->min_z >> 2) + qz) * 4;
+        ch->flat[id][idx] = df_eval(n->a, bx, 0, bz, chc, false);
+        ch->flat_have[id][idx] = 1;
+    }
+    return ch->flat[id][idx];
 }
 
 static double blended_eval(const Blended *b, int bx, int by, int bz)
@@ -615,50 +735,50 @@ static double blended_eval(const Blended *b, int bx, int by, int bz)
     return r / 128.0;
 }
 
-static double df_eval(const JDensity *n, int x, int y, int z)
+static double df_eval(const JDensity *n, int x, int y, int z, const JChunk *ch, bool cc)
 {
     switch (n->kind) {
     case K_CONST: return n->c1;
-    case K_ADD: return df_eval(n->a, x, y, z) + df_eval(n->b, x, y, z);
+    case K_ADD: return df_eval(n->a, x, y, z, ch, cc) + df_eval(n->b, x, y, z, ch, cc);
     case K_MUL: {
-        double d = df_eval(n->a, x, y, z);
-        return d == 0.0 ? 0.0 : d * df_eval(n->b, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
+        return d == 0.0 ? 0.0 : d * df_eval(n->b, x, y, z, ch, cc);
     }
-    case K_MIN: return java_min(df_eval(n->a, x, y, z), df_eval(n->b, x, y, z));
-    case K_MAX: return java_max(df_eval(n->a, x, y, z), df_eval(n->b, x, y, z));
-    case K_ADD_C: return df_eval(n->a, x, y, z) + n->c1;
-    case K_MUL_C: return df_eval(n->a, x, y, z) * n->c1;
+    case K_MIN: return java_min(df_eval(n->a, x, y, z, ch, cc), df_eval(n->b, x, y, z, ch, cc));
+    case K_MAX: return java_max(df_eval(n->a, x, y, z, ch, cc), df_eval(n->b, x, y, z, ch, cc));
+    case K_ADD_C: return df_eval(n->a, x, y, z, ch, cc) + n->c1;
+    case K_MUL_C: return df_eval(n->a, x, y, z, ch, cc) * n->c1;
     case K_MIN_C: {
-        double d = df_eval(n->a, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
         return d < n->c1 ? d : n->c1;
     }
     case K_MAX_C: {
-        double d = df_eval(n->a, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
         return d > n->c1 ? d : n->c1;
     }
-    case K_ABS: return fabs(df_eval(n->a, x, y, z));
+    case K_ABS: return fabs(df_eval(n->a, x, y, z, ch, cc));
     case K_SQUARE: {
-        double d = df_eval(n->a, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
         return d * d;
     }
     case K_CUBE: {
-        double d = df_eval(n->a, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
         return d * d * d;
     }
     case K_HALF_NEG: {
-        double d = df_eval(n->a, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
         return d > 0.0 ? d : d * 0.5;
     }
     case K_QUARTER_NEG: {
-        double d = df_eval(n->a, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
         return d > 0.0 ? d : d * 0.25;
     }
     case K_SQUEEZE: {
-        double c = mth_clamp(df_eval(n->a, x, y, z), -1.0, 1.0);
+        double c = mth_clamp(df_eval(n->a, x, y, z, ch, cc), -1.0, 1.0);
         return c / 2.0 - c * c * c / 24.0;
     }
-    case K_INVERT: return 1.0 / df_eval(n->a, x, y, z);
-    case K_CLAMP: return mth_clamp(df_eval(n->a, x, y, z), n->c1, n->c2);
+    case K_INVERT: return 1.0 / df_eval(n->a, x, y, z, ch, cc);
+    case K_CLAMP: return mth_clamp(df_eval(n->a, x, y, z, ch, cc), n->c1, n->c2);
     case K_YGRAD: {
         double delta = ((double)y - (double)n->ay) / ((double)n->by - (double)n->ay);
         if (delta < 0.0) {
@@ -672,9 +792,9 @@ static double df_eval(const JDensity *n, int x, int y, int z)
     case K_NOISE:
         return jn_normal_value(n->noise, (double)x * n->c1, (double)y * n->c2, (double)z * n->c1);
     case K_SHIFTED: {
-        double d = (double)x * n->c1 + df_eval(n->a, x, y, z);
-        double e = (double)y * n->c2 + df_eval(n->b, x, y, z);
-        double f = (double)z * n->c1 + df_eval(n->c, x, y, z);
+        double d = (double)x * n->c1 + df_eval(n->a, x, y, z, ch, cc);
+        double e = (double)y * n->c2 + df_eval(n->b, x, y, z, ch, cc);
+        double f = (double)z * n->c1 + df_eval(n->c, x, y, z, ch, cc);
         return jn_normal_value(n->noise, d, e, f);
     }
     case K_SHIFT_A:
@@ -682,22 +802,22 @@ static double df_eval(const JDensity *n, int x, int y, int z)
     case K_SHIFT_B:
         return jn_normal_value(n->noise, (double)z * 0.25, (double)x * 0.25, 0.0 * 0.25) * 4.0;
     case K_RANGE: {
-        double d = df_eval(n->a, x, y, z);
-        return (d >= n->c1 && d < n->c2) ? df_eval(n->b, x, y, z) : df_eval(n->c, x, y, z);
+        double d = df_eval(n->a, x, y, z, ch, cc);
+        return (d >= n->c1 && d < n->c2) ? df_eval(n->b, x, y, z, ch, cc) : df_eval(n->c, x, y, z, ch, cc);
     }
     case K_WEIRD: {
-        double d = rarity(n->mapper, df_eval(n->a, x, y, z));
+        double d = rarity(n->mapper, df_eval(n->a, x, y, z, ch, cc));
         return d * fabs(jn_normal_value(n->noise, (double)x / d, (double)y / d, (double)z / d));
     }
-    case K_SPLINE: return (double)spline_eval(n->spline, x, y, z);
-    case K_PASS: return df_eval(n->a, x, y, z);
+    case K_SPLINE: return (double)spline_eval(n->spline, x, y, z, ch, cc);
+    case K_PASS: return df_eval(n->a, x, y, z, ch, cc);
     case K_BLEND_ALPHA: return 1.0;
     case K_BLEND_OFFSET: return 0.0;
     case K_BLENDED: return blended_eval(n->blended, x, y, z);
     case K_FIND_TOP: {
         int cell = n->by;
         int lower = n->ay;
-        double ub = df_eval(n->b, x, y, z) / (double)cell;
+        double ub = df_eval(n->b, x, y, z, ch, cc) / (double)cell;
         int i = (int)ub;
         if (ub < (double)i) {
             i--;
@@ -707,12 +827,16 @@ static double df_eval(const JDensity *n, int x, int y, int z)
             return (double)lower;
         }
         for (int yy = i; yy >= lower; yy -= cell) {
-            if (df_eval(n->a, x, yy, z) > 0.0) {
+            if (df_eval(n->a, x, yy, z, ch, false) > 0.0) {
                 return (double)yy;
             }
         }
         return (double)lower;
     }
+    case K_FLATCACHE:
+        return ch != NULL ? flat_eval(n, x, y, z, ch) : df_eval(n->a, x, y, z, ch, cc);
+    case K_INTERP:
+        return (ch != NULL && cc) ? interp_eval(n, x, y, z, ch) : df_eval(n->a, x, y, z, ch, cc);
     case K_UNSUPPORTED: return NAN;
     }
     return NAN;
@@ -720,7 +844,7 @@ static double df_eval(const JDensity *n, int x, int y, int z)
 
 double jdf_compute(const JDensity *df, int x, int y, int z)
 {
-    return df != NULL ? df_eval(df, x, y, z) : NAN;
+    return df != NULL ? df_eval(df, x, y, z, NULL, false) : NAN;
 }
 
 /* ---- router ----------------------------------------------------------------------- */
@@ -761,6 +885,63 @@ JRandomState *jrs_create(const char *datapack_root, const char *settings, int64_
         return NULL;
     }
     return rs;
+}
+
+
+JChunk *jchunk_create(const JRandomState *rs, int chunk_x, int chunk_z)
+{
+    if (rs == NULL) {
+        return NULL;
+    }
+    JChunk *c = (JChunk *)calloc(1, sizeof(JChunk));
+    if (c == NULL) {
+        return NULL;
+    }
+    c->rs = rs;
+    c->chunk_x = chunk_x;
+    c->chunk_z = chunk_z;
+    c->min_x = chunk_x * 16;
+    c->min_z = chunk_z * 16;
+    for (int i = 0; i < rs->interp_count; ++i) {
+        c->corner[i] = (double *)calloc(CHUNK_CORNERS, sizeof(double));
+        c->corner_have[i] = (unsigned char *)calloc(CHUNK_CORNERS, 1);
+    }
+    for (int i = 0; i < rs->flat_count; ++i) {
+        c->flat[i] = (double *)calloc(FLAT_N * FLAT_N, sizeof(double));
+        c->flat_have[i] = (unsigned char *)calloc(FLAT_N * FLAT_N, 1);
+    }
+    return c;
+}
+
+void jchunk_free(JChunk *c)
+{
+    if (c == NULL) {
+        return;
+    }
+    for (int i = 0; i < 16; ++i) {
+        free(c->corner[i]);
+        free(c->corner_have[i]);
+    }
+    for (int i = 0; i < 64; ++i) {
+        free(c->flat[i]);
+        free(c->flat_have[i]);
+    }
+    free(c);
+}
+
+double jchunk_final_density(JChunk *c, int x, int y, int z)
+{
+    const JDensity *fd = jrs_router(c->rs, "final_density");
+    c->lerp_mode = 0; /* CacheAllInCell(add(final_density, beardifier)) fills with Mth.lerp3 */
+    double d = fd != NULL ? df_eval(fd, x, y, z, c, true) : NAN;
+    return d + 0.0; /* + BeardifierMarker (0.0 without structures) */
+}
+
+double jchunk_eval_router(JChunk *c, const char *key, int x, int y, int z, bool chain_lerp)
+{
+    const JDensity *df = jrs_router(c->rs, key);
+    c->lerp_mode = chain_lerp ? 1 : 0;
+    return df != NULL ? df_eval(df, x, y, z, c, true) : NAN;
 }
 
 const JDensity *jrs_router(const JRandomState *rs, const char *key)

@@ -35,3 +35,17 @@ double jdf_compute(const JDensity *df, int x, int y, int z);
 /* Number of density-function node kinds that could not be evaluated exactly
  * yet (reported, not hidden): >0 means some outputs are incomplete. */
 int jrs_unsupported_count(const JRandomState *rs);
+
+/* ---- NoiseChunk environment ------------------------------------------------
+ * One overworld chunk's wrapping of the router: FlatCache grids sampled on the
+ * 4-block quart lattice and trilinear cell interpolation (4x8x4 blocks) of the
+ * `interpolated` nodes, exactly as NoiseChunk does. */
+typedef struct JChunk JChunk;
+JChunk *jchunk_create(const JRandomState *rs, int chunk_x, int chunk_z);
+void jchunk_free(JChunk *c);
+/* Density the block loop sees at block (x, y, z) of this chunk (y -64..319). */
+double jchunk_final_density(JChunk *c, int x, int y, int z);
+/* Any router output in chunk context. chain_lerp selects the plain
+ * NoiseInterpolator Y,X,Z lerp chain (used by ore-vein noises) instead of the
+ * cell-cache Mth.lerp3 form. */
+double jchunk_eval_router(JChunk *c, const char *key, int x, int y, int z, bool chain_lerp);

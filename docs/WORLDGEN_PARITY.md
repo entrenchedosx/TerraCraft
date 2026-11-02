@@ -39,7 +39,9 @@ therefore produces unrelated terrain to vanilla.
 | 1. `ImprovedNoise`, `PerlinNoise`, `NormalNoise` (value + max value, y-fudge variant) | **Pass**: 160 + 880 comparisons, 0 mismatches |
 | 2. Density-function graph + noise router for the overworld: `barrier`, `fluid_level_floodedness`, `fluid_level_spread`, `lava`, `temperature`, `vegetation`, `continents`, `erosion`, `depth`, `ridges`, `preliminary_surface_level`, `final_density`, `vein_toggle`, `vein_ridged`, `vein_gap` (28 node types incl. splines, `old_blended_noise`, `find_top_surface`, `weird_scaled_sampler`) | **Pass**: 10,800 point evaluations (8 seeds x 15 outputs x 90 points, y from -64 to 319), 0 mismatches, 0 skipped. Debug and Release |
 | 3. Climate sampling (`Climate.Sampler`, quantisation x10000 in float) and multi-noise biome lookup through the 7-D `Climate.RTree` (7,593 overworld leaves, built with vanilla's sort/bucketize order, last-result shortcut included) | **Pass**: leaf list count + order-sensitive hash equal; 4,000 random targets (54 distinct biomes; the R-tree and brute force disagree on 62, and C reproduces both exactly); 2,496 sampler-derived points over 8 seeds (42 distinct biomes) with all six quantised climate values and the biome identical; 0 mismatches |
-| 4. `NoiseChunk` cell interpolation, `NoiseBasedChunkGenerator` fill, aquifers, ore veins, carvers | Not started |
+| 4a. `NoiseChunk` wrapping: 4x8x4 cell interpolation of `interpolated` nodes (Mth.lerp3 form of the CacheAllInCell fill and the Y,X,Z chain form), `FlatCache` quart lattice, corner memo | **Pass**: bit-exact per-block final density for 40 chunks (8 seeds x 5 chunks, all 24 sections, 3.9 M values): 960 section hashes, 0 mismatches |
+| 4b. `Aquifer` (barrier walls, water/lava pockets), ore veins, final block state per block, `doFill` | Not started. Vanilla blocks with density <= 0 can still be stone (aquifer barriers), so the solid mask cannot be derived from density alone. The vanilla fill of the 40 reference chunks has stone, water, lava, tuff, granite, copper/iron ore (`tests/fixtures/worldgen/chunk_counts.csv`; per-section block-name hashes in `chunks.csv`) |
+| 4c. Carvers | Not started |
 | 5. Surface rules, bedrock, heightmaps | Not started |
 | 6. Features / decorators / structures | Not started |
 | 7. Nether, End (End islands, legacy random source settings) | Not started |
@@ -55,9 +57,8 @@ game switches over.
    thread-local last result that decides exact distance ties, so biome results at ties depend on
    query order; the harness replays queries in the reference order. A world generator must
    therefore query in the same order as vanilla's chunk generation to be tie-exact.
-4. `NoiseChunk`: 4x8 cell interpolation of `final_density` (the router above is
-   evaluated at cell corners and trilinearly interpolated), `NoiseBasedChunkGenerator.doFill`,
-   aquifers, ore veins; compare block states at world coordinates and chunk hashes.
+4. ~~`NoiseChunk` density~~ - done (exact). Next: `Aquifer.NoiseBasedAquifer` + `OreVeinifier` so the
+   per-block name hashes in `chunks.csv` match; then carvers.
 5. `SurfaceSystem` + surface rules, bedrock; heightmaps; compare.
 6. Carvers, features, structures in vanilla's decoration order.
 7. Nether/End.
