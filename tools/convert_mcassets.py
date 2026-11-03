@@ -28,6 +28,9 @@ import os
 import json
 import sys
 import wave
+import zipfile
+import io
+import re
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MC = os.path.join(REPO, "mcassets", "assets", "minecraft")
@@ -38,6 +41,30 @@ GEN_SOUNDS = os.path.join(REPO, "mcassets", "generated", "sounds")
 GEN_MOBS = os.path.join(REPO, "mcassets", "generated", "mobs")
 GEN_MENU = os.path.join(REPO, "mcassets", "generated", "menu")
 DOWNLOADED_MENU = os.path.join(REPO, "mcassets", "downloaded", "menu")
+
+REFERENCE_CLIENT = os.path.join(REPO, "reference", "1.21.11", "client.jar")
+
+
+def _visual_bytes(relative):
+    """Read only owner-local files, preferring the exact target release."""
+    if os.path.isfile(REFERENCE_CLIENT):
+        with zipfile.ZipFile(REFERENCE_CLIENT) as archive:
+            try:
+                return archive.read("assets/minecraft/textures/" + relative)
+            except KeyError:
+                pass
+    path = os.path.join(TEX, *relative.split("/"))
+    if os.path.isfile(path):
+        with open(path, "rb") as source:
+            return source.read()
+    return None
+
+
+def _visual_image(relative):
+    from PIL import Image
+    data = _visual_bytes(relative)
+    return Image.open(io.BytesIO(data)).convert("RGBA") if data else None
+
 
 TILE_SIZE = 16
 AUDIO_RATE = 22050
@@ -195,6 +222,8 @@ SOUNDS["splash"] = "random/splash.ogg"
 # tint stage, so the converter bakes MC plains colors in once:
 # grass green #91BD59 for grass tops/plants, foliage #77AB2F for leaves.
 # (User pack BMPs bypass conversion and carry their own colors.)
+TILES["grass_side_overlay"] = "block/grass_block_side_overlay.png"
+
 TINTS = {
     "grass_top": (145, 189, 89),
     "plant": (145, 189, 89),
@@ -210,10 +239,10 @@ def convert_tiles():
     for stem, rel in sorted(TILES.items()):
         src = os.path.join(TEX, *rel.split("/"))
         dst = os.path.join(GEN_TILES, stem + ".bmp")
-        if not os.path.isfile(src):
+        img = _visual_image(rel)
+        if img is None:
             missing.append(rel)
             continue
-        img = Image.open(src).convert("RGBA")
         if img.width != TILE_SIZE or img.height < TILE_SIZE or img.height % TILE_SIZE != 0:
             print("  bad size %s: %s" % (rel, img.size))
             missing.append(rel)
@@ -520,12 +549,124 @@ def convert_sounds():
     return ok, missing
 
 
+
+def convert_visual_assets():
+    """Native sky/HUD sprites and tick-accurate fluid animation strips."""
+    from PIL import Image
+    import numpy as np
+    import struct
+    environment = os.path.join(REPO, "mcassets", "generated", "environment")
+    animations = os.path.join(REPO, "mcassets", "generated", "animations")
+    os.makedirs(environment, exist_ok=True)
+    os.makedirs(animations, exist_ok=True)
+    for name in ("sun", "moon_phases", "clouds"):
+        image = _visual_image("environment/" + name + ".png")
+        if image is not None:
+            _write_rgba_bmp(image, os.path.join(environment, name + ".bmp"))
+    underwater = _visual_image("misc/underwater.png")
+    if underwater is not None:
+        _write_rgba_bmp(underwater, os.path.join(environment, "underwater.bmp"))
+    for stem, source in (("water", "water_still"), ("lava", "lava_still")):
+        image = _visual_image("block/" + source + ".png")
+        if image is None:
+            continue
+        data = _visual_bytes("block/" + source + ".png.mcmeta")
+        meta = json.loads(data).get("animation", {}) if data else {}
+        count = image.height // image.width
+        duration = meta.get("frametime", 1)
+        sequence = meta.get("frames", list(range(count)))
+        frames = [(f, duration) if isinstance(f, int) else (f["index"], f.get("time", duration)) for f in sequence]
+        timeline = []
+        for i, (index, ticks) in enumerate(frames):
+            frame = image.crop((0,index*image.width,image.width,(index+1)*image.width)).resize((16,16),Image.Resampling.NEAREST)
+            next_index = frames[(i+1) % len(frames)][0]
+            next_frame = image.crop((0,next_index*image.width,image.width,(next_index+1)*image.width)).resize((16,16),Image.Resampling.NEAREST)
+            for tick in range(ticks):
+                timeline.append(Image.blend(frame,next_frame,tick/ticks) if meta.get("interpolate",False) else frame)
+        strip = Image.new("RGBA", (16,16*len(timeline)))
+        for i, frame in enumerate(timeline):
+            strip.paste(frame, (0,i*16))
+        _write_rgba_bmp(strip, os.path.join(animations, stem+".bmp"))
+    hud = Image.new("RGBA", (512,128))
+    regions = [
+        ("hotbar",0,0), ("hotbar_selection",192,0), ("crosshair",224,0),
+        ("experience_bar_background",0,32), ("heart/container",0,48),
+        ("heart/full",16,48), ("heart/half",32,48),
+        ("food_empty",48,48), ("food_full",64,48), ("food_half",80,48),
+    ]
+    available = True
+    for name,x,y in regions:
+        image = _visual_image("gui/sprites/hud/"+name+".png")
+        if image is None:
+            available = False
+            continue
+        hud.paste(image,(x,y))
+    if available:
+        _write_rgba_bmp(hud, os.path.join(GEN_MENU,"hud.bmp"))
+
+    def tile(stem):
+        path = os.path.join(GEN_TILES,stem+".bmp")
+        if not os.path.isfile(path):
+            return Image.new("RGBA",(16,16))
+        with open(path,"rb") as source:
+            data = source.read()
+        offset = struct.unpack_from("<I",data,10)[0]
+        return Image.frombytes("RGBA",(16,16),data[offset:],"raw","BGRA",64,-1)
+
+    # Render GUI block models to their own atlas. World UVs and model textures
+    # stay independent; tools and other generated items keep their flat art.
+    atlas = Image.new("RGBA",(512,512))
+    # Match the stable C enum, including aliases whose source order differs.
+    with open(os.path.join(REPO,"src","render","texture_atlas.c"), encoding="utf-8") as source:
+        enum_text = source.read()
+    table = re.search(r'TILE_FILES\[\].*?=\s*\{(.*?)\};', enum_text, re.S)
+    if table is None:
+        raise ValueError("Cannot find engine tile filename table")
+    names = re.findall(r'"([a-z0-9_]+)"', table.group(1))
+    for index,stem in enumerate(names):
+        atlas.paste(tile(stem).resize((32,32),Image.Resampling.NEAREST),((index%16)*32,(15-index//16)*32))
+    blocks = {"grass_side":("grass_top","grass_side"), "wood":("wood_top","wood"),
+              "workbench":("workbench_top","workbench_side")}
+    for stem in ("dirt","stone","sand","bedrock","coal_ore","iron_ore","gold_ore","diamond_ore",
+                 "snow","planks","gravel","sandstone","deepslate","copper_ore","lapis_ore",
+                 "redstone_ore","emerald_ore","tuff","granite","leaves","glass"):
+        blocks[stem]=(stem,stem)
+    for stem,(top_name,side_name) in blocks.items():
+        top,side = tile(top_name),tile(side_name)
+        if stem == "grass_side":
+            overlay=tile("grass_side_overlay"); pixels=np.array(overlay,dtype=np.uint16)
+            pixels[:,:,:3]=pixels[:,:,:3]*np.array([145,189,89],dtype=np.uint16)//255
+            side=Image.alpha_composite(side,Image.fromarray(pixels.astype(np.uint8),"RGBA"))
+        result=Image.new("RGBA",(32,32))
+        faces=[(top,[(16,1),(30,9),(16,17),(2,9)],1.0),
+               (side,[(2,9),(16,17),(16,31),(2,23)],0.8),
+               (side,[(16,17),(30,9),(30,23),(16,31)],0.6)]
+        for art,points,shade in faces:
+            # An affine parallelogram has one unique UV for each screen point.
+            o=np.array(points[0],dtype=float); ax=np.array(points[1])-o; ay=np.array(points[3])-o
+            inverse=np.linalg.inv(np.column_stack([ax,ay])); pixels=result.load()
+            for y in range(32):
+                for x in range(32):
+                    u,v=inverse@(np.array([x+0.5,y+0.5])-o)
+                    if 0<=u<1 and 0<=v<1:
+                        c=art.getpixel((min(15,int(u*16)),min(15,int(v*16))))
+                        pixels[x,y]=tuple(int(k*shade+0.5) for k in c[:3])+(c[3],)
+        index=names.index(stem)
+        atlas.paste(result,((index%16)*32,(15-index//16)*32))
+    _write_rgba_bmp(atlas,os.path.join(GEN_MENU,"item_icons.bmp"))
+    print("visuals: native sky/HUD, isometric item icons, fluid timelines converted locally")
+
+
 def main():
     os.makedirs(GEN_TILES, exist_ok=True)
     os.makedirs(GEN_SOUNDS, exist_ok=True)
     os.makedirs(GEN_MOBS, exist_ok=True)
     os.makedirs(GEN_MENU, exist_ok=True)
     tiles_ok, tiles_missing = convert_tiles()
+    convert_visual_assets()
+    if "--visuals-only" in sys.argv:
+        print("tiles: %d converted, %d missing" % (tiles_ok, len(tiles_missing)))
+        return 0 if not tiles_missing else 1
     arm_ok, arm_missing = convert_player_arm()
     sounds_ok, sounds_missing = convert_sounds()
     skins_ok, skins_missing = convert_skins()

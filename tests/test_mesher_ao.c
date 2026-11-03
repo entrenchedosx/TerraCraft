@@ -25,8 +25,8 @@ int test_ao_levels(void)
     int l_both = mesher_ao_level(true, true, true);
     TEST_ASSERT(l_none == 3);
     TEST_ASSERT(l_corner == 2);
-    TEST_ASSERT(l_side1 == 0);
-    TEST_ASSERT(l_side2 == 0);
+    TEST_ASSERT(l_side1 == 2);
+    TEST_ASSERT(l_side2 == 1);
     TEST_ASSERT(l_both == 0);
 
     TEST_ASSERT_FLOAT_EQ(mesher_ao_factor(0), 0.4f, 1e-6f);
@@ -129,8 +129,8 @@ int test_ao_corner(void)
     if (m != NULL) {
         /* Top face of (8,64,8): three enclosed corners dark, open one bright. */
         TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 8.0f, 8.0f), 0.4f, 1e-6f);
-        TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 8.0f, 9.0f), 0.4f, 1e-6f);
-        TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 9.0f, 8.0f), 0.4f, 1e-6f);
+        TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 8.0f, 9.0f), 0.8f, 1e-6f);
+        TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 9.0f, 8.0f), 0.8f, 1e-6f);
         TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 9.0f, 9.0f), 1.0f, 1e-6f);
         mesher_free(m);
     }
@@ -168,7 +168,7 @@ int test_ao_seam(void)
     TEST_ASSERT(m != NULL);
     if (m != NULL) {
         /* Corner (16,65,8) sees the cross-chunk occluder -> dark. */
-        TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 16.0f, 8.0f), 0.4f, 1e-6f);
+        TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 16.0f, 8.0f), 0.8f, 1e-6f);
         /* Far corner (15,65,9) is fully open -> bright. */
         TEST_ASSERT_FLOAT_EQ(corner_ao(m, 65.0f, 15.0f, 9.0f), 1.0f, 1e-6f);
         mesher_free(m);

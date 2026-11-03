@@ -3,6 +3,7 @@
 #include "core/time.h"
 #include "render/texture_atlas.h"
 #include "render/voxel_light.h"
+#include "render/visual_style.h"
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/world.h"
@@ -62,13 +63,10 @@ static const float AO_TABLE[MESHER_AO_LEVELS] = {0.4f, 0.6f, 0.8f, 1.0f};
  */
 int mesher_ao_level(bool side1, bool side2, bool corner)
 {
-    if (side1 || side2) {
+    if (side1 && side2) {
         return 0;
     }
-    if (corner) {
-        return 2;
-    }
-    return 3;
+    return 3 - (int)side1 - (int)side2 - (int)corner;
 }
 
 /* Brightness factor for an AO level (clamped).
@@ -134,11 +132,12 @@ static int mesh_reserve_indices(MeshData *m, size_t extra_idx)
 
 /* Light occlusion test for sun/AO: solid blocks occlude, except glass
  * (transparent cover must not darken what is below/beside it, matching
- * water which is already non-solid). Leaves keep occluding (canopy shade).
+ * water which is already non-solid). Leaf opacity still attenuates the
+ * propagated light field, but cutout leaves do not behave like solid AO walls.
  */
 static bool mesher_occludes(uint16_t id)
 {
-    return id != (uint16_t)BLOCK_GLASS && block_is_solid(id);
+    return id != (uint16_t)BLOCK_GLASS && id != (uint16_t)BLOCK_LEAVES && block_is_solid(id);
 }
 
 /* Emit one textured face quad with AO (4 verts, 6 indices).
@@ -155,17 +154,21 @@ static bool mesher_occludes(uint16_t id)
  *
  * Returns: 0 on success, -1 on OOM.
  */
-static int mesh_emit_face(MeshData *m, const VoxelLightBake *light, const FaceDef *f, int face_idx, const Chunk *c, const World *w, int x,
-                          int y, int z, float wx, float wy, float wz, uint16_t block)
+static int mesh_emit_face(MeshData *m, const VoxelLightBake *light, const FaceDef *f, int face_idx, const Chunk *c,
+                          const World *w, int x, int y, int z, float wx, float wy, float wz, uint16_t block,
+                          const VisualTintGrid *tints, bool overlay)
 {
-    if (mesh_reserve_vertices(m, 4) != 0 || mesh_reserve_indices(m, 6) != 0) {
+    bool water_surface = block_is_water(block) && face_idx == ATLAS_FACE_POS_Y;
+    if (mesh_reserve_vertices(m, 4) != 0 || mesh_reserve_indices(m, water_surface ? 12 : 6) != 0) {
         return -1;
     }
     float u0 = 0.0f;
     float v0 = 0.0f;
     float u1 = 1.0f;
     float v1 = 1.0f;
-    texture_atlas_tile_uv(block_tile_for_face(block, face_idx), &u0, &v0, &u1, &v1);
+    int tile = overlay ? TILE_GRASS_SIDE_OVERLAY : block_tile_for_face(block, face_idx);
+    texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
+    Vec3 tint = visual_tile_tint(tints, x, z, tile);
 
     /* Empty-cell coords of this face (local, may be out of chunk bounds). */
     int ex = x + f->nx_o;
@@ -206,21 +209,42 @@ static int mesh_emit_face(MeshData *m, const VoxelLightBake *light, const FaceDe
         float ao = mesher_ao_factor(mesher_ao_level(side1, side2, corner));
 
         float *v = m->vertices + (m->vertex_count * MESHER_FLOATS_PER_VERTEX);
-        v[0] = wx + f->corners[i][0];
+        float inset = overlay ? 0.0005f : 0.0f;
+        v[0] = wx + f->corners[i][0] + f->nx * inset;
         float local_y = f->corners[i][1] * fluid_height;
         if (f->ny_o == 0 && f->corners[i][1] == 0.0f && fluid_bottom > 0.0f) {
             local_y = fluid_bottom;
         }
-        v[1] = wy + local_y;
-        v[2] = wz + f->corners[i][2];
+        v[1] = wy + local_y + f->ny * inset;
+        v[2] = wz + f->corners[i][2] + f->nz * inset;
         v[3] = f->nx;
         v[4] = f->ny;
         v[5] = f->nz;
         v[6] = (FACE_U[i] == 0.0f) ? u0 : u1;
         v[7] = (FACE_V[i] == 0.0f) ? v0 : v1;
         v[8] = ao;
-        v[9] = sky;
-        v[10] = emitted;
+        float edge_sky1, edge_block1, edge_sky2, edge_block2, corner_sky, corner_block;
+        voxel_light_sample(light, ex + o1[0], ey + o1[1], ez + o1[2], &edge_sky1, &edge_block1);
+        voxel_light_sample(light, ex + o2[0], ey + o2[1], ez + o2[2], &edge_sky2, &edge_block2);
+        voxel_light_sample(light, ex + o1[0] + o2[0], ey + o1[1] + o2[1], ez + o1[2] + o2[2], &corner_sky,
+                           &corner_block);
+        if (side1) {
+            edge_sky1 = sky;
+            edge_block1 = emitted;
+        }
+        if (side2) {
+            edge_sky2 = sky;
+            edge_block2 = emitted;
+        }
+        if (corner || (side1 && side2)) {
+            corner_sky = sky;
+            corner_block = emitted;
+        }
+        v[9] = (sky + edge_sky1 + edge_sky2 + corner_sky) * 0.25f;
+        v[10] = (emitted + edge_block1 + edge_block2 + corner_block) * 0.25f;
+        v[11] = tint.x;
+        v[12] = tint.y;
+        v[13] = tint.z;
         m->vertex_count++;
     }
     unsigned int *ix = m->indices + m->index_count;
@@ -231,6 +255,17 @@ static int mesh_emit_face(MeshData *m, const VoxelLightBake *light, const FaceDe
     ix[4] = base + 1;
     ix[5] = base + 3;
     m->index_count += 6;
+    if (water_surface) {
+        /* The upper fluid surface is visible from below while swimming. */
+        ix += 6;
+        ix[0] = base + 0;
+        ix[1] = base + 2;
+        ix[2] = base + 1;
+        ix[3] = base + 2;
+        ix[4] = base + 3;
+        ix[5] = base + 1;
+        m->index_count += 6;
+    }
     return 0;
 }
 
@@ -283,8 +318,8 @@ static void mesh_emit_sprite_vert(MeshData *m, float x, float y, float z, float 
  *
  * Returns: 0 on success, -1 on OOM.
  */
-static int mesh_emit_cross(MeshData *m, const VoxelLightBake *light, int x, int y, int z, float wx,
-                           float wy, float wz, uint16_t block)
+static int mesh_emit_cross(MeshData *m, const VoxelLightBake *light, int x, int y, int z, float wx, float wy, float wz,
+                           uint16_t block, const VisualTintGrid *tints)
 {
     if (mesh_reserve_vertices(m, 16) != 0 || mesh_reserve_indices(m, 24) != 0) {
         return -1;
@@ -316,9 +351,28 @@ static int mesh_emit_cross(MeshData *m, const VoxelLightBake *light, int x, int 
     mesh_emit_sprite_vert(m, wx + 1.0f, wy + 1.0f, wz, -nb, 0.0f, -nb, u0, v1, sun);
     mesh_emit_sprite_vert(m, wx, wy, wz + 1.0f, -nb, 0.0f, -nb, u1, v0, sun);
     mesh_emit_sprite_vert(m, wx, wy + 1.0f, wz + 1.0f, -nb, 0.0f, -nb, u1, v1, sun);
+    float offset_x = 0, offset_z = 0;
+    if (block == BLOCK_GRASS_PLANT || block == BLOCK_FLOWER) {
+        /* Mth.getSeed(x,0,z), preserving Java integer overflow. */
+        uint64_t seed =
+            (uint64_t)(int64_t)(int32_t)((uint32_t)(int)wx * 3129871u) ^ ((uint64_t)(int64_t)(int)wz * 116129781u);
+        seed = seed * seed * 42317861u + seed * 11u;
+        seed >>= 16;
+        offset_x = ((float)((seed >> 16) & 15) / 15 - 0.5f) * 0.5f;
+        offset_z = ((float)((seed >> 24) & 15) / 15 - 0.5f) * 0.5f;
+    }
     for (size_t i = base; i < m->vertex_count; ++i) {
+        if (block == BLOCK_GRASS_PLANT || block == BLOCK_FLOWER) {
+            float *v = m->vertices + i * MESHER_FLOATS_PER_VERTEX;
+            v[0] = wx + 0.5f + (v[0] - wx - 0.5f) * 0.9f + offset_x;
+            v[2] = wz + 0.5f + (v[2] - wz - 0.5f) * 0.9f + offset_z;
+        }
+        Vec3 tint = visual_tile_tint(tints, x, z, block_tile_for_face(block, 0));
         m->vertices[i * MESHER_FLOATS_PER_VERTEX + 9] = sky;
         m->vertices[i * MESHER_FLOATS_PER_VERTEX + 10] = emitted;
+        m->vertices[i * MESHER_FLOATS_PER_VERTEX + 11] = tint.x;
+        m->vertices[i * MESHER_FLOATS_PER_VERTEX + 12] = tint.y;
+        m->vertices[i * MESHER_FLOATS_PER_VERTEX + 13] = tint.z;
     }
     unsigned int *ix = m->indices + m->index_count;
     for (int q = 0; q < 4; ++q) {
@@ -370,6 +424,8 @@ MeshData *mesher_build_lit_mesh(const Chunk *c, const World *w, const VoxelLight
     }
     m->vertex_cap = 24576;
     m->index_cap = 36864;
+    VisualTintGrid tints;
+    visual_build_tints(w, c->cx, c->cz, &tints);
     for (int y = 0; y < CHUNK_Y; ++y) {
         for (int z = 0; z < CHUNK_Z; ++z) {
             for (int x = 0; x < CHUNK_X; ++x) {
@@ -387,7 +443,7 @@ MeshData *mesher_build_lit_mesh(const Chunk *c, const World *w, const VoxelLight
                  * crossed quads, never as a cube (a cube turns a flower
                  * into a red box). */
                 if (block_is_cross(id)) {
-                    if (mesh_emit_cross(m, light, x, y, z, wx, wy, wz, id) != 0) {
+                    if (mesh_emit_cross(m, light, x, y, z, wx, wy, wz, id, &tints) != 0) {
                         LOG_ERROR("mesher: out of memory emitting sprite");
                         mesher_free(m);
                         return NULL;
@@ -407,8 +463,13 @@ MeshData *mesher_build_lit_mesh(const Chunk *c, const World *w, const VoxelLight
                     if (!visible) {
                         continue;
                     }
-                    if (mesh_emit_face(m, light, fd, f, c, w, x, y, z, wx, wy, wz, id) != 0) {
+                    if (mesh_emit_face(m, light, fd, f, c, w, x, y, z, wx, wy, wz, id, &tints, false) != 0) {
                         LOG_ERROR("mesher: out of memory emitting face");
+                        mesher_free(m);
+                        return NULL;
+                    }
+                    if (id == BLOCK_GRASS && fd->ny_o == 0 &&
+                        mesh_emit_face(m, light, fd, f, c, w, x, y, z, wx, wy, wz, id, &tints, true) != 0) {
                         mesher_free(m);
                         return NULL;
                     }

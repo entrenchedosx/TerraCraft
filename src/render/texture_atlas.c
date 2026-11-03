@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* Write one pixel (tile coords: col/row with row 0 at the texture bottom,
  * pixel x/y within the tile with y=0 at the tile bottom). */
@@ -169,15 +170,80 @@ int block_tile_for_face(uint16_t block, int face)
  * Player tiles load Steve-sourced crops (converter) when present and keep
  * the procedural art as fallback (e.g. CI without mcassets). */
 static const char *TILE_FILES[] = {
-    "grass_top", "grass_side", "dirt", "stone", "sand", "wood", "leaves", "glass", "water", "bedrock",
-    "coal_ore", "iron_ore", "gold_ore", "diamond_ore", "snow", "grass_bottom", "plant", "flower", "torch",
-    "tool_pickaxe", "tool_axe", "tool_shovel", "coal", "crack0", "crack1", "crack2", "crack3", "crack4",
-    "workbench", "planks", "apple", "stick", "wood_top", "workbench_top", "workbench_side", "wood_pickaxe",
-    "stone_pickaxe", "wood_axe", "stone_axe", "wood_shovel", "stone_shovel", "bow", "arrow",
-"bone", "beef", "leather", "player_skin", "player_sleeve", "flesh", "wood_sword", "stone_sword",
-    "iron_ingot", "diamond", "iron_pickaxe", "iron_axe", "iron_shovel", "diamond_pickaxe", "diamond_axe",
-    "diamond_shovel", "iron_sword", "diamond_sword",
-"gravel", "sandstone", "deepslate", "copper_ore", "lapis_ore", "redstone_ore", "emerald_ore", "tuff", "granite", "raw_iron", "raw_copper", "lava",
+    "grass_top",
+    "grass_side",
+    "dirt",
+    "stone",
+    "sand",
+    "wood",
+    "leaves",
+    "glass",
+    "water",
+    "bedrock",
+    "coal_ore",
+    "iron_ore",
+    "gold_ore",
+    "diamond_ore",
+    "snow",
+    "grass_bottom",
+    "plant",
+    "flower",
+    "torch",
+    "tool_pickaxe",
+    "tool_axe",
+    "tool_shovel",
+    "coal",
+    "crack0",
+    "crack1",
+    "crack2",
+    "crack3",
+    "crack4",
+    "workbench",
+    "planks",
+    "apple",
+    "stick",
+    "wood_top",
+    "workbench_top",
+    "workbench_side",
+    "wood_pickaxe",
+    "stone_pickaxe",
+    "wood_axe",
+    "stone_axe",
+    "wood_shovel",
+    "stone_shovel",
+    "bow",
+    "arrow",
+    "bone",
+    "beef",
+    "leather",
+    "player_skin",
+    "player_sleeve",
+    "flesh",
+    "wood_sword",
+    "stone_sword",
+    "iron_ingot",
+    "diamond",
+    "iron_pickaxe",
+    "iron_axe",
+    "iron_shovel",
+    "diamond_pickaxe",
+    "diamond_axe",
+    "diamond_shovel",
+    "iron_sword",
+    "diamond_sword",
+    "gravel",
+    "sandstone",
+    "deepslate",
+    "copper_ore",
+    "lapis_ore",
+    "redstone_ore",
+    "emerald_ore",
+    "tuff",
+    "granite",
+    "raw_iron",
+    "raw_copper",
+    "lava",
+    "grass_side_overlay",
 };
 /* Derived from the array so adding a tile can never desync the bound. */
 #define TILE_FILE_COUNT (sizeof(TILE_FILES) / sizeof(TILE_FILES[0]))
@@ -247,7 +313,9 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
     if (out_px == NULL) {
         return;
     }
+    memset(out_px, 0, (size_t)ATLAS_SIZE * ATLAS_SIZE * ATLAS_BYTES);
     /* Base fills. */
+    tile_fill(out_px, TILE_GRASS_SIDE_OVERLAY, 0, 0, 0, 0);
     tile_fill(out_px, TILE_GRASS_TOP, 106, 176, 66, 255);
     tile_fill(out_px, TILE_GRASS_SIDE, 134, 96, 67, 255);
     tile_fill(out_px, TILE_DIRT, 134, 96, 67, 255);
@@ -256,7 +324,8 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
     tile_fill(out_px, TILE_WOOD, 104, 78, 47, 255);
     tile_fill(out_px, TILE_LEAVES, 45, 125, 45, 255);
     tile_fill(out_px, TILE_GLASS, 190, 220, 235, 90);
-    tile_fill(out_px, TILE_WATER, 52, 110, 220, 180);
+    /* Water art is neutral; the mesher supplies the biome water color. */
+    tile_fill(out_px, TILE_WATER, 174, 174, 174, 180);
     tile_fill(out_px, TILE_BEDROCK, 40, 40, 40, 255);
     tile_fill(out_px, TILE_COAL_ORE, 128, 128, 128, 255);
     tile_fill(out_px, TILE_IRON_ORE, 128, 128, 128, 255);
@@ -963,6 +1032,28 @@ static bool atlas_gl_ready(void)
  *
  * Returns: GL texture id, or 0 on failure.
  */
+void texture_atlas_downsample(const unsigned char *src, int width, int height, unsigned char *out)
+{
+    if (!src || !out || width < 2 || height < 2 || width % 2 || height % 2)
+        return;
+    for (int y = 0; y < height / 2; ++y)
+        for (int x = 0; x < width / 2; ++x) {
+            float rgb[3] = {0}, alpha = 0;
+            for (int dy = 0; dy < 2; ++dy)
+                for (int dx = 0; dx < 2; ++dx) {
+                    const unsigned char *p = src + ((y * 2 + dy) * width + x * 2 + dx) * 4;
+                    float a = p[3] / 255.0f;
+                    alpha += a;
+                    for (int c = 0; c < 3; ++c)
+                        rgb[c] += powf(p[c] / 255.0f, 2.2f) * a;
+                }
+            unsigned char *p = out + (y * (width / 2) + x) * 4;
+            for (int c = 0; c < 3; ++c)
+                p[c] = alpha > 0 ? (unsigned char)floorf(powf(rgb[c] / alpha, 1.0f / 2.2f) * 255 + 0.5f) : 0;
+            p[3] = (unsigned char)floorf(alpha * 255 / 4 + 0.5f);
+        }
+}
+
 static unsigned int atlas_upload(const unsigned char *px)
 {
     unsigned int tex = 0;
@@ -975,8 +1066,30 @@ static unsigned int atlas_upload(const unsigned char *px)
     minec_glTexImage2D((MinecGLenum)MINEC_GL_TEXTURE_2D, 0, (MinecGLint)MINEC_GL_RGBA, (MinecGLsizei)ATLAS_SIZE,
                        (MinecGLsizei)ATLAS_SIZE, 0, (MinecGLenum)MINEC_GL_RGBA,
                        (MinecGLenum)MINEC_GL_UNSIGNED_BYTE, px);
+    unsigned char *mip = (unsigned char *)malloc((size_t)ATLAS_SIZE * ATLAS_SIZE * 4 / 4);
+    if (!mip) {
+        minec_glBindTexture(MINEC_GL_TEXTURE_2D, 0);
+        minec_glDeleteTextures(1, &tex);
+        LOG_ERROR("texture_atlas: could not allocate mipmap scratch");
+        return 0;
+    }
+    int max_level = 0;
+    if (mip) {
+        const unsigned char *previous = px;
+        int size = ATLAS_SIZE;
+        for (int level = 1; level <= 4; ++level) {
+            texture_atlas_downsample(previous, size, size, mip);
+            size /= 2;
+            minec_glTexImage2D(MINEC_GL_TEXTURE_2D, level, MINEC_GL_RGBA, size, size, 0, MINEC_GL_RGBA,
+                               MINEC_GL_UNSIGNED_BYTE, mip);
+            previous = mip;
+            max_level = level;
+        }
+        free(mip);
+    }
+    minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_MAX_LEVEL, max_level);
     minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_MIN_FILTER,
-                          (MinecGLint)MINEC_GL_NEAREST);
+                          (MinecGLint)(max_level ? MINEC_GL_NEAREST_MIPMAP_LINEAR : MINEC_GL_NEAREST));
     minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_MAG_FILTER,
                           (MinecGLint)MINEC_GL_NEAREST);
     minec_glTexParameteri((MinecGLenum)MINEC_GL_TEXTURE_2D, (MinecGLenum)MINEC_GL_TEXTURE_WRAP_S,
@@ -1137,6 +1250,29 @@ int texture_atlas_pack_tiles_dir(char *out, size_t out_cap, const char *packs_di
  *
  * Returns: texture id or 0.
  */
+bool texture_atlas_water_is_colored(const char *pack)
+{
+    if (!pack || !pack[0] || strcmp(pack, "Default") == 0)
+        return false;
+    char tiles[PATH_MAX_LEN], file[PATH_MAX_LEN];
+    if (texture_atlas_pack_tiles_dir(tiles, sizeof(tiles), "resourcepacks", pack) != 0 ||
+        path_join(file, sizeof(file), tiles, "water.bmp") != 0)
+        return false;
+    BmpImage image = {0};
+    bool colored = false;
+    if (bmp_load_file(file, &image) == 0 && bmp_is_tile(&image)) {
+        for (int i = 0; i < 16 * 16; ++i) {
+            const unsigned char *p = image.px + i * 4;
+            if (p[3] && (abs((int)p[0] - p[1]) > 3 || abs((int)p[1] - p[2]) > 3)) {
+                colored = true;
+                break;
+            }
+        }
+    }
+    bmp_free(&image);
+    return colored;
+}
+
 unsigned int texture_atlas_generate_from_pack(const char *pack)
 {
     if (!atlas_gl_ready()) {

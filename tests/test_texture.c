@@ -196,9 +196,9 @@ int test_atlas_mcfaces(void)
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_WOOD_SWORD), "wood_sword") == 0);
     TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_STONE_SWORD), "stone_sword") == 0);
 TEST_ASSERT(strcmp(texture_atlas_tile_file(TILE_DIAMOND_SWORD), "diamond_sword") == 0);
-    TEST_ASSERT(texture_atlas_tile_file(73) == NULL);
-    TEST_ASSERT(texture_atlas_tile_file(-1) == NULL);
-    return failures;
+TEST_ASSERT(texture_atlas_tile_file(74) == NULL);
+TEST_ASSERT(texture_atlas_tile_file(-1) == NULL);
+return failures;
 }
 
 /* Write a solid 16x16 32-bit BMP (bottom-up) for overlay tests. */

@@ -11,15 +11,21 @@
 /* Default cycle speed: one full day per 1200 seconds (MC: 20 minutes). */
 #define TIME_DEFAULT_SPEED (1.0f / 1200.0f)
 
-/* Floor for the sun-intensity track. Outdoor night readability comes from
- * the shader's separate moon/skylight terms, not sunlight below the horizon. */
-#define TIME_MIN_INTENSITY 0.15f
+/* Nighttime lightmap input; daylight and RGB colors use the release's
+ * independent cyclic environment timelines. */
+#define TIME_MIN_INTENSITY 0.20f
 
 /* Day/night state. */
 typedef struct TimeSystem {
     float day_progress; /* 0.0..1.0, wraps. */
     float speed;        /* Cycles per second (0 pauses). */
 } TimeSystem;
+
+/* Daytime sky-color strength, distinct from the residual nighttime lightmap. */
+float time_get_daylight(const TimeSystem *t);
+Vec3 time_get_fog_multiplier(const TimeSystem *t);
+Vec3 time_get_cloud_color(const TimeSystem *t);
+float time_get_star_brightness(const TimeSystem *t);
 
 /* Initialise the clock.
  *
@@ -43,7 +49,7 @@ void time_system_update(TimeSystem *t, float dt);
  * Args:
  *   t: system (must not be NULL).
  *
- * Returns: RGB sky color (deep blue at midnight).
+ * Returns: plains RGB sky color (black at midnight, stars drawn separately).
  */
 Vec3 time_get_sky_color(const TimeSystem *t);
 
@@ -57,7 +63,7 @@ Vec3 time_get_sky_color(const TimeSystem *t);
  */
 Vec3 time_get_sun_dir(const TimeSystem *t);
 
-/* Global light multiplier in [TIME_MIN_INTENSITY, 1.0].
+/* Lightmap sky-brightness input in [TIME_MIN_INTENSITY, 1.0].
  *
  * Args:
  *   t: system (must not be NULL).

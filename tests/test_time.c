@@ -14,9 +14,9 @@ int test_time_phases(void)
 
     time_system_init(&t, 0.5f, TIME_DEFAULT_SPEED);
     Vec3 noon = time_get_sky_color(&t);
-    TEST_ASSERT_FLOAT_EQ(noon.x, 0.529f, 0.02f);
-    TEST_ASSERT_FLOAT_EQ(noon.y, 0.808f, 0.02f);
-    TEST_ASSERT_FLOAT_EQ(noon.z, 0.922f, 0.02f);
+    TEST_ASSERT_FLOAT_EQ(noon.x, 120.0f / 255, 0.02f);
+    TEST_ASSERT_FLOAT_EQ(noon.y, 167.0f / 255, 0.02f);
+    TEST_ASSERT_FLOAT_EQ(noon.z, 1.0f, 0.02f);
     TEST_ASSERT_FLOAT_EQ(time_get_light_intensity(&t), 1.0f, 1e-5f);
 
     time_system_init(&t, 0.0f, 0.0f);
@@ -24,17 +24,17 @@ int test_time_phases(void)
     TEST_ASSERT(night.x < 0.1f && night.y < 0.1f && night.z < 0.2f);
     TEST_ASSERT_FLOAT_EQ(time_get_light_intensity(&t), TIME_MIN_INTENSITY, 1e-5f);
 
-    /* Dawn is warm (red dominates), dusk too. */
+    /* Vanilla keeps the sky blue; a separate horizon fan supplies sunset color. */
     time_system_init(&t, 0.27f, 0.0f);
     Vec3 dawn = time_get_sky_color(&t);
-    TEST_ASSERT(dawn.x > dawn.y && dawn.x > dawn.z);
+    TEST_ASSERT(dawn.z > dawn.x);
     time_system_init(&t, 0.73f, 0.0f);
     Vec3 dusk = time_get_sky_color(&t);
-    TEST_ASSERT(dusk.x > dusk.z);
+    TEST_ASSERT(dusk.z > dusk.x);
 
     /* NULL-safe fallbacks. */
     Vec3 fallback = time_get_sky_color(NULL);
-    TEST_ASSERT_FLOAT_EQ(fallback.x, 0.529f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(fallback.x, 120.0f / 255, 1e-5f);
     TEST_ASSERT_FLOAT_EQ(time_get_light_intensity(NULL), 1.0f, 1e-5f);
     return failures;
 }
@@ -58,7 +58,7 @@ int test_time_sun(void)
     time_system_init(&t, 0.25f, 0.0f);
     Vec3 rise = time_get_sun_dir(&t);
     TEST_ASSERT(rise.x > 0.9f);
-    TEST_ASSERT_FLOAT_EQ(rise.y, 0.0f, 0.05f);
+    TEST_ASSERT_FLOAT_EQ(rise.y, 0.216f, 0.01f);
     time_system_init(&t, 0.75f, 0.0f);
     Vec3 set = time_get_sun_dir(&t);
     TEST_ASSERT(set.x < -0.9f);

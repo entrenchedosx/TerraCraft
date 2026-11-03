@@ -18,8 +18,8 @@ typedef struct ItemStack ItemStack;
 #define HUD_MAX_VERTS 4096
 #define HUD_HOTBAR_SLOTS 9
 #define HUD_SLOT_PX 40
-#define HUD_SLOT_GAP 4
-#define HUD_BOTTOM_MARGIN 12
+#define HUD_SLOT_GAP 0
+#define HUD_BOTTOM_MARGIN 0
 
 /* One frame of HUD vertices (stack-allocatable, 96 KiB). */
 typedef struct HudFrame {

@@ -5,8 +5,8 @@
  * CPU-only (no GL) so unit tests run headless.
  * Right-handed, Y-up. World-space positions (chunk origin baked).
  *
- * Vertex format (interleaved, 11 floats = VoxelVertex):
- *   pos xyz | normal xyz | uv uv | ao | skylight | block light
+ * Vertex format (interleaved, 14 floats = VoxelVertex):
+ *   pos xyz | normal xyz | uv uv | ao | skylight | block light | tint rgb
  * UVs address the 256x256 texture atlas tile for (block, face).
  * Geometry AO and the two propagated light channels remain independent.
  * Cross-chunk neighbors are resolved via the World so
@@ -25,7 +25,7 @@ typedef struct Chunk Chunk;
 typedef struct World World;
 typedef struct VoxelLightBake VoxelLightBake;
 
-/* Textured voxel vertex (11 floats, tightly packed). */
+/* Textured voxel vertex (14 floats, tightly packed). */
 typedef struct VoxelVertex {
     float pos[3];  /* World-space position. */
     float norm[3]; /* Outward face normal (unit axis). */
@@ -33,18 +33,19 @@ typedef struct VoxelVertex {
     float ao;      /* Geometry ambient occlusion (0.0..1.0). */
     float sky;     /* Propagated skylight (0.0..1.0). */
     float block;   /* Propagated emissive light (0.0..1.0). */
+    float tint[3]; /* Blended biome color multiplier. */
 } VoxelVertex;
 
 /* Number of floats per vertex (sizeof(VoxelVertex)/sizeof(float)). */
-#define MESHER_FLOATS_PER_VERTEX 11
+#define MESHER_FLOATS_PER_VERTEX 14
 
 /* AO brightness table indexed by AO level 0..3 (darkest -> brightest).
- * Level 1 is reserved by the M4 heuristic (see mesher_vertex_ao). */
+ * All four levels are used by the corner occupancy rule. */
 #define MESHER_AO_LEVELS 4
 
 /* CPU mesh: caller owns vertices/indices, frees via mesher_free(). */
 typedef struct MeshData {
-    float *vertices; /* Interleaved VoxelVertex data, vertex_count*11 floats. */
+    float *vertices;       /* Interleaved VoxelVertex data, vertex_count*14 floats. */
     unsigned int *indices; /* Triangles, index_count entries. */
     size_t vertex_count; /* Number of vertices (not floats). */
     size_t index_count; /* Number of indices. */
@@ -52,10 +53,8 @@ typedef struct MeshData {
     size_t index_cap; /* Allocated index capacity (internal). */
 } MeshData;
 
-/* AO level from side/corner occupancy (M4 heuristic):
- * side1||side2 solid -> 0 (darkest); else corner solid -> 2; else 3.
- * Level 1 is reserved (unused) to keep the 4-entry brightness table stable
- * for future refinement.
+/* AO level from the three corner occluders. Two adjacent filled sides
+ * fully occlude; otherwise every filled neighbor removes one level.
  *
  * Args:
  *   side1, side2, corner: occupancy of the three occluder cells.

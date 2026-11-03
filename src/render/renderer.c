@@ -27,6 +27,7 @@
 #include "render/texture_atlas.h"
 #include "render/vao_manager.h"
 #include "render/voxel_light.h"
+#include "render/visual_style.h"
 #include "ui/hud.h"
 #include "world/chunk.h"
 #include "world/world.h"
@@ -67,16 +68,19 @@ struct Renderer {
     int vp_width, vp_height;
     Shader *shader; /* Owned textured voxel program (NULL when GL limited). */
     unsigned int atlas; /* Owned GL atlas texture (0 when unavailable). */
+    AtlasAnimations *atlas_animations;
+    bool colored_water;
+    int colored_water_loc;
+    unsigned int lightmap;
+    float lightmap_sky;
+    double visual_seconds;
+    int render_distance;
+    int lightmap_loc, fog_start_loc, fog_end_loc, underwater_loc, viewmodel_loc, entity_lighting_loc;
+    int chunk_visibility_loc;
     int mvp_loc; /* Uniform locations (-1 when unavailable). */
     int atlas_loc;
-    int sun_dir_loc;
-    int light_intensity_loc;
-    int sky_color_loc;
     int fog_color_loc;
-    int fog_density_loc;
     int cam_pos_loc;
-    int voxel_cloud_time_loc;
-    int voxel_cloud_altitude_loc;
     int voxel_atlas_materials_loc;
     const World *light_world; /* Borrowed during this world's rendering. */
     uint8_t *light_cache[WORLD_MAX_CHUNKS]; /* Packed derived light, 64KiB/slot. */
@@ -95,6 +99,12 @@ struct Renderer {
     int sky_light_intensity_loc;
     int sky_cloud_altitude_loc;
     int sky_underwater_loc;
+    int sky_fog_color_loc;
+    int sky_cloud_color_loc, sky_star_brightness_loc;
+    int sky_textures_loc[3], sky_has_textures_loc;
+    unsigned int sky_textures[3];
+    unsigned int hud_tex, item_icons_tex;
+    unsigned int underwater_overlay_tex;
     Shader *ui_shader; /* Owned flat UI program (NULL when GL limited). */
     unsigned int ui_vao; /* UI quad array (0 when unavailable). */
     unsigned int ui_vbo; /* UI quad buffer (dynamic, re-uploaded per frame). */
@@ -159,6 +169,13 @@ static void renderer_init_sky(Renderer *r)
     r->sky_light_intensity_loc = shader_get_uniform_location(r->sky_shader, "uLightIntensity");
     r->sky_cloud_altitude_loc = shader_get_uniform_location(r->sky_shader, "uCloudAltitude");
     r->sky_underwater_loc = shader_get_uniform_location(r->sky_shader, "uUnderwater");
+    r->sky_fog_color_loc = shader_get_uniform_location(r->sky_shader, "uFogColor");
+    r->sky_cloud_color_loc = shader_get_uniform_location(r->sky_shader, "uCloudColor");
+    r->sky_star_brightness_loc = shader_get_uniform_location(r->sky_shader, "uStarBrightness");
+    r->sky_textures_loc[0] = shader_get_uniform_location(r->sky_shader, "uSunTexture");
+    r->sky_textures_loc[1] = shader_get_uniform_location(r->sky_shader, "uMoonTexture");
+    r->sky_textures_loc[2] = shader_get_uniform_location(r->sky_shader, "uCloudTexture");
+    r->sky_has_textures_loc = shader_get_uniform_location(r->sky_shader, "uHasSkyTextures");
 
     if (minec_glGenVertexArrays == NULL || minec_glGenBuffers == NULL ||
         minec_glBindVertexArray == NULL || minec_glBindBuffer == NULL ||
@@ -239,6 +256,7 @@ static void renderer_light_vertices(Renderer *r, float *vertices, size_t count)
             have_sample = true;
         }
         v[9] = sky; v[10] = emitted;
+        v[11] = v[12] = v[13] = 1.0f;
     }
 }
 
@@ -885,7 +903,30 @@ static bool renderer_draw_player_arm_batch(Renderer *r, const Camera *cam, float
     mesh.index_count = vertex_count;
     mesh.vertex_cap = vertex_count;
     mesh.index_cap = vertex_count;
-    renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
+    Vec3 eye = camera_get_position(cam);
+    float sample[MESHER_FLOATS_PER_VERTEX] = {0};
+    sample[0] = eye.x;
+    sample[1] = eye.y;
+    sample[2] = eye.z;
+    renderer_light_vertices(r, sample, 1);
+    int last_tile = -1;
+    Vec3 tint = mmath_vec3(1, 1, 1);
+    for (size_t i = 0; i < vertex_count; ++i) {
+        float *v = vertices + i * MESHER_FLOATS_PER_VERTEX;
+        v[9] = sample[9];
+        v[10] = sample[10];
+        int tile = (int)floorf(v[7] * 16) * 16 + (int)floorf(v[6] * 16);
+        if (tile != last_tile) {
+            tint = texture == r->atlas ? visual_world_tint(r->light_world, (int)floorf(eye.x), (int)floorf(eye.z), tile)
+                                       : mmath_vec3(1, 1, 1);
+            last_tile = tile;
+        }
+        v[11] = tint.x;
+        v[12] = tint.y;
+        v[13] = tint.z;
+    }
+    shader_set_uniform_float(r->entity_lighting_loc, 1);
+    shader_set_uniform_float(r->viewmodel_loc, 1);
     bool drew = gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0;
     if (drew) {
         gpu_chunk_draw(&r->ent_buf);
@@ -1172,6 +1213,38 @@ static void renderer_read_menu_font_metrics(Renderer *r, const BmpImage *image)
  *
  * Returns: owned Renderer (NULL only on OOM).
  */
+static unsigned int renderer_load_visual_bitmap(const char *relative, int width, int height, bool flip, bool repeat)
+{
+    BmpImage image = {0};
+    if (bmp_load_mcasset(relative, width, height, &image) != 0)
+        return 0;
+    if (flip) {
+        for (int y = 0; y < image.height / 2; ++y)
+            for (int x = 0; x < image.width * 4; ++x) {
+                unsigned char *a = image.px + y * image.width * 4 + x;
+                unsigned char *b = image.px + (image.height - 1 - y) * image.width * 4 + x;
+                unsigned char t = *a;
+                *a = *b;
+                *b = t;
+            }
+    }
+    unsigned int texture = 0;
+    minec_glGenTextures(1, &texture);
+    if (texture) {
+        minec_glBindTexture(MINEC_GL_TEXTURE_2D, texture);
+        minec_glTexImage2D(MINEC_GL_TEXTURE_2D, 0, MINEC_GL_RGBA, image.width, image.height, 0, MINEC_GL_RGBA,
+                           MINEC_GL_UNSIGNED_BYTE, image.px);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_MIN_FILTER, MINEC_GL_NEAREST);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_MAG_FILTER, MINEC_GL_NEAREST);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_WRAP_S,
+                              repeat ? MINEC_GL_REPEAT : MINEC_GL_CLAMP_TO_EDGE);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_WRAP_T,
+                              repeat ? MINEC_GL_REPEAT : MINEC_GL_CLAMP_TO_EDGE);
+    }
+    bmp_free(&image);
+    return texture;
+}
+
 Renderer *renderer_create(GlContext *gl)
 {
     if (gl == NULL) {
@@ -1184,6 +1257,9 @@ Renderer *renderer_create(GlContext *gl)
         return NULL;
     }
     r->gl = gl;
+    r->render_distance = 4;
+    r->lightmap_sky = -1.0f;
+    minec_glGenTextures(1, &r->lightmap);
     r->clear_r = 0.529f;
     r->clear_g = 0.808f;
     r->clear_b = 0.922f;
@@ -1192,14 +1268,8 @@ Renderer *renderer_create(GlContext *gl)
     r->vp_height = 720;
     r->mvp_loc = -1;
     r->atlas_loc = -1;
-    r->sun_dir_loc = -1;
-    r->light_intensity_loc = -1;
-    r->sky_color_loc = -1;
     r->fog_color_loc = -1;
-    r->fog_density_loc = -1;
     r->cam_pos_loc = -1;
-    r->voxel_cloud_time_loc = -1;
-    r->voxel_cloud_altitude_loc = -1;
     r->ui_ortho_loc = -1;
     r->ui_tex_ortho_loc = -1;
     r->ui_tex_atlas_loc = -1;
@@ -1218,14 +1288,16 @@ Renderer *renderer_create(GlContext *gl)
     } else {
         r->mvp_loc = shader_get_uniform_location(r->shader, "uMVP");
         r->atlas_loc = shader_get_uniform_location(r->shader, "uAtlas");
-        r->sun_dir_loc = shader_get_uniform_location(r->shader, "uSunDir");
-        r->light_intensity_loc = shader_get_uniform_location(r->shader, "uLightIntensity");
-        r->sky_color_loc = shader_get_uniform_location(r->shader, "uSkyColor");
+        r->lightmap_loc = shader_get_uniform_location(r->shader, "uLightmap");
+        r->fog_start_loc = shader_get_uniform_location(r->shader, "uFogStart");
+        r->fog_end_loc = shader_get_uniform_location(r->shader, "uFogEnd");
+        r->underwater_loc = shader_get_uniform_location(r->shader, "uUnderwater");
+        r->viewmodel_loc = shader_get_uniform_location(r->shader, "uViewModel");
+        r->entity_lighting_loc = shader_get_uniform_location(r->shader, "uEntityLighting");
+        r->chunk_visibility_loc = shader_get_uniform_location(r->shader, "uChunkVisibility");
+        r->colored_water_loc = shader_get_uniform_location(r->shader, "uColoredWater");
         r->fog_color_loc = shader_get_uniform_location(r->shader, "uFogColor");
-        r->fog_density_loc = shader_get_uniform_location(r->shader, "uFogDensity");
         r->cam_pos_loc = shader_get_uniform_location(r->shader, "uCamPos");
-        r->voxel_cloud_time_loc = shader_get_uniform_location(r->shader, "uCloudTime");
-        r->voxel_cloud_altitude_loc = shader_get_uniform_location(r->shader, "uCloudAltitude");
         r->voxel_atlas_materials_loc = shader_get_uniform_location(r->shader, "uAtlasMaterials");
         if (r->mvp_loc < 0 || r->atlas_loc < 0) {
             LOG_WARN("renderer_create: core uniforms missing (mvp=%d atlas=%d)", r->mvp_loc, r->atlas_loc);
@@ -1234,6 +1306,13 @@ Renderer *renderer_create(GlContext *gl)
     renderer_init_sky(r);
 
     r->atlas = texture_atlas_generate();
+    r->atlas_animations = texture_atlas_animations_create("Default");
+    r->sky_textures[0] = renderer_load_visual_bitmap("generated/environment/sun.bmp", 32, 32, true, false);
+    r->sky_textures[1] = renderer_load_visual_bitmap("generated/environment/moon_phases.bmp", 128, 64, true, false);
+    r->sky_textures[2] = renderer_load_visual_bitmap("generated/environment/clouds.bmp", 256, 256, true, true);
+    r->hud_tex = renderer_load_visual_bitmap("generated/menu/hud.bmp", 512, 128, false, false);
+    r->underwater_overlay_tex = renderer_load_visual_bitmap("generated/environment/underwater.bmp", 0, 0, false, true);
+    r->item_icons_tex = renderer_load_visual_bitmap("generated/menu/item_icons.bmp", 512, 512, true, false);
     if (r->atlas == 0) {
         LOG_ERROR("renderer_create: atlas unavailable; textured draws will be wrong");
     }
@@ -1468,6 +1547,13 @@ void renderer_destroy(Renderer *r)
     shader_destroy(r->ui_tex_shader);
     texture_atlas_delete(r->atlas);
     r->atlas = 0;
+    texture_atlas_animations_destroy(r->atlas_animations);
+    texture_atlas_delete(r->lightmap);
+    texture_atlas_delete(r->hud_tex);
+    texture_atlas_delete(r->underwater_overlay_tex);
+    texture_atlas_delete(r->item_icons_tex);
+    for (int i = 0; i < 3; ++i)
+        texture_atlas_delete(r->sky_textures[i]);
     for (int i = 0; i < 3; ++i) {
         texture_atlas_delete(r->mob_skin_tex[i]);
         r->mob_skin_tex[i] = 0;
@@ -1540,6 +1626,18 @@ void renderer_clear(Renderer *r)
 }
 
 /* Underwater rendering flag (dense blue fog while the eye is submerged). */
+void renderer_set_render_distance(Renderer *r, int distance)
+{
+    if (r)
+        r->render_distance = distance < 2 ? 2 : distance;
+}
+
+void renderer_advance_visuals(Renderer *r, double seconds)
+{
+    if (r && isfinite(seconds) && seconds > 0)
+        r->visual_seconds += seconds;
+}
+
 void renderer_set_underwater(Renderer *r, bool underwater)
 {
     if (r == NULL) {
@@ -1608,8 +1706,15 @@ void renderer_refresh_world(Renderer *r, World *w)
             continue;
         }
         double t2 = time_now_seconds();
+        double first_seen =
+            r->gpu[slot][RENDERER_PASS_OPAQUE].valid
+                ? r->gpu[slot][RENDERER_PASS_OPAQUE].visible_since
+                : (r->gpu[slot][RENDERER_PASS_TRANSPARENT].valid ? r->gpu[slot][RENDERER_PASS_TRANSPARENT].visible_since
+                                                                 : r->visual_seconds);
         int rc = gpu_chunk_upload(&r->gpu[slot][RENDERER_PASS_OPAQUE], opaque, c->cx, c->cz);
         int rc2 = gpu_chunk_upload(&r->gpu[slot][RENDERER_PASS_TRANSPARENT], transp, c->cx, c->cz);
+        r->gpu[slot][RENDERER_PASS_OPAQUE].visible_since = first_seen;
+        r->gpu[slot][RENDERER_PASS_TRANSPARENT].visible_since = first_seen;
         if (!r->light_cache[slot]) r->light_cache[slot] = (uint8_t *)malloc(CHUNK_VOLUME);
         voxel_light_copy_chunk(light, r->light_cache[slot]);
         voxel_light_free(light);
@@ -1673,63 +1778,62 @@ static bool renderer_begin_voxel(Renderer *r, const Camera *cam, float aspect, c
     return renderer_begin_voxel_tex(r, cam, aspect, ts, r != NULL ? r->atlas : 0);
 }
 
+static Vec3 renderer_fog_color(Renderer *r, const Camera *cam, const TimeSystem *ts)
+{
+    if (r->underwater)
+        return mmath_vec3(5.0f / 255, 5.0f / 255, 51.0f / 255);
+    Vec3 multiplier = time_get_fog_multiplier(ts);
+    Vec3 fog = mmath_vec3((192.0f / 255) * multiplier.x, (216.0f / 255) * multiplier.y, multiplier.z);
+    Vec3 eye = camera_get_position(cam);
+    float sample[MESHER_FLOATS_PER_VERTEX] = {0};
+    sample[0] = eye.x;
+    sample[1] = eye.y;
+    sample[2] = eye.z;
+    renderer_light_vertices(r, sample, 1);
+    float visibility = 0.05f + 0.95f * fmaxf(sample[9], sample[10]);
+    return mmath_vec3_scale(fog, visibility);
+}
+
 static bool renderer_begin_voxel_tex(Renderer *r, const Camera *cam, float aspect,
                                      const TimeSystem *ts, unsigned int tex)
 {
-    if (r->shader == NULL || !shader_is_ready(r->shader) || tex == 0) {
+    if (!r || !r->shader || !shader_is_ready(r->shader) || !tex || !r->lightmap)
         return false;
-    }
-    if (shader_bind(r->shader) != MINEC_SHADER_OK) {
+    if (shader_bind(r->shader) != MINEC_SHADER_OK)
         return false;
-    }
-    Vec3 sky = mmath_vec3(0.529f, 0.808f, 0.922f);
-    Vec3 sun = mmath_vec3(-0.45f, 0.85f, 0.30f);
-    float intensity = 1.0f;
-    if (ts != NULL) {
-        sky = time_get_sky_color(ts);
-        sun = time_get_sun_dir(ts);
-        intensity = time_get_light_intensity(ts);
-    } else {
-        sun = mmath_vec3_normalize(sun);
-    }
-    Mat4 view = camera_get_view(cam);
-    Mat4 proj = camera_get_proj(cam, aspect);
-    Mat4 mvp = mmath_mat4_mul(proj, view);
+    Mat4 mvp = mmath_mat4_mul(camera_get_proj(cam, aspect), camera_get_view(cam));
     shader_set_uniform_mat4(r->mvp_loc, mvp.m);
-    if (minec_glActiveTexture != NULL) {
-        minec_glActiveTexture((MinecGLenum)MINEC_GL_TEXTURE0);
+    float sky = time_get_light_intensity(ts);
+    minec_glActiveTexture(MINEC_GL_TEXTURE0 + 1);
+    minec_glBindTexture(MINEC_GL_TEXTURE_2D, r->lightmap);
+    if (fabsf(sky - r->lightmap_sky) > 0.0001f) {
+        unsigned char pixels[16 * 16 * 4];
+        visual_lightmap(pixels, sky, 0.5f);
+        minec_glTexImage2D(MINEC_GL_TEXTURE_2D, 0, MINEC_GL_RGBA, 16, 16, 0, MINEC_GL_RGBA, MINEC_GL_UNSIGNED_BYTE,
+                           pixels);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_MIN_FILTER, MINEC_GL_LINEAR);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_MAG_FILTER, MINEC_GL_LINEAR);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_WRAP_S, MINEC_GL_CLAMP_TO_EDGE);
+        minec_glTexParameteri(MINEC_GL_TEXTURE_2D, MINEC_GL_TEXTURE_WRAP_T, MINEC_GL_CLAMP_TO_EDGE);
+        r->lightmap_sky = sky;
     }
-    if (minec_glBindTexture != NULL) {
-        minec_glBindTexture((MinecGLenum)MINEC_GL_TEXTURE_2D, tex);
-    }
+    shader_set_uniform_int(r->lightmap_loc, 1);
+    minec_glActiveTexture(MINEC_GL_TEXTURE0);
+    minec_glBindTexture(MINEC_GL_TEXTURE_2D, tex);
     shader_set_uniform_int(r->atlas_loc, 0);
     shader_set_uniform_float(r->voxel_atlas_materials_loc, tex == r->atlas ? 1.0f : 0.0f);
-    shader_set_uniform_vec3(r->sun_dir_loc, sun.x, sun.y, sun.z);
-    shader_set_uniform_float(r->light_intensity_loc, intensity);
-    shader_set_uniform_vec3(r->sky_color_loc, sky.x, sky.y, sky.z);
-    Vec3 fog_eye = camera_get_position(cam);
-    float fog_probe[MESHER_FLOATS_PER_VERTEX] = {0};
-    fog_probe[0] = fog_eye.x; fog_probe[1] = fog_eye.y; fog_probe[2] = fog_eye.z;
-    renderer_light_vertices(r, fog_probe, 1);
-    float fog_visibility = 0.10f + 0.90f * fmaxf(fog_probe[9], fog_probe[10]);
-    if (r->underwater) {
-        /* Submerged: short blue sightlines instead of sky haze. */
-        float night = 1.0f - fminf(1.0f, fmaxf(0.0f, (sun.y + 0.16f) / 0.36f));
-        shader_set_uniform_vec3(r->fog_color_loc, (0.05f - night * 0.025f) * fog_visibility,
-                                (0.16f - night * 0.075f) * fog_visibility,
-                                (0.38f - night * 0.22f) * fog_visibility);
-        shader_set_uniform_float(r->fog_density_loc, RENDERER_UNDERWATER_FOG_DENSITY);
-    } else {
-        float daylight = fminf(1.0f, fmaxf(0.0f, (sun.y + 0.16f) / 0.36f));
-        shader_set_uniform_vec3(r->fog_color_loc, (sky.x * daylight + 0.065f * (1.0f - daylight)) * fog_visibility,
-                                (sky.y * daylight + 0.078f * (1.0f - daylight)) * fog_visibility,
-                                (sky.z * daylight + 0.105f * (1.0f - daylight)) * fog_visibility);
-        shader_set_uniform_float(r->fog_density_loc, RENDERER_FOG_DENSITY);
-    }
-    Vec3 cam_pos = camera_get_position(cam);
-    shader_set_uniform_vec3(r->cam_pos_loc, cam_pos.x, cam_pos.y, cam_pos.z);
-    shader_set_uniform_float(r->voxel_cloud_time_loc, (float)fmod(time_now_seconds(), 8192.0));
-    shader_set_uniform_float(r->voxel_cloud_altitude_loc, 144.0f);
+    shader_set_uniform_float(r->colored_water_loc, r->colored_water ? 1.0f : 0.0f);
+    shader_set_uniform_float(r->entity_lighting_loc, tex == r->atlas ? 0.0f : 1.0f);
+    shader_set_uniform_float(r->viewmodel_loc, 0);
+    shader_set_uniform_float(r->chunk_visibility_loc, 1.0f);
+    shader_set_uniform_float(r->underwater_loc, r->underwater ? 1.0f : 0.0f);
+    Vec3 eye = camera_get_position(cam), fog = renderer_fog_color(r, cam, ts);
+    shader_set_uniform_vec3(r->cam_pos_loc, eye.x, eye.y, eye.z);
+    shader_set_uniform_vec3(r->fog_color_loc, fog.x, fog.y, fog.z);
+    float fog_start, fog_end;
+    visual_fog_range(r->render_distance, r->underwater, &fog_start, &fog_end);
+    shader_set_uniform_float(r->fog_start_loc, fog_start);
+    shader_set_uniform_float(r->fog_end_loc, fog_end);
     return true;
 }
 
@@ -1764,7 +1868,9 @@ static void renderer_draw_sky(Renderer *r, const Camera *cam, float aspect, cons
     float safe_aspect = aspect > 0.0f ? aspect : (16.0f / 9.0f);
     Mat4 projection = camera_get_proj(cam, safe_aspect);
     float tan_half_fov = projection.m[5] > 1e-6f ? 1.0f / projection.m[5] : 0.7002075f;
-    float shader_time = (float)fmod(time_now_seconds(), 8192.0);
+    float shader_time = (float)r->visual_seconds;
+    sky = visual_sky_color(r->light_world, (int)floorf(position.x), (int)floorf(position.z), time_get_daylight(ts));
+    Vec3 fog = renderer_fog_color(r, cam, ts);
 
     if (shader_bind(r->sky_shader) != MINEC_SHADER_OK) {
         return;
@@ -1775,11 +1881,23 @@ static void renderer_draw_sky(Renderer *r, const Camera *cam, float aspect, cons
     shader_set_uniform_vec3(r->sky_camera_up_loc, up.x, up.y, up.z);
     shader_set_uniform_vec3(r->sky_sun_dir_loc, sun.x, sun.y, sun.z);
     shader_set_uniform_vec3(r->sky_horizon_color_loc, sky.x, sky.y, sky.z);
+    shader_set_uniform_vec3(r->sky_fog_color_loc, fog.x, fog.y, fog.z);
+    Vec3 cloud_color = time_get_cloud_color(ts);
+    shader_set_uniform_vec3(r->sky_cloud_color_loc, cloud_color.x, cloud_color.y, cloud_color.z);
+    shader_set_uniform_float(r->sky_star_brightness_loc, time_get_star_brightness(ts));
+    for (int i = 0; i < 3; ++i) {
+        minec_glActiveTexture(MINEC_GL_TEXTURE0 + 1 + i);
+        minec_glBindTexture(MINEC_GL_TEXTURE_2D, r->sky_textures[i]);
+        shader_set_uniform_int(r->sky_textures_loc[i], 1 + i);
+    }
+    shader_set_uniform_float(r->sky_has_textures_loc,
+                             r->sky_textures[0] && r->sky_textures[1] && r->sky_textures[2] ? 1.0f : 0.0f);
+    minec_glActiveTexture(MINEC_GL_TEXTURE0);
     shader_set_uniform_float(r->sky_aspect_loc, safe_aspect);
     shader_set_uniform_float(r->sky_tan_half_fov_loc, tan_half_fov);
     shader_set_uniform_float(r->sky_time_loc, shader_time);
     shader_set_uniform_float(r->sky_light_intensity_loc, intensity);
-    shader_set_uniform_float(r->sky_cloud_altitude_loc, 144.0f);
+    shader_set_uniform_float(r->sky_cloud_altitude_loc, 192.0f);
     shader_set_uniform_float(r->sky_underwater_loc, r->underwater ? 1.0f : 0.0f);
 
     GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);
@@ -1824,13 +1942,10 @@ void renderer_draw_world(Renderer *r, const World *w, const Camera *cam, float a
     /* Day/night sky drives the clear color (NULL ts keeps noon defaults).
      * Lighting itself resolves inside the voxel pass from ts. */
     Vec3 sky = mmath_vec3(0.529f, 0.808f, 0.922f);
-    Vec3 sun = mmath_vec3(-0.45f, 0.85f, 0.30f);
     if (ts != NULL) {
         sky = time_get_sky_color(ts);
-        sun = time_get_sun_dir(ts);
-    } else {
-        sun = mmath_vec3_normalize(sun);
     }
+    texture_atlas_animations_update(r->atlas_animations, r->atlas, r->visual_seconds);
     renderer_set_clear_color(r, sky.x, sky.y, sky.z, 1.0f);
 
     double t0 = time_now_seconds();
@@ -1867,6 +1982,9 @@ void renderer_draw_world(Renderer *r, const World *w, const Camera *cam, float a
         if (!r->gpu[slot][RENDERER_PASS_OPAQUE].valid) {
             continue;
         }
+        shader_set_uniform_float(
+            r->chunk_visibility_loc,
+            fminf(1.0f, (float)(r->visual_seconds - r->gpu[slot][RENDERER_PASS_OPAQUE].visible_since) / 0.75f));
         gpu_chunk_draw(&r->gpu[slot][RENDERER_PASS_OPAQUE]);
         r->perf.drawn++;
     }
@@ -1915,6 +2033,11 @@ void renderer_draw_world(Renderer *r, const World *w, const Camera *cam, float a
         }
         glDepthMask(GL_FALSE);
         for (size_t i = 0; i < n; ++i) {
+            shader_set_uniform_float(
+                r->chunk_visibility_loc,
+                fminf(1.0f,
+                      (float)(r->visual_seconds - r->gpu[order[i].slot][RENDERER_PASS_TRANSPARENT].visible_since) /
+                          0.75f));
             gpu_chunk_draw(&r->gpu[order[i].slot][RENDERER_PASS_TRANSPARENT]);
             r->perf.drawn_t++;
         }
@@ -2298,6 +2421,9 @@ int renderer_reload_atlas(Renderer *r, const char *pack)
     }
     texture_atlas_delete(r->atlas);
     r->atlas = tex;
+    texture_atlas_animations_destroy(r->atlas_animations);
+    r->atlas_animations = texture_atlas_animations_create(pack);
+    r->colored_water = texture_atlas_water_is_colored(pack);
     const char *name = (pack != NULL && pack[0] != '\0') ? pack : "Default";
     size_t n = strlen(name);
     if (n > sizeof(r->atlas_pack) - 1) {
@@ -2418,7 +2544,8 @@ void renderer_draw_item_icons(Renderer *r, int width, int height, const IconBatc
         return;
     }
     size_t verts = (size_t)b->quads * 6;
-    (void)renderer_draw_ui_texture_verts(r, width, height, r->atlas, b->verts, verts,
+    bool native_icons = r->item_icons_tex && (!r->atlas_pack[0] || strcmp(r->atlas_pack, "Default") == 0);
+    (void)renderer_draw_ui_texture_verts(r, width, height, native_icons ? r->item_icons_tex : r->atlas, b->verts, verts,
                                          1.0f, 1.0f, 1.0f, 1.0f);
 }
 
@@ -2562,6 +2689,56 @@ RendererPerf renderer_get_perf(const Renderer *r)
  *   bow_frac: bow draw charge 0..1 (< 0 hides).
  *   hurt_flash: damage flash 0..1 (0 hides).
  */
+static void native_hud_quad(float *vertices, size_t *count, int sprite, float x, float y)
+{
+    /* Pixel rectangles in the owner-converted 512 x 128 native HUD sheet. */
+    static const int rects[][4] = {{0, 0, 182, 22}, {192, 0, 24, 23}, {224, 0, 15, 15}, {0, 32, 182, 5},
+                                   {0, 48, 9, 9},   {16, 48, 9, 9},   {32, 48, 9, 9},   {48, 48, 9, 9},
+                                   {64, 48, 9, 9},  {80, 48, 9, 9}};
+    const int *r = rects[sprite];
+    float u0 = r[0] / 512.0f, v0 = r[1] / 128.0f;
+    float u1 = (r[0] + r[2]) / 512.0f, v1 = (r[1] + r[3]) / 128.0f;
+    float x1 = x + r[2] * 2, y1 = y + r[3] * 2;
+    const float quad[24] = {x, y, u0, v0, x1, y, u1, v0, x, y1, u0, v1, x, y1, u0, v1, x1, y, u1, v0, x1, y1, u1, v1};
+    memcpy(vertices + *count * 4, quad, sizeof(quad));
+    *count += 6;
+}
+
+static bool renderer_native_hud(Renderer *r, int width, int height, int selected, bool survival, float health,
+                                float max_health, float hunger, float max_hunger)
+{
+    if (!r->hud_tex)
+        return false;
+    float vertices[64 * 24];
+    size_t count = 0;
+    float center = width * 0.5f;
+    native_hud_quad(vertices, &count, 0, center - 182, height - 44.0f);
+    native_hud_quad(vertices, &count, 1, center - 184 + selected * 40, height - 46.0f);
+    if (survival) {
+        native_hud_quad(vertices, &count, 3, center - 182, height - 64.0f);
+        int hp = max_health > 0 && isfinite(health) ? (int)ceilf(fminf(1, fmaxf(0, health / max_health)) * 20) : 0;
+        int food = max_hunger > 0 && isfinite(hunger) ? (int)ceilf(fminf(1, fmaxf(0, hunger / max_hunger)) * 20) : 0;
+        for (int i = 0; i < 10; ++i) {
+            float hx = center - 182 + i * 16, fx = center + 182 - 18 - i * 16, y = height - 78.0f;
+            native_hud_quad(vertices, &count, 4, hx, y);
+            if (hp > i * 2)
+                native_hud_quad(vertices, &count, hp >= i * 2 + 2 ? 5 : 6, hx, y);
+            native_hud_quad(vertices, &count, 7, fx, y);
+            if (food > i * 2)
+                native_hud_quad(vertices, &count, food >= i * 2 + 2 ? 8 : 9, fx, y);
+        }
+    }
+    bool drawn = renderer_draw_ui_texture_verts(r, width, height, r->hud_tex, vertices, count, 1, 1, 1, 1);
+    count = 0;
+    native_hud_quad(vertices, &count, 2, center - 15, height * 0.5f - 15);
+    /* Vanilla's crosshair inverts the background instead of disappearing
+     * against bright snow. Transparent sprite pixels are discarded. */
+    glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_SRC_COLOR);
+    (void)renderer_draw_ui_texture_verts(r, width, height, r->hud_tex, vertices, count, 1, 1, 1, 1);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    return drawn;
+}
+
 void renderer_draw_hud(Renderer *r, int width, int height, const ItemStack *hotbar, int hotbar_sel,
                        float health, float max_health, float hunger, float max_hunger, bool show_vitals,
                        float eat_frac, float bow_frac, float hurt_flash)
@@ -2573,25 +2750,57 @@ void renderer_draw_hud(Renderer *r, int width, int height, const ItemStack *hotb
      * by menus. Only UI projection changes: the world viewport remains at
      * the actual drawable resolution. Preserve a caller's existing canvas. */
     int previous_canvas_width = r->ui_width;
+    if (hotbar_sel < 0)
+        hotbar_sel = 0;
+    if (hotbar_sel >= HUD_HOTBAR_SLOTS)
+        hotbar_sel = HUD_HOTBAR_SLOTS - 1;
     int previous_canvas_height = r->ui_height;
     UiScale metrics = ui_scale_for_drawable(width, height);
     width = (int)floorf(metrics.canvas_width);
     height = (int)floorf(metrics.canvas_height);
     renderer_set_ui_canvas(r, width, height);
     HudFrame frame;
-    hud_build(&frame, width, height, hotbar, hotbar_sel);
+    if (r->underwater && r->underwater_overlay_tex) {
+        const float overlay[24] = {0,
+                                   0,
+                                   0,
+                                   0,
+                                   (float)width,
+                                   0,
+                                   4,
+                                   0,
+                                   0,
+                                   (float)height,
+                                   0,
+                                   4,
+                                   0,
+                                   (float)height,
+                                   0,
+                                   4,
+                                   (float)width,
+                                   0,
+                                   4,
+                                   0,
+                                   (float)width,
+                                   (float)height,
+                                   4,
+                                   4};
+        (void)renderer_draw_ui_texture_verts(r, width, height, r->underwater_overlay_tex, overlay, 6, 1, 1, 1, 0.1f);
+    }
+    frame.count = 0;
+    bool native =
+        renderer_native_hud(r, width, height, hotbar_sel, show_vitals, health, max_health, hunger, max_hunger);
+    if (!native)
+        hud_build(&frame, width, height, hotbar, hotbar_sel);
     hud_build_durability(&frame, width, height, hotbar);
-    if (show_vitals) {
+    if (show_vitals && !native) {
         hud_build_vitals(&frame, width, height, health, max_health, hunger, max_hunger);
     }
     hud_build_eat(&frame, width, height, eat_frac);
     hud_build_bow(&frame, width, height, bow_frac);
     hud_build_flash(&frame, width, height, hurt_flash);
-    if (frame.count == 0) {
-        renderer_set_ui_canvas(r, previous_canvas_width, previous_canvas_height);
-        return;
-    }
-    renderer_ui_draw_verts(r, width, height, frame.verts, frame.count);
+    if (frame.count > 0)
+        renderer_ui_draw_verts(r, width, height, frame.verts, frame.count);
     /* Textured item icons, centered in their slots (24 px in 40 px cells). */
     {
         IconBatch icons;
@@ -2604,7 +2813,7 @@ void renderer_draw_hud(Renderer *r, int width, int height, const ItemStack *hotb
             float sx = 0.0f;
             float sy = 0.0f;
             hud_hotbar_slot(width, height, i, &sx, &sy);
-            icons_push(&icons, sx + 8.0f, sy + 8.0f, 24.0f, item_get_info(s->item)->tile);
+            icons_push(&icons, sx + 4.0f, sy + 4.0f, 32.0f, item_get_info(s->item)->tile);
         }
         renderer_draw_item_icons(r, width, height, &icons);
     }

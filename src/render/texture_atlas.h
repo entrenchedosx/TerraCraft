@@ -2,7 +2,7 @@
 
 /* Procedural texture atlas (M2): 256x256 RGBA8, 16x16 grid of 16px tiles.
  * Pixels are generated deterministically at runtime (no image files).
- * NEAREST filtering (retro crisp look), CLAMP_TO_EDGE wrapping.
+ * Nearest pixel magnification, four tile-isolated mip levels, clamp wrapping.
  *
  * CPU-side helpers (fill/uv/tile mapping) are GL-free and unit-tested;
  * only texture_atlas_generate/delete touch GL (minec_gl_*).
@@ -68,7 +68,7 @@ typedef enum AtlasTile {
     TILE_PLAYER_SKIN = 46,
     TILE_PLAYER_SLEEVE = 47,
     TILE_FLESH = 48,
-TILE_WOOD_SWORD = 49,
+    TILE_WOOD_SWORD = 49,
     TILE_STONE_SWORD = 50,
     TILE_IRON_INGOT = 51,
     TILE_DIAMOND = 52,
@@ -91,7 +91,8 @@ TILE_WOOD_SWORD = 49,
     TILE_GRANITE = 69,
     TILE_RAW_IRON = 70,
     TILE_RAW_COPPER = 71,
-    TILE_LAVA = 72
+    TILE_LAVA = 72,
+    TILE_GRASS_SIDE_OVERLAY = 73
 } AtlasTile;
 
 /* Resource-pack tile file names, indexed by tile (NULL entry = no override).
@@ -180,6 +181,18 @@ unsigned int texture_atlas_generate(void);
  * Returns: GL texture id, or 0 on failure.
  */
 unsigned int texture_atlas_generate_from_pack(const char *pack);
+/* Already-colored pack water keeps its artwork instead of receiving a
+ * second blue multiplier. Missing/invalid tiles retain the neutral fallback. */
+bool texture_atlas_water_is_colored(const char *pack);
+
+/* Gamma-correct, alpha-weighted 2x minification. Atlas mips stop at level
+ * four, where each 16px source tile occupies exactly one texel. */
+void texture_atlas_downsample(const unsigned char *source, int width, int height, unsigned char *out);
+
+typedef struct AtlasAnimations AtlasAnimations;
+AtlasAnimations *texture_atlas_animations_create(const char *pack);
+void texture_atlas_animations_update(AtlasAnimations *animations, unsigned int atlas, double seconds);
+void texture_atlas_animations_destroy(AtlasAnimations *animations);
 
 /* List installed resource packs (subdirectories of resourcepacks/ holding
  * a tiles/ directory), plus the implicit "Default" procedural entry first.

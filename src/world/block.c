@@ -203,6 +203,11 @@ bool block_is_face_visible(uint16_t current, uint16_t neighbor)
     if (block_is_water(current) && block_is_water(neighbor)) {
         return false;
     }
+    /* Fancy cutout leaves keep the interior surfaces. They fill holes in
+     * the front leaf texture instead of
+     * exposing the sky through a canopy. */
+    if (current == BLOCK_LEAVES && neighbor == BLOCK_LEAVES)
+        return true;
     /* Opaque current vs transparent neighbor: visible (e.g. stone next to
      * water/leaves). Transparent current vs opaque neighbor: handled from the
      * opaque side; still emit to avoid holes for water surfaces. */

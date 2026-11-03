@@ -42,8 +42,12 @@ open.
   render pass.
 - Chunk streaming, block editing, lighting, ambient occlusion, fog, and a
   day/night cycle.
-- A procedural sky with a moving sun and moon, fading stars, warm dawn/dusk,
-  animated parallax clouds, soft cloud shading, and hemisphere-lit blocks.
+- A Java 1.21.11-style lightmap, fixed block-face shading, biome-blended
+  vegetation, animated tinted water/lava, pixel sun/moon sprites, block clouds,
+  distance-based fog, mipmapped textures, and chunk fade-in.
+- Native owner-local HUD sprites and isometric block icons when reference
+  assets are supplied. See [Visual Fidelity](docs/VISUAL_FIDELITY.md) for
+  verification and remaining differences.
 - Creative flight and Survival health, hunger, mining, tool wear, food,
   crafting, item drops, and death recovery.
 - Pixel-art full/half/empty heart and hunger icons in Survival.

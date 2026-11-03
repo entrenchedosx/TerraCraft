@@ -4155,6 +4155,7 @@ static void app_prepare_world_render(AppContext *app)
         }
     }
     app_position_camera(app);
+    renderer_set_render_distance(app->renderer, app->settings.render_distance);
     /* Dense blue fog while the eye is submerged. */
     renderer_set_underwater(app->renderer,
                             player_eye_in_water(app->world, &app->player));
@@ -4241,6 +4242,8 @@ int app_run(AppContext *app)
                 continue;
             }
         }
+        if (app->world_open && game_state_ticks_world(app->state))
+            renderer_advance_visuals(app->renderer, frame_elapsed);
         app_lan_update(app, frame_elapsed);
         if (!app->running || app->state == GAME_STATE_QUIT) {
             break;

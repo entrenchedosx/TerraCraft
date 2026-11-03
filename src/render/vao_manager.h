@@ -19,12 +19,13 @@ typedef struct GpuChunkBuffer {
     size_t index_count; /* Indices to draw (0 = nothing). */
     bool valid; /* True when buffers hold current mesh data. */
     int cx, cz; /* Chunk coords this buffer belongs to. */
+    double visible_since; /* Renderer visual clock when first uploaded. */
 } GpuChunkBuffer;
 
 /* Upload a CPU mesh into GPU buffers (creates VAO/VBO/EBO on first use,
  * re-uploads on dirty). Empty meshes (0 indices) destroy GPU buffers and
- * mark the entry invalid (nothing to draw). Vertex layout: 11 floats
- * [pos xyz | normal xyz | uv uv | ao | sky | block], locations 0/1/2/3/4.
+ * mark the entry invalid (nothing to draw). Vertex layout: 14 floats
+ * [pos xyz | normal xyz | uv uv | ao | sky | block | tint rgb], locations 0..5.
  *
  * Args:
  *   g: buffer entry to fill (must not be NULL).

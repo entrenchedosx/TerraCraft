@@ -1,4 +1,8 @@
 #pragma once
+int test_visual_lightmap_and_fog(void);
+int test_visual_biome_tints(void);
+int test_texture_mipmap_edges(void);
+int test_visual_leaves_and_timeline(void);
 
 /* Minimal test harness: counts, assertion macro, and test declarations.
  * Each test returns the number of failures (0 = pass).

@@ -1,171 +1,111 @@
 #include "game/time_system.h"
-
 #include <math.h>
 #include <stddef.h>
 
-/* Keyframed sky track: {progress, r, g, b}. Must start at 0 and end at 1
- * with matching endpoints for seamless wrap. */
-static const float SKY_KEYS[][4] = {
-    {0.00f, 0.030f, 0.040f, 0.100f}, /* Midnight. */
-    {0.20f, 0.030f, 0.040f, 0.100f}, /* Late night. */
-    {0.27f, 0.960f, 0.600f, 0.400f}, /* Dawn. */
-    {0.35f, 0.529f, 0.808f, 0.922f}, /* Morning (M1 sky). */
-    {0.65f, 0.529f, 0.808f, 0.922f}, /* Afternoon. */
-    {0.73f, 0.950f, 0.450f, 0.300f}, /* Dusk. */
-    {0.80f, 0.030f, 0.040f, 0.100f}, /* Nightfall. */
-    {1.00f, 0.030f, 0.040f, 0.100f}, /* Midnight (wrap). */
-};
-#define SKY_KEY_COUNT 8
-
-/* Keyframed intensity track: {progress, value}. */
-static const float INT_KEYS[][2] = {
-    {0.00f, TIME_MIN_INTENSITY},
-    {0.22f, TIME_MIN_INTENSITY},
-    {0.30f, 0.900f},
-    {0.40f, 1.000f},
-    {0.60f, 1.000f},
-    {0.72f, 0.700f},
-    {0.80f, TIME_MIN_INTENSITY},
-    {1.00f, TIME_MIN_INTENSITY},
-};
-#define INT_KEY_COUNT 8
-
-/* Wrap progress into [0,1). */
 static float wrap01(float p)
 {
     p = fmodf(p, 1.0f);
-    if (p < 0.0f) {
-        p += 1.0f;
-    }
-    return p;
+    return p < 0 ? p + 1 : p;
 }
 
-/* Locate the segment [keys[i], keys[i+1]] containing p and return the
- * fractional position. Keys must span [0,1]. */
-static float segment(const float *progs, int n, float p, int *out_i)
+void time_system_init(TimeSystem *t, float start, float speed)
 {
-    for (int i = 0; i < n - 1; ++i) {
-        if (p <= progs[i + 1] || i == n - 2) {
-            if (out_i != NULL) {
-                *out_i = i;
-            }
-            float span = progs[i + 1] - progs[i];
-            if (span <= 0.0f) {
-                return 0.0f;
-            }
-            float f = (p - progs[i]) / span;
-            if (f < 0.0f) {
-                f = 0.0f;
-            }
-            if (f > 1.0f) {
-                f = 1.0f;
-            }
-            /* Smooth first derivatives at dawn/dusk keyframes. */
-            f = f * f * (3.0f - 2.0f * f);
-            return f;
-        }
-    }
-    if (out_i != NULL) {
-        *out_i = 0;
-    }
-    return 0.0f;
-}
-
-/* Initialise the clock.
- *
- * Args:
- *   t: system.
- *   start_progress: initial phase.
- *   speed: cycles per second.
- */
-void time_system_init(TimeSystem *t, float start_progress, float speed)
-{
-    if (t == NULL) {
+    if (!t)
         return;
-    }
-    t->day_progress = wrap01(start_progress);
-    t->speed = speed < 0.0f ? 0.0f : speed;
+    t->day_progress = wrap01(start);
+    t->speed = speed < 0 ? 0 : speed;
 }
 
-/* Advance the clock.
- *
- * Args:
- *   t: system.
- *   dt: seconds.
- */
 void time_system_update(TimeSystem *t, float dt)
 {
-    if (t == NULL || dt <= 0.0f || t->speed <= 0.0f) {
-        return;
-    }
-    t->day_progress = wrap01(t->day_progress + dt * t->speed);
+    if (t && dt > 0 && t->speed > 0)
+        t->day_progress = wrap01(t->day_progress + dt * t->speed);
 }
 
-/* Interpolated sky color.
- *
- * Args:
- *   t: system.
- *
- * Returns: RGB sky.
- */
-Vec3 time_get_sky_color(const TimeSystem *t)
+/* Release 1.21.11 data/minecraft/timeline/day.json. Cyclic tracks are
+ * linearly interpolated; celestial angles use the supplied cubic Bezier. */
+static float day_ticks(const TimeSystem *t)
 {
-    if (t == NULL) {
-        return mmath_vec3(0.529f, 0.808f, 0.922f);
-    }
-    float progs[SKY_KEY_COUNT];
-    for (int i = 0; i < SKY_KEY_COUNT; ++i) {
-        progs[i] = SKY_KEYS[i][0];
-    }
-    int idx = 0;
-    float f = segment(progs, SKY_KEY_COUNT, t->day_progress, &idx);
-    float r = SKY_KEYS[idx][1] + (SKY_KEYS[idx + 1][1] - SKY_KEYS[idx][1]) * f;
-    float g = SKY_KEYS[idx][2] + (SKY_KEYS[idx + 1][2] - SKY_KEYS[idx][2]) * f;
-    float b = SKY_KEYS[idx][3] + (SKY_KEYS[idx + 1][3] - SKY_KEYS[idx][3]) * f;
-    return mmath_vec3(r, g, b);
+    return wrap01((t ? t->day_progress : 0.5f) - 0.25f) * 24000;
 }
 
-/* Sun direction (unit, east rise -> zenith -> west set).
- *
- * Args:
- *   t: system.
- *
- * Returns: normalized sun direction.
- */
+static float day_track(const TimeSystem *t, float dawn_end, float dusk_start, float dusk_end, float dawn_start)
+{
+    float tick = day_ticks(t);
+    if (tick >= dawn_end && tick <= dusk_start)
+        return 1;
+    if (tick > dusk_start && tick < dusk_end)
+        return 1 - (tick - dusk_start) / (dusk_end - dusk_start);
+    if (tick >= dusk_end && tick <= dawn_start)
+        return 0;
+    if (tick < dawn_end)
+        tick += 24000;
+    return (tick - dawn_start) / (24000 + dawn_end - dawn_start);
+}
+
+static float bezier(float t, float a, float b)
+{
+    float u = 1 - t;
+    return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t;
+}
+
 Vec3 time_get_sun_dir(const TimeSystem *t)
 {
-    if (t == NULL) {
-        return mmath_vec3(-0.45f, 0.85f, 0.30f);
+    float fraction = wrap01((t ? t->day_progress : 0.5f) - 0.5f);
+    float low = 0, high = 1;
+    for (int i = 0; i < 20; ++i) {
+        float middle = (low + high) * 0.5f;
+        if (bezier(middle, 0.362f, 0.638f) < fraction)
+            low = middle;
+        else
+            high = middle;
     }
-    float theta = (t->day_progress - 0.25f) * 2.0f * MMATH_PI;
-    Vec3 d = mmath_vec3(cosf(theta), sinf(theta), 0.30f);
-    return mmath_vec3_normalize(d);
+    float angle = bezier((low + high) * 0.5f, 0.241f, 0.759f) * 2 * MMATH_PI;
+    return mmath_vec3(-sinf(angle), cosf(angle), 0);
 }
 
-/* Global light multiplier.
- *
- * Args:
- *   t: system.
- *
- * Returns: intensity in [MIN, 1].
- */
+float time_get_daylight(const TimeSystem *t)
+{
+    return day_track(t, 133, 11867, 13670, 22330);
+}
+
+Vec3 time_get_sky_color(const TimeSystem *t)
+{
+    float f = time_get_daylight(t);
+    return mmath_vec3(120.0f / 255 * f, 167.0f / 255 * f, f);
+}
+
 float time_get_light_intensity(const TimeSystem *t)
 {
-    if (t == NULL) {
-        return 1.0f;
+    return TIME_MIN_INTENSITY + (1 - TIME_MIN_INTENSITY) * day_track(t, 730, 11270, 13140, 22860);
+}
+
+Vec3 time_get_fog_multiplier(const TimeSystem *t)
+{
+    float f = time_get_daylight(t);
+    return mmath_vec3((15 + 240 * f) / 255, (15 + 240 * f) / 255, (22 + 233 * f) / 255);
+}
+
+Vec3 time_get_cloud_color(const TimeSystem *t)
+{
+    float f = time_get_daylight(t);
+    return mmath_vec3((25 + 230 * f) / 255, (25 + 230 * f) / 255, (38 + 217 * f) / 255);
+}
+
+float time_get_star_brightness(const TimeSystem *t)
+{
+    static const float keys[][2] = {{92, 0.037f},    {627, 0},        {11373, 0},      {11732, 0.016f},
+                                    {11959, 0.044f}, {12399, 0.143f}, {12729, 0.258f}, {13228, 0.5f},
+                                    {22772, 0.5f},   {23032, 0.364f}, {23356, 0.225f}, {23758, 0.101f}};
+    float tick = day_ticks(t);
+    for (int i = 0; i < 12; ++i) {
+        int j = (i + 1) % 12;
+        float a = keys[i][0], b = keys[j][0] + (j == 0 ? 24000 : 0);
+        float x = tick;
+        if (i == 11 && x < a)
+            x += 24000;
+        if (x >= a && x <= b)
+            return keys[i][1] + (keys[j][1] - keys[i][1]) * (x - a) / (b - a);
     }
-    float progs[INT_KEY_COUNT];
-    for (int i = 0; i < INT_KEY_COUNT; ++i) {
-        progs[i] = INT_KEYS[i][0];
-    }
-    int idx = 0;
-    float f = segment(progs, INT_KEY_COUNT, t->day_progress, &idx);
-    float v = INT_KEYS[idx][1] + (INT_KEYS[idx + 1][1] - INT_KEYS[idx][1]) * f;
-    if (v < TIME_MIN_INTENSITY) {
-        v = TIME_MIN_INTENSITY;
-    }
-    if (v > 1.0f) {
-        v = 1.0f;
-    }
-    return v;
+    return 0;
 }

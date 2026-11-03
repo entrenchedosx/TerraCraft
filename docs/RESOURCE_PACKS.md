@@ -20,6 +20,13 @@ When an owner supplies a local asset tree, run:
 python tools/convert_mcassets.py
 ```
 
+For the visual assets alone, use `python tools/convert_mcassets.py --visuals-only`.
+When the owner's `reference/1.21.11/client.jar` exists, visual conversion
+prefers its textures over the older supplied asset tree. It also writes
+native sky and HUD images, an item icon atlas, and water/lava animation strips.
+Animation strips expand the source `.mcmeta` durations and interpolation to
+one 16px frame per 20 Hz game tick. These generated files remain local.
+
 The converter writes engine-ready BMP/WAV files and mob skins under
 `mcassets/generated/`. That directory is ignored by Git and is not required
 for building or running a fresh checkout. The build copies generated files
@@ -60,7 +67,7 @@ owner-local layer.
 
 ### Texture tiles
 
-The current atlas exposes 73 named tiles. Each tile is a 16×16 BMP; files
+The current atlas exposes 74 named tiles. Each tile is a 16×16 BMP; files
 may be omitted individually.
 
 ```text
@@ -83,6 +90,7 @@ diamond_sword.bmp gravel.bmp        sandstone.bmp      deepslate.bmp
 copper_ore.bmp    lapis_ore.bmp     redstone_ore.bmp   emerald_ore.bmp
 tuff.bmp          granite.bmp       raw_iron.bmp       raw_copper.bmp
 lava.bmp
+grass_side_overlay.bmp
 ```
 
 The source of truth for names and item mappings is
@@ -118,5 +126,14 @@ Sounds must be RIFF/WAVE PCM, 8- or 16-bit, mono or stereo. Accepted files
 are capped at 4 MiB and 10 seconds, then converted to the mixer's format.
 Invalid files leave the built-in sound active.
 
-The atlas uses nearest-neighbor filtering and half-texel inset UVs. This
-keeps 16×16 tile edges crisp and prevents sampling neighboring atlas tiles.
+The atlas uses nearest-neighbor magnification, four gamma-correct,
+alpha-weighted mip levels, and half-texel inset UVs. Mips stop when each tile
+occupies one texel, preserving tile boundaries and crisp nearby pixels.
+
+Grass and foliage retain the converter's plains colors and receive relative
+biome tinting at render time. The optional grass-side overlay is grayscale
+and receives the full biome tint. Neutral water receives the default Java
+water color; already-colored custom water keeps its supplied colors.
+Selecting a pack with a valid static `water.bmp` or `lava.bmp` suppresses
+the owner animation for that tile. Custom item icons use the selected pack
+atlas, so owner-local isometric icons do not hide pack overrides.

@@ -10,6 +10,10 @@ int g_tests_failed = 0;
  */
 int main(void)
 {
+    RUN_TEST(test_visual_lightmap_and_fog);
+    RUN_TEST(test_visual_biome_tints);
+    RUN_TEST(test_texture_mipmap_edges);
+    RUN_TEST(test_visual_leaves_and_timeline);
     RUN_TEST(test_voxel_light_sky_and_cave);
     RUN_TEST(test_voxel_light_torch_and_removal);
     RUN_TEST(test_voxel_light_seams_and_invalidation);

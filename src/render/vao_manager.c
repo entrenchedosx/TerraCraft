@@ -61,7 +61,7 @@ int gpu_chunk_upload(GpuChunkBuffer *g, const MeshData *mesh, int cx, int cz)
                        (MinecGLsizeiptr)(mesh->index_count * sizeof(unsigned int)), mesh->indices,
                        (MinecGLenum)MINEC_GL_STATIC_DRAW);
 
-    /* Layout: 11 floats; position, normal, UV, AO and independent sky/block light. */
+    /* Layout: 14 floats; position, normal, UV, AO and independent sky/block light. */
     const MinecGLsizei stride = (MinecGLsizei)(MESHER_FLOATS_PER_VERTEX * sizeof(float));
     minec_glVertexAttribPointer(0, 3, (MinecGLenum)MINEC_GL_FLOAT, 0, stride, (const void *)0);
     minec_glEnableVertexAttribArray(0);
@@ -73,6 +73,8 @@ int gpu_chunk_upload(GpuChunkBuffer *g, const MeshData *mesh, int cx, int cz)
     minec_glEnableVertexAttribArray(3);
     minec_glVertexAttribPointer(4, 2, (MinecGLenum)MINEC_GL_FLOAT, 0, stride, (const void *)(9 * sizeof(float)));
     minec_glEnableVertexAttribArray(4);
+    minec_glVertexAttribPointer(5, 3, (MinecGLenum)MINEC_GL_FLOAT, 0, stride, (const void *)(11 * sizeof(float)));
+    minec_glEnableVertexAttribArray(5);
 
     minec_glBindVertexArray(0);
 

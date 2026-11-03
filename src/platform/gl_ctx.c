@@ -83,6 +83,7 @@ MinecPFN_glGenTextures minec_glGenTextures = NULL;
 MinecPFN_glBindTexture minec_glBindTexture = NULL;
 MinecPFN_glTexImage2D minec_glTexImage2D = NULL;
 MinecPFN_glTexParameteri minec_glTexParameteri = NULL;
+MinecPFN_glTexSubImage2D minec_glTexSubImage2D = NULL;
 MinecPFN_glDeleteTextures minec_glDeleteTextures = NULL;
 MinecPFN_glActiveTexture minec_glActiveTexture = NULL;
 MinecPFN_glGenerateMipmap minec_glGenerateMipmap = NULL;
@@ -147,6 +148,7 @@ int minec_gl_load_all(void)
     MINEC_LOAD_GL(glBindTexture);
     MINEC_LOAD_GL(glTexImage2D);
     MINEC_LOAD_GL(glTexParameteri);
+    MINEC_LOAD_GL(glTexSubImage2D);
     MINEC_LOAD_GL(glDeleteTextures);
     MINEC_LOAD_GL(glActiveTexture);
     MINEC_LOAD_GL(glGenerateMipmap);

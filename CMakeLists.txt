@@ -82,8 +82,10 @@ set(TERRACRAFT_SOURCES
   src/render/camera.c
   src/render/mesher.c
   src/render/voxel_light.c
+  src/render/visual_style.c
   src/render/vao_manager.c
   src/render/texture_atlas.c
+  src/render/atlas_animation.c
   src/render/font.c
   src/world/block.c
   src/world/chunk.c
@@ -205,6 +207,7 @@ add_executable(terracraft_tests
   tests/test_physics.c
   tests/test_raycast.c
   tests/test_time.c
+  tests/test_visual_style.c
   tests/test_simulation_clock.c
   tests/test_mesher_ao.c
   tests/test_item.c
@@ -288,6 +291,13 @@ target_link_libraries(worldgen_probe PRIVATE terracraft_core)
 if(WIN32 AND MINEC_SDL2_DLL)
   add_custom_command(TARGET worldgen_probe POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINEC_SDL2_DLL}" $<TARGET_FILE_DIR:worldgen_probe>)
+endif()
+# Manual GPU render verification; exports frames without editing player saves.
+add_executable(visual_probe tools/visual_probe.c)
+target_link_libraries(visual_probe PRIVATE terracraft_core)
+if(WIN32 AND MINEC_SDL2_DLL)
+  add_custom_command(TARGET visual_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINEC_SDL2_DLL}" $<TARGET_FILE_DIR:visual_probe>)
 endif()
 # Headless instrumented LAN host for live two-client verification with a
 # real graphical peer (manual runs only, not part of ctest).
