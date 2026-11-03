@@ -82,3 +82,29 @@ Done after the jar became available (2026-11-02):
    JSON and patched into each carver config.
 3. `ONLY=carver tools/reference/run_worldgen_ref.sh` regenerates just the carver
    fixtures (`carvers.csv`, `carver_counts.csv`, `carver_starts.csv`).
+
+## Method used for the surface stage (worldgen stage 5)
+
+1. `javap_mapped.py` disassembled `SurfaceSystem`, `SurfaceRules` and its nested
+   conditions (`StoneDepthCheck`, `WaterConditionSource`, `YConditionSource`,
+   `VerticalGradientConditionSource`, `NoiseThresholdConditionSource`, the
+   `Context` helper conditions), `BiomeManager`, `Biome` (temperature and the
+   `FROZEN` modifier), `PerlinSimplexNoise`/`SimplexNoise`, `Heightmap`,
+   `WorldCarver.carveBlock` and `RandomState`. `jsurface.c` follows that bytecode
+   (float/double mixing, `Mth.map`, lazy-condition caching, `Math.round`).
+2. The rule tree is not hard-coded: it is parsed at run time from
+   `data/minecraft/worldgen/noise_settings/overworld.json` (`surface_rule`), so the
+   interpreter only knows rule/condition *types*; unknown types fail loading loudly.
+3. `tools/reference/WorldgenSurfaceDump.java` runs the real classes: NoiseChunk fill
+   into a `ProtoChunk` with the generation heightmaps primed as `doFill` does, then
+   the real `SurfaceSystem.buildSurface` with a real `BiomeManager` over a
+   per-chunk biome store, then the replayed `applyCarvers` loop with
+   `BiomeManager::getBiome` as the carver biome getter (so `topMaterial` runs).
+   It also picks, per seed, chunks in every special surface biome by scanning the
+   climate sampler, and dumps `BiomeManager.getBiome`, `Biome.getTemperature` and
+   `PerlinSimplexNoise` probes. `ONLY=surface tools/reference/run_worldgen_ref.sh`
+   regenerates `surface*.csv`, `pipeline*.csv`, `biome_zoom.csv`, `temperature.csv`,
+   `simplex.csv` (about 0.5 MB, one minute).
+4. Debugging a mismatch: `SURF_FULL=seed,cx,cz,file ONLY=surface ...` dumps one chunk block
+   by block and `worldgen_diff --surface <datapack> <seed> <cx> <cz> <file>` lists the
+   differing blocks with their biome. `SURF_PROBE=x,z` prints the real iceberg noise terms.

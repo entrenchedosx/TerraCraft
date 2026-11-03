@@ -461,15 +461,139 @@ static int vein_rule(JChunk *c, const JrPositional *ore, int x, int y, int z)
     return copper ? JB_GRANITE : JB_TUFF;
 }
 
+static const char *const BLOCK_NAMES[JB_COUNT] = {
+    "minecraft:air",
+    "minecraft:stone",
+    "minecraft:water",
+    "minecraft:lava",
+    "minecraft:copper_ore",
+    "minecraft:raw_copper_block",
+    "minecraft:granite",
+    "minecraft:deepslate_iron_ore",
+    "minecraft:raw_iron_block",
+    "minecraft:tuff",
+    "minecraft:bedrock",
+    "minecraft:deepslate",
+    "minecraft:calcite",
+    "minecraft:coarse_dirt",
+    "minecraft:dirt",
+    "minecraft:grass_block",
+    "minecraft:gravel",
+    "minecraft:ice",
+    "minecraft:mud",
+    "minecraft:mycelium",
+    "minecraft:orange_terracotta",
+    "minecraft:packed_ice",
+    "minecraft:podzol",
+    "minecraft:powder_snow",
+    "minecraft:red_sand",
+    "minecraft:red_sandstone",
+    "minecraft:sand",
+    "minecraft:sandstone",
+    "minecraft:snow_block",
+    "minecraft:terracotta",
+    "minecraft:white_terracotta",
+    "minecraft:yellow_terracotta",
+    "minecraft:brown_terracotta",
+    "minecraft:red_terracotta",
+    "minecraft:light_gray_terracotta",
+};
+
 const char *jfill_block_name(JFillBlock b)
 {
-    static const char *NAMES[JB_COUNT] = {
-        "minecraft:air",         "minecraft:stone",     "minecraft:water",
-        "minecraft:lava",        "minecraft:copper_ore", "minecraft:raw_copper_block",
-        "minecraft:granite",     "minecraft:deepslate_iron_ore", "minecraft:raw_iron_block",
-        "minecraft:tuff",
-    };
-    return (b >= 0 && b < JB_COUNT) ? NAMES[b] : "minecraft:air";
+    return (b >= 0 && b < JB_COUNT) ? BLOCK_NAMES[b] : "minecraft:air";
+}
+
+int jfill_block_from_name(const char *name)
+{
+    for (int i = 0; i < JB_COUNT; ++i) {
+        if (strcmp(BLOCK_NAMES[i], name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool jblock_is_air(int b)
+{
+    return b == JB_AIR;
+}
+
+bool jblock_is_fluid(int b)
+{
+    return b == JB_WATER || b == JB_LAVA;
+}
+
+/* BlockState.blocksMotion: solid collision. Powder snow has no default collision. */
+bool jblock_blocks_motion(int b)
+{
+    return !(b == JB_AIR || b == JB_WATER || b == JB_LAVA || b == JB_POWDER_SNOW);
+}
+
+void jheightmaps_prime(JHeightmaps *hm, const uint8_t *blocks)
+{
+    for (int lz = 0; lz < 16; ++lz) {
+        for (int lx = 0; lx < 16; ++lx) {
+            int ws = JFILL_MIN_Y, of = JFILL_MIN_Y;
+            for (int y = JFILL_MIN_Y + JFILL_HEIGHT - 1; y >= JFILL_MIN_Y; --y) {
+                int b = blocks[JFILL_INDEX(lx, lz, y)];
+                if (ws == JFILL_MIN_Y && !jblock_is_air(b)) {
+                    ws = y + 1;
+                }
+                if (of == JFILL_MIN_Y && jblock_blocks_motion(b)) {
+                    of = y + 1;
+                }
+                if (ws != JFILL_MIN_Y && of != JFILL_MIN_Y) {
+                    break;
+                }
+            }
+            hm->world_surface[lz * 16 + lx] = ws;
+            hm->ocean_floor[lz * 16 + lx] = of;
+        }
+    }
+}
+
+/* Heightmap.update for one type. `matches` is the type's block predicate. */
+static void heightmap_update(int *cell, const uint8_t *blocks, int lx, int y, int lz, int state, bool (*matches)(int))
+{
+    int cur = *cell;
+    if (y <= cur - 2) {
+        return;
+    }
+    if (matches(state)) {
+        if (y >= cur) {
+            *cell = y + 1;
+        }
+    } else if (cur - 1 == y) {
+        for (int yy = y - 1; yy >= JFILL_MIN_Y; --yy) {
+            if (matches(blocks[JFILL_INDEX(lx, lz, yy)])) {
+                *cell = yy + 1;
+                return;
+            }
+        }
+        *cell = JFILL_MIN_Y;
+    }
+}
+
+static bool not_air(int b)
+{
+    return !jblock_is_air(b);
+}
+
+void jheightmaps_update(JHeightmaps *hm, const uint8_t *blocks, int lx, int y, int lz, int state)
+{
+    heightmap_update(&hm->ocean_floor[lz * 16 + lx], blocks, lx, y, lz, state, jblock_blocks_motion);
+    heightmap_update(&hm->world_surface[lz * 16 + lx], blocks, lx, y, lz, state, not_air);
+}
+
+int jheightmaps_world_surface_height(const JHeightmaps *hm, int lx, int lz)
+{
+    return hm->world_surface[lz * 16 + lx] - 1;
+}
+
+int jheightmaps_ocean_floor_height(const JHeightmaps *hm, int lx, int lz)
+{
+    return hm->ocean_floor[lz * 16 + lx] - 1;
 }
 
 JAquifer *jaquifer_create(JChunk *chunk)

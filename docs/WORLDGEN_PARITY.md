@@ -42,8 +42,8 @@ therefore produces unrelated terrain to vanilla.
 | 4a. `NoiseChunk` wrapping: 4x8x4 cell interpolation of `interpolated` nodes (Mth.lerp3 form of the CacheAllInCell fill and the Y,X,Z chain form), `FlatCache` quart lattice, corner memo | **Pass**: bit-exact per-block final density for 40 chunks (8 seeds x 5 chunks, all 24 sections, 3.9 M values): 960 section hashes, 0 mismatches |
 | 4b. `Aquifer.NoiseBasedAquifer` (nearest-4 aquifer centres on the 16x12x16 grid, `computeFluid` with the 13 surface-sampling offsets, surface level via floodedness/spread/erosion/depth, lava noise, barrier pressure), `OreVeinifier` (copper/iron veins, granite/tuff filler, raw ore blocks), material rule list and default block - i.e. `doFill` block states | **Pass**: 128 chunks (8 seeds x 16 chunks, 12.6 M blocks: air, stone, water, lava, tuff, granite, copper/iron ore, raw copper/iron blocks): per-section hashes of density bits, solid mask and block names (3,072 section triples) all identical, 0 mismatches. Debug and Release |
 | 4c. Carvers: `CaveWorldCarver` (cave, cave_extra_underground), `CanyonWorldCarver`, `CarvingMask`, `WorldgenRandom.setLargeFeatureSeed`, float/height providers, lava level, aquifer fluid in carved blocks, `applyCarvers` 17 x 17 neighbour loop | **Pass**: the same 128 chunks as 4b after carving (12.6 M blocks): 3,072 per-section block-name hashes, 3,072 per-section carving-mask hashes and 384 per-carver start counts identical (395 sections change relative to the uncarved fill, 696 sections have mask bits), 0 mismatches. Debug and Release. Reference carves with the real biome source; all 54 overworld biomes list the same three carvers |
-| 5. Surface rules, bedrock, heightmaps | Not started |
-| 6. Features / decorators / structures | Not started |
+| 5. `SurfaceSystem.buildSurface` with the `SurfaceRules` interpreter driven by the overworld `surface_rule` JSON (bedrock floor and deepslate transition via `vertical_gradient`, grass/dirt/sand/gravel/mud/podzol/mycelium/calcite/powder-snow top layers, clay-band badlands, ice/packed-ice/snow, `steep`, `hole`, `water`, `y_above`, `stone_depth` incl. the secondary-noise range, `noise_threshold`, `temperature`, `above_preliminary_surface`), eroded-badlands pillars, frozen-ocean icebergs, generation heightmaps (`WORLD_SURFACE_WG`, `OCEAN_FLOOR_WG` incl. `Heightmap.update` rescans), `BiomeManager.getBiome` (SHA-256 `obfuscateSeed`, hashed 8-corner zoom) over per-chunk stored biomes, `Biome.getTemperature` with `PerlinSimplexNoise`, and the carver top-material swap (`CarvingContext.topMaterial`) | **Pass**: 200 chunks (8 seeds x 16 fixed chunks + 3 seeds x 24 chunks chosen so every special surface biome is hit: eroded/plain/wooded badlands, frozen and deep frozen ocean, ice spikes, jagged/frozen/stony peaks, snowy slopes, grove, swamp, mangrove swamp, desert, beaches, taiga variants, mushroom fields...). Per-section block-name hashes after the surface stage and after surface + carvers (4,800 each), carving-mask hashes (4,800), both heightmaps after each stage (800), 384 `getBiome` probes, 180 temperature floats, 120 simplex doubles: 72,198 comparisons in total for the whole harness, 0 mismatches, Debug and Release. Mutation checks (clay-band scale, badlands pillar base) are caught |
+| 6. Features / decorators / structures (incl. lighting, spawn) | Not started |
 | 7. Nether, End (End islands, legacy random source settings) | Not started |
 
 **Important:** stage 2 proves the *point-evaluated* router. It does not yet
@@ -57,11 +57,17 @@ game switches over.
    thread-local last result that decides exact distance ties, so biome results at ties depend on
    query order; the harness replays queries in the reference order. A world generator must
    therefore query in the same order as vanilla's chunk generation to be tie-exact.
+   The surface stage settles this the way vanilla does: biomes are stored per chunk once
+   (`ChunkAccess.fillBiomesFromNoise`: sections bottom to top, quarts in x, y, z order) and
+   `BiomeManager` only reads stored values (`jsurface_prepare_biomes` fills a chunk and its 8
+   neighbours in a fixed order). Both the C port and the reference harness use that order and
+   one R-tree per generation run. A frozen-ocean chunk in the first fixture draft exposed the
+   problem (a few columns resolved a tied biome differently); real vanilla has the same
+   thread-order sensitivity at exact ties, which a C port can only fix by fixing the order.
 4. ~~`NoiseChunk` density, aquifers, ore veins (`doFill`)~~ - done (exact; `jfill.c`).
-   ~~Carvers~~ - done (exact on the raw fill; `jcarver.c`). Not covered yet: the top-material swap when a
-   carver cuts through grass/mycelium (needs surface rules, so it is checked together with them).
-   Next: surface rules and bedrock.
-5. `SurfaceSystem` + surface rules, bedrock; heightmaps; compare.
+   ~~Carvers~~ - done (exact; `jcarver.c`), including the grass/mycelium top-material swap, which is checked
+   in the `pipeline_*` suites (fill -> surface -> carvers) together with the surface stage.
+5. ~~`SurfaceSystem` + surface rules, bedrock; heightmaps~~ - done (exact; `jsurface.c`). Next: features.
 6. Features, structures in vanilla's decoration order.
 7. Nether/End.
 

@@ -6,6 +6,7 @@
 #include "world/jfill.h"
 #include "world/jnoise.h"
 #include "world/jrandom.h"
+#include "world/jsurface.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -669,7 +670,7 @@ static void run_carvers(const char *dir, const char *datapack, Ctx *c)
                 memset(mask, 0, (size_t)16 * 16 * JFILL_HEIGHT);
                 JAquifer *aq = jaquifer_create(ch);
                 int starts[JCARVER_MAX];
-                if (aq != NULL && jchunk_carve(ch, cv, aq, blocks, mask, starts)) {
+                if (aq != NULL && jchunk_carve(ch, cv, aq, blocks, mask, starts, NULL)) {
                     have = true;
                     for (int m = 0; m < jcarvers_count(cv); ++m) {
                         int expect = 0;
@@ -723,6 +724,274 @@ static void run_carvers(const char *dir, const char *datapack, Ctx *c)
     fclose(f);
 }
 
+/* ---- surface stage -----------------------------------------------------------------------------
+ * surface.csv / pipeline.csv:   seed,chunk_x,chunk_z,section,name_hash[,mask_hash]
+ * surface_heights.csv / pipeline_heights.csv: seed,chunk_x,chunk_z,world_surface_hash,ocean_floor_hash
+ * biome_zoom.csv:   seed,x,y,z,biome       temperature.csv: biome,x,y,z,float_bits_hex
+ * simplex.csv:      noise,x,y,double_bits_hex */
+typedef struct Table {
+    char (*lines)[160];
+    int count;
+} Table;
+
+static Table load_table(const char *dir, const char *name, WorldgenParityStats *stats)
+{
+    Table t = {NULL, 0};
+    FILE *f = open_fixture(dir, name, stats);
+    if (f == NULL) {
+        return t;
+    }
+    int cap = 0;
+    char line[LINE_MAX_LEN];
+    fgets(line, sizeof(line), f);
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (t.count == cap) {
+            cap = cap != 0 ? cap * 2 : 1024;
+            t.lines = (char(*)[160])realloc(t.lines, (size_t)cap * 160);
+        }
+        snprintf(t.lines[t.count++], 160, "%s", line);
+    }
+    fclose(f);
+    return t;
+}
+
+static void free_table(Table *t)
+{
+    free(t->lines);
+    t->lines = NULL;
+    t->count = 0;
+}
+
+static uint64_t hash_names(const uint8_t *blocks, int sec)
+{
+    uint64_t hn = 1125899906842597ULL;
+    for (int yy = 0; yy < 16; ++yy) {
+        int y = -64 + sec * 16 + yy;
+        for (int zz = 0; zz < 16; ++zz) {
+            for (int xx = 0; xx < 16; ++xx) {
+                int b = blocks[JFILL_INDEX(xx, zz, y)];
+                hn = 31u * hn + (uint64_t)(int64_t)jr_java_string_hash(jfill_block_name((JFillBlock)b));
+            }
+        }
+    }
+    return hn;
+}
+
+static uint64_t hash_mask(const uint8_t *mask, int sec)
+{
+    uint64_t hm = 1125899906842597ULL;
+    for (int yy = 0; yy < 16; ++yy) {
+        int y = -64 + sec * 16 + yy;
+        for (int zz = 0; zz < 16; ++zz) {
+            for (int xx = 0; xx < 16; ++xx) {
+                hm = 31u * hm + (mask[JFILL_INDEX(xx, zz, y)] != 0 ? 1u : 0u);
+            }
+        }
+    }
+    return hm;
+}
+
+static void hash_heights(const JHeightmaps *hm, uint64_t *ws, uint64_t *of)
+{
+    uint64_t hw = 1125899906842597ULL, ho = 1125899906842597ULL;
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            hw = 31u * hw + (uint64_t)(int64_t)jheightmaps_world_surface_height(hm, x, z);
+            ho = 31u * ho + (uint64_t)(int64_t)jheightmaps_ocean_floor_height(hm, x, z);
+        }
+    }
+    *ws = hw;
+    *of = ho;
+}
+
+/* Find the row of a table matching a chunk (and, if sec >= 0, a section). */
+static bool find_row(const Table *t, const char *seed, int cx, int cz, int sec, char *fld_out[FIELDS_MAX], char *buf)
+{
+    for (int i = 0; i < t->count; ++i) {
+        snprintf(buf, 160, "%s", t->lines[i]);
+        if (split_csv(buf, fld_out) < 5) {
+            continue;
+        }
+        if (strcmp(fld_out[0], seed) == 0 && atoi(fld_out[1]) == cx && atoi(fld_out[2]) == cz &&
+            (sec < 0 || atoi(fld_out[3]) == sec)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void run_surface(const char *dir, const char *datapack, Ctx *c)
+{
+    Table pipe = load_table(dir, "pipeline.csv", c->stats);
+    Table surf = load_table(dir, "surface.csv", c->stats);
+    Table surf_h = load_table(dir, "surface_heights.csv", c->stats);
+    Table pipe_h = load_table(dir, "pipeline_heights.csv", c->stats);
+    Table zoom = load_table(dir, "biome_zoom.csv", c->stats);
+    Table temp = load_table(dir, "temperature.csv", c->stats);
+    Table simp = load_table(dir, "simplex.csv", c->stats);
+    if (datapack == NULL) {
+        c->stats->skipped += (uint64_t)(pipe.count + zoom.count + temp.count);
+    } else {
+        JCarvers *cv = jcarvers_load(datapack);
+        uint8_t *blocks = (uint8_t *)malloc((size_t)16 * 16 * JFILL_HEIGHT);
+        uint8_t *mask = (uint8_t *)malloc((size_t)16 * 16 * JFILL_HEIGHT);
+        char last_seed[32] = "";
+        JRandomState *rs = NULL;
+        JSurface *surface = NULL;
+        char cur[64] = "";
+        char buf[160];
+        char *fld[FIELDS_MAX];
+        int i = 0;
+        while (i < pipe.count) {
+            /* One chunk = 24 consecutive pipeline rows. */
+            snprintf(buf, sizeof(buf), "%s", pipe.lines[i]);
+            if (split_csv(buf, fld) < 6) {
+                ++i;
+                continue;
+            }
+            char seed[32];
+            snprintf(seed, sizeof(seed), "%s", fld[0]);
+            int cx = atoi(fld[1]), cz = atoi(fld[2]);
+            snprintf(cur, sizeof(cur), "%s/%d/%d", seed, cx, cz);
+            if (rs == NULL || strcmp(last_seed, seed) != 0) {
+                jsurface_free(surface);
+                jrs_destroy(rs);
+                rs = jrs_create(datapack, "overworld", (int64_t)strtoll(seed, NULL, 10));
+                surface = rs != NULL ? jsurface_create(rs) : NULL;
+                snprintf(last_seed, sizeof(last_seed), "%s", seed);
+            }
+            JChunk *ch = rs != NULL ? jchunk_create(rs, cx, cz) : NULL;
+            bool have_surface = false, have_pipe = false;
+            uint64_t s_name[24], p_name[24], p_mask[24], s_ws = 0, s_of = 0, p_ws = 0, p_of = 0;
+            JHeightmaps hm;
+            if (ch != NULL && surface != NULL && cv != NULL && blocks != NULL && mask != NULL && jchunk_fill(ch, blocks)) {
+                jheightmaps_prime(&hm, blocks);
+                if (jsurface_build(surface, ch, blocks, &hm)) {
+                    have_surface = true;
+                    for (int sec = 0; sec < 24; ++sec) {
+                        s_name[sec] = hash_names(blocks, sec);
+                    }
+                    hash_heights(&hm, &s_ws, &s_of);
+                    JAquifer *aq = jaquifer_create(ch);
+                    JSurfaceTopUser top = {surface, ch, blocks, &hm};
+                    JCarveSurface cs = {&hm, jsurface_top_material, &top};
+                    memset(mask, 0, (size_t)16 * 16 * JFILL_HEIGHT);
+                    if (aq != NULL && jchunk_carve(ch, cv, aq, blocks, mask, NULL, &cs)) {
+                        have_pipe = true;
+                        for (int sec = 0; sec < 24; ++sec) {
+                            p_name[sec] = hash_names(blocks, sec);
+                            p_mask[sec] = hash_mask(mask, sec);
+                        }
+                        hash_heights(&hm, &p_ws, &p_of);
+                    }
+                    jaquifer_free(aq);
+                }
+            }
+            char label[96];
+            char rbuf[160];
+            char *rf[FIELDS_MAX];
+            for (int sec = 0; sec < 24; ++sec) {
+                snprintf(label, sizeof(label), "%s/sec%d", cur, sec);
+                c->suite = "surface_blocks";
+                if (find_row(&surf, seed, cx, cz, sec, rf, rbuf)) {
+                    uint64_t e = (uint64_t)strtoll(rf[4], NULL, 10);
+                    record(c, label, e, have_surface ? s_name[sec] : ~e);
+                }
+                c->suite = "pipeline_blocks";
+                if (find_row(&pipe, seed, cx, cz, sec, rf, rbuf)) {
+                    uint64_t e = (uint64_t)strtoll(rf[4], NULL, 10);
+                    record(c, label, e, have_pipe ? p_name[sec] : ~e);
+                    c->suite = "pipeline_mask";
+                    uint64_t em = (uint64_t)strtoll(rf[5], NULL, 10);
+                    record(c, label, em, have_pipe ? p_mask[sec] : ~em);
+                }
+            }
+            if (find_row(&surf_h, seed, cx, cz, -1, rf, rbuf)) {
+                c->suite = "surface_heights";
+                uint64_t ew = (uint64_t)strtoll(rf[3], NULL, 10), eo = (uint64_t)strtoll(rf[4], NULL, 10);
+                record(c, cur, ew, have_surface ? s_ws : ~ew);
+                record(c, cur, eo, have_surface ? s_of : ~eo);
+            }
+            if (find_row(&pipe_h, seed, cx, cz, -1, rf, rbuf)) {
+                c->suite = "pipeline_heights";
+                uint64_t ew = (uint64_t)strtoll(rf[3], NULL, 10), eo = (uint64_t)strtoll(rf[4], NULL, 10);
+                record(c, cur, ew, have_pipe ? p_ws : ~ew);
+                record(c, cur, eo, have_pipe ? p_of : ~eo);
+            }
+            jchunk_free(ch);
+            /* Skip this chunk's rows. */
+            while (i < pipe.count) {
+                snprintf(buf, sizeof(buf), "%s", pipe.lines[i]);
+                if (split_csv(buf, fld) < 6 || strcmp(fld[0], seed) != 0 || atoi(fld[1]) != cx || atoi(fld[2]) != cz) {
+                    break;
+                }
+                ++i;
+            }
+        }
+        free(blocks);
+        free(mask);
+        jcarvers_free(cv);
+        jsurface_free(surface);
+        jrs_destroy(rs);
+
+        /* BiomeManager.getBiome probes, per seed. */
+        c->suite = "biome_zoom";
+        rs = NULL;
+        surface = NULL;
+        last_seed[0] = '\0';
+        for (int r = 0; r < zoom.count; ++r) {
+            snprintf(buf, sizeof(buf), "%s", zoom.lines[r]);
+            if (split_csv(buf, fld) < 5) {
+                continue;
+            }
+            if (rs == NULL || strcmp(last_seed, fld[0]) != 0) {
+                jsurface_free(surface);
+                jrs_destroy(rs);
+                rs = jrs_create(datapack, "overworld", (int64_t)strtoll(fld[0], NULL, 10));
+                surface = rs != NULL ? jsurface_create(rs) : NULL;
+                snprintf(last_seed, sizeof(last_seed), "%s", fld[0]);
+            }
+            uint64_t e = (uint64_t)(int64_t)jr_java_string_hash(fld[4]);
+            const char *got = surface != NULL ? jsurface_biome_at(surface, atoi(fld[1]), atoi(fld[2]), atoi(fld[3])) : NULL;
+            record(c, zoom.lines[r], e, got != NULL ? (uint64_t)(int64_t)jr_java_string_hash(got) : ~e);
+        }
+        /* Biome.getTemperature probes (seed independent). */
+        c->suite = "biome_temperature";
+        for (int r = 0; r < temp.count; ++r) {
+            snprintf(buf, sizeof(buf), "%s", temp.lines[r]);
+            if (split_csv(buf, fld) < 5) {
+                continue;
+            }
+            uint32_t e = (uint32_t)hex64(fld[4]);
+            float got = surface != NULL ? jsurface_biome_temperature(surface, fld[0], atoi(fld[1]), atoi(fld[2]), atoi(fld[3])) : 0.0f;
+            record(c, temp.lines[r], e, surface != NULL ? float_bits(got) : ~(uint64_t)e);
+        }
+        jsurface_free(surface);
+        jrs_destroy(rs);
+    }
+    /* PerlinSimplexNoise probes (no data pack needed). */
+    c->suite = "simplex_noise";
+    {
+        char buf[160];
+        char *fld[FIELDS_MAX];
+        for (int r = 0; r < simp.count; ++r) {
+            snprintf(buf, sizeof(buf), "%s", simp.lines[r]);
+            if (split_csv(buf, fld) < 4) {
+                continue;
+            }
+            record(c, simp.lines[r], hex64(fld[3]),
+                   double_bits(jsurface_simplex_noise(atoi(fld[0]), strtod(fld[1], NULL), strtod(fld[2], NULL))));
+        }
+    }
+    free_table(&pipe);
+    free_table(&surf);
+    free_table(&surf_h);
+    free_table(&pipe_h);
+    free_table(&zoom);
+    free_table(&temp);
+    free_table(&simp);
+}
+
 uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root, FILE *report,
                              WorldgenParityStats *stats)
 {
@@ -747,5 +1016,6 @@ uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root,
     run_biomes(fixture_dir, datapack_root, &c);
     run_chunks(fixture_dir, datapack_root, &c);
     run_carvers(fixture_dir, datapack_root, &c);
+    run_surface(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }

@@ -1016,6 +1016,21 @@ int jrs_sea_level(const JRandomState *rs)
     return rs != NULL ? rs->sea_level : 63;
 }
 
+const JrPositional *jrs_random(const JRandomState *rs)
+{
+    return &rs->random;
+}
+
+const char *jrs_root(const JRandomState *rs)
+{
+    return rs->root;
+}
+
+const struct JNormalNoise *jrs_noise(JRandomState *rs, const char *id)
+{
+    return get_noise(rs, id);
+}
+
 const JrPositional *jrs_aquifer_random(const JRandomState *rs)
 {
     return &rs->aquifer_rand;

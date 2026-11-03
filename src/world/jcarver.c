@@ -384,6 +384,8 @@ typedef struct Ctx {
     uint8_t *blocks;
     uint8_t *mask;
     int min_x, min_z;
+    const JCarveSurface *surface;
+    bool top_flag;  /* the MutableBoolean carveEllipsoid creates per (x, z) column */
 } Ctx;
 
 static bool skip_block(const Skip *s, double dx, double dy, double dz, int y)
@@ -398,11 +400,25 @@ static bool skip_block(const Skip *s, double dx, double dy, double dz, int y)
     return (dx * dx + dz * dz) * (double)s->width[k - 1] + dy * dy / 6.0 >= 1.0;
 }
 
-/* WorldCarver.carveBlock for a raw-fill chunk (no grass/mycelium top-swap). */
+/* ChunkAccess.setBlockState: block array plus both generation heightmaps. */
+static void chunk_set(Ctx *c, int lx, int y, int lz, int state)
+{
+    c->blocks[JFILL_INDEX(lx, lz, y)] = (uint8_t)state;
+    if (c->surface != NULL && c->surface->heightmaps != NULL) {
+        jheightmaps_update(c->surface->heightmaps, c->blocks, lx, y, lz, state);
+    }
+}
+
+/* WorldCarver.carveBlock. With a surface context, a carved grass/mycelium column
+ * re-runs the surface rules for the dirt below (CarvingContext.topMaterial). */
 static bool carve_block(Ctx *c, int lx, int y, int lz, int x, int z)
 {
     int idx = JFILL_INDEX(lx, lz, y);
-    if (!c->replaceable[c->blocks[idx]]) {
+    int cur = c->blocks[idx];
+    if (cur == JB_GRASS_BLOCK || cur == JB_MYCELIUM) {
+        c->top_flag = true;
+    }
+    if (!c->replaceable[cur]) {
         return false;
     }
     int state;
@@ -414,7 +430,14 @@ static bool carve_block(Ctx *c, int lx, int y, int lz, int x, int z)
             return false;
         }
     }
-    c->blocks[idx] = (uint8_t)state;
+    chunk_set(c, lx, y, lz, state);
+    if (c->top_flag && c->surface != NULL && c->surface->top_material != NULL && y - 1 >= MIN_GEN_Y &&
+        c->blocks[JFILL_INDEX(lx, lz, y - 1)] == JB_DIRT) {
+        int top = c->surface->top_material(c->surface->user, x, y - 1, z, jblock_is_fluid(state));
+        if (top >= 0) {
+            chunk_set(c, lx, y - 1, lz, top);
+        }
+    }
     return true;
 }
 
@@ -461,6 +484,7 @@ static bool carve_ellipsoid(Ctx *c, double x, double y, double z, double hr, dou
             if (g * g + h * h >= 1.0) {
                 continue;
             }
+            c->top_flag = false;
             for (int u = y1; u > y0; --u) {
                 double v = ((double)u - 0.5 - y) / vr;
                 if (skip_block(skip, g, v, h, u)) {
@@ -668,7 +692,7 @@ static void set_large_feature_seed(JrRandom *r, int64_t seed, int cx, int cz)
 }
 
 bool jchunk_carve(JChunk *chunk, const JCarvers *cv, JAquifer *aquifer, uint8_t *blocks, uint8_t *mask,
-                  int starts[JCARVER_MAX])
+                  int starts[JCARVER_MAX], const JCarveSurface *surface)
 {
     if (chunk == NULL || cv == NULL || aquifer == NULL || blocks == NULL) {
         return false;
@@ -702,7 +726,7 @@ bool jchunk_carve(JChunk *chunk, const JCarvers *cv, JAquifer *aquifer, uint8_t 
                 if (starts != NULL) {
                     starts[m]++;
                 }
-                Ctx ctx = {cfg, cv->replaceable, aquifer, blocks, mask, jchunk_min_x(chunk), jchunk_min_z(chunk)};
+                Ctx ctx = {cfg, cv->replaceable, aquifer, blocks, mask, jchunk_min_x(chunk), jchunk_min_z(chunk), surface, false};
                 if (cfg->kind == CARVER_CAVE) {
                     cave_carve(&ctx, &rnd, sx * 16, sz * 16);
                 } else {

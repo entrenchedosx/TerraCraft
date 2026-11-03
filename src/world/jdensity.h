@@ -60,3 +60,10 @@ const JrPositional *jrs_ore_random(const JRandomState *rs);
 const JRandomState *jchunk_state(const JChunk *c);
 int jchunk_min_x(const JChunk *c);
 int jchunk_min_z(const JChunk *c);
+
+/* RandomState extras used by the surface stage. */
+const JrPositional *jrs_random(const JRandomState *rs);       /* RandomState.random (root factory) */
+const char *jrs_root(const JRandomState *rs);                  /* data pack root given to jrs_create */
+struct JNormalNoise;
+/* RandomState.getOrCreateNoise("minecraft:surface"); NULL if the noise file is missing. */
+const struct JNormalNoise *jrs_noise(JRandomState *rs, const char *id);
