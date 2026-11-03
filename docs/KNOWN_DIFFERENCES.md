@@ -59,6 +59,6 @@ Walking, swimming and falling run the vanilla 20 TPS model (see
   `worldgen_diff`; the game still uses its own terrain profiles.
 - The core tracks block *names*, not block states (no `axis`, `half`, `distance`, `waterlogged`, ...) and caps the registry at
   255 names; leaf decay distances, double-plant halves and similar properties are therefore absent.
-- Features implemented and verified: ores, 22 vegetation patch features, structure-set placement. Trees and most other feature
-  types, structure piece generation, strongholds (concentric rings), Nether and End are not implemented.
+- Features implemented and verified: ores, 22 vegetation patch features, 32 of 39 tree configurations (all except cherry, mangrove, pale oak), structure-set placement. Fallen trees, the other feature types, structure piece generation,
+  strongholds (concentric rings), Nether and End are not implemented.
 - See [WORLDGEN_PARITY.md](WORLDGEN_PARITY.md) for the per-stage evidence.

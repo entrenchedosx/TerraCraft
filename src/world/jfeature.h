@@ -31,11 +31,16 @@ const char *jfeatures_step_feature(const JFeatures *f, int step, int index);
 
 /* The generation region around the decorated chunk: 3 x 3 chunks, index (dz + 1) * 3 + (dx + 1),
  * each with its block array (JFILL_INDEX layout) and generation heightmaps. */
+typedef struct JPostHeightmaps JPostHeightmaps;
 typedef struct JRegion {
     int target_x, target_z;
     uint8_t *blocks[9];
     JHeightmaps *heightmaps[9];
+    /* Heightmaps primed at the start of decoration (managed by jfeatures_*; zero-initialise the region). */
+    JPostHeightmaps *post;
 } JRegion;
+/* Drop the primed post-feature heightmaps; call before the region's blocks are rebuilt. */
+void jfeatures_region_reset(JRegion *r);
 
 /* applyBiomeDecoration for the target chunk, restricted to placed features whose configured feature
  * type is in `types` (e.g. {"minecraft:ore"}); seed is the world seed. Returns false if an allowed
@@ -45,3 +50,17 @@ bool jfeatures_decorate(JFeatures *f, JSurface *surface, int64_t seed, JRegion *
                         int type_count, const char *const *names, int name_count);
 /* Number of blocks changed by the most recent decorate call. */
 int jfeatures_last_changed(const JFeatures *f);
+
+/* One block of a placement whose name differs from before the placement. */
+typedef struct JBlockChange {
+    int x, y, z;
+    int block;
+} JBlockChange;
+
+/* Differential-test hook: place the configured feature `name` (e.g. "minecraft:oak") at (x, y, z) with
+ * the random source seeded like WorldgenRandom.setFeatureSeed(feature_seed, 0, 0), straight through
+ * ConfiguredFeature.place (no placement modifiers). Returns 1 if placed, 0 if not, -1 if the feature uses
+ * something that is not ported. The blocks whose id changed are written to `out` sorted by (x, y, z); *count
+ * receives their number (which may exceed `cap`). */
+int jfeatures_place_configured(JFeatures *f, JSurface *surface, JRegion *region, const char *name, int64_t feature_seed,
+                               int x, int y, int z, JBlockChange *out, int cap, int *count);

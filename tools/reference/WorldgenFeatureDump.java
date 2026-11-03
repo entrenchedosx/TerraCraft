@@ -36,6 +36,79 @@ public class WorldgenFeatureDump {
     static java.util.Set<String> NAMES = null;
     static final int[][] TARGETS = {{0, 0}, {-1, -1}, {5, -7}, {31, 12}, {-20, 3}, {100, 100}};
 
+    static final Map<String, Object> T_TREES = new java.util.TreeMap<>();
+    static Method T_PLACE, T_HEIGHT, T_GETSTATE, T_SEED, T_SETBLOCK;
+    static Object T_OFWG;
+    static java.lang.reflect.Constructor<?> T_BP;
+
+    /** Sort key of a block position: lexicographic (x, y, z). */
+    static long touchKey(int x, int y, int z) {
+        return ((long) (x + (1 << 20)) << 31) | ((long) (y + 512) << 21) | (long) (z + (1 << 20));
+    }
+
+    /**
+     * Places every selected configured feature at K fixed columns of the target chunk (each with its own
+     * feature seed) and writes one row per placement: the placement result and a hash of every block whose
+     * name changed (sorted by x, y, z).
+     */
+    static void runTreeTest(PrintStream out, long seed, int tx, int tz, Object level, Object generator, Map<Long, Object> touched) throws Exception {
+        int kCount = System.getenv("TREE_K") != null ? Integer.parseInt(System.getenv("TREE_K")) : 12;
+        int ti = 0;
+        for (Map.Entry<String, Object> e : T_TREES.entrySet()) {
+            for (int k = 0; k < kCount; k++) {
+                int x = tx * 16 + (k * 7 + 3) % 16;
+                int z = tz * 16 + (k * 11 + 5) % 16;
+                int y = (Integer) T_HEIGHT.invoke(level, T_OFWG, x, z);
+                Object random = WorldgenCarverDump.construct("net.minecraft.world.level.levelgen.WorldgenRandom", 1,
+                        WorldgenRefDump.cls("net.minecraft.world.level.levelgen.XoroshiroRandomSource").getConstructor(long.class).newInstance(0L));
+                T_SEED.invoke(random, 777000L + ti * 1000L + k, 0, 0);
+                touched.clear();
+                boolean placed = (Boolean) T_PLACE.invoke(e.getValue(), level, generator, random, T_BP.newInstance(x, y, z));
+                long hash = 1125899906842597L;
+                int count = 0;
+                for (Map.Entry<Long, Object> t : touched.entrySet()) {
+                    long key = t.getKey();
+                    int bx = (int) (key >> 31) - (1 << 20), by = (int) ((key >> 21) & 1023) - 512, bz = (int) (key & ((1 << 21) - 1)) - (1 << 20);
+                    String now = WorldgenCarverDump.blockName(T_GETSTATE.invoke(level, T_BP.newInstance(bx, by, bz)));
+                    if (now.equals(WorldgenCarverDump.blockName(t.getValue()))) continue;
+                    hash = 31 * hash + bx;
+                    hash = 31 * hash + by;
+                    hash = 31 * hash + bz;
+                    hash = 31 * hash + now.hashCode();
+                    count++;
+                }
+                out.printf("%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d%n", seed, tx, tz, e.getKey(), k, x, y, z, placed ? 1 : 0, count, hash, 777000L + ti * 1000L + k);
+                String dumpSpec = System.getenv("TREE_DUMP"); // seed,tx,tz,tree,k,file
+                if (dumpSpec != null) {
+                    String[] ds = dumpSpec.split(",");
+                    if (Long.parseLong(ds[0]) == seed && Integer.parseInt(ds[1]) == tx && Integer.parseInt(ds[2]) == tz && ds[3].equals(e.getKey()) && Integer.parseInt(ds[4]) == k) {
+                        try (PrintStream fo = new PrintStream(ds[5])) {
+                            fo.println("x,y,z,block");
+                            for (Map.Entry<Long, Object> t : touched.entrySet()) {
+                                long key = t.getKey();
+                                int bx = (int) (key >> 31) - (1 << 20), by = (int) ((key >> 21) & 1023) - 512, bz = (int) (key & ((1 << 21) - 1)) - (1 << 20);
+                                String now = WorldgenCarverDump.blockName(T_GETSTATE.invoke(level, T_BP.newInstance(bx, by, bz)));
+                                if (!now.equals(WorldgenCarverDump.blockName(t.getValue()))) fo.printf("%d,%d,%d,%s%n", bx, by, bz, now);
+                            }
+                        }
+                        System.err.println("tree dump feature seed " + (777000L + ti * 1000L + k));
+                    }
+                }
+                // restore the world so every placement is independent of the others
+                java.util.List<Map.Entry<Long, Object>> undo = new java.util.ArrayList<>(touched.entrySet());
+                touched.clear();
+                for (Map.Entry<Long, Object> t : undo) {
+                    long key = t.getKey();
+                    int bx = (int) (key >> 31) - (1 << 20), by = (int) ((key >> 21) & 1023) - 512, bz = (int) (key & ((1 << 21) - 1)) - (1 << 20);
+                    T_SETBLOCK.invoke(level, T_BP.newInstance(bx, by, bz), t.getValue(), 3);
+                }
+                touched.clear();
+            }
+            ti++;
+        }
+        out.flush();
+    }
+
     static Object call(String cls, String name, String args, Object target, Object... a) throws Exception {
         return WorldgenRefDump.method(cls, name, args).invoke(target, a);
     }
@@ -296,13 +369,55 @@ public class WorldgenFeatureDump {
             }
         });
 
+        if (System.getenv("TREE_TEST") != null) {
+            // Direct per-configured-feature test: every configured feature of type TREE_TYPE (default tree).
+            String wantType = System.getenv("TREE_TYPE") != null ? System.getenv("TREE_TYPE") : "minecraft:tree";
+            String treeNames = System.getenv("TREE_NAMES");
+            java.util.Set<String> wantNames = treeNames != null ? new java.util.HashSet<>(java.util.Arrays.asList(treeNames.split(","))) : null;
+            Object cfReg = field("net.minecraft.core.registries.Registries", "CONFIGURED_FEATURE", null);
+            Object cfLookup = call("net.minecraft.core.HolderGetter$Provider", "lookupOrThrow", "net.minecraft.resources.ResourceKey", provider, cfReg);
+            ((java.util.stream.Stream<?>) listElements.invoke(cfLookup)).forEach(h -> {
+                try {
+                    Object cfObj = biomeValue.invoke(h);
+                    String type = String.valueOf(regGetKey.invoke(featureRegistry, cfFeature.invoke(cfObj)));
+                    String id = String.valueOf(keyLoc.invoke(refKey.invoke(h)));
+                    String skip = System.getenv("TREE_SKIP");
+                    boolean skipped = skip != null && java.util.Arrays.asList(skip.split(",")).contains(id);
+                    if (type.equals(wantType) && !skipped && (wantNames == null || wantNames.contains(id))) T_TREES.put(id, cfObj);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            T_PLACE = WorldgenRefDump.method("net.minecraft.world.level.levelgen.feature.ConfiguredFeature", "place",
+                    "net.minecraft.world.level.WorldGenLevel,net.minecraft.world.level.chunk.ChunkGenerator,net.minecraft.util.RandomSource,net.minecraft.core.BlockPos");
+            T_HEIGHT = WorldgenRefDump.method("net.minecraft.world.level.LevelReader", "getHeight", HM_TYPES + ",int,int");
+            T_GETSTATE = WorldgenRefDump.method("net.minecraft.world.level.BlockGetter", "getBlockState", "net.minecraft.core.BlockPos");
+            T_SETBLOCK = WorldgenRefDump.method("net.minecraft.world.level.LevelWriter", "setBlock", "net.minecraft.core.BlockPos,net.minecraft.world.level.block.state.BlockState,int");
+            T_OFWG = OFWG;
+            T_BP = bpCtor;
+            T_SEED = setFeatureSeed;
+            System.err.println("tree test: " + T_TREES.size() + " configured features of type " + wantType);
+        }
+
+        final Class<?> entityBlockC = WorldgenRefDump.cls("net.minecraft.world.level.block.EntityBlock");
+        final Method newBlockEntity = WorldgenRefDump.method("net.minecraft.world.level.block.EntityBlock", "newBlockEntity", "net.minecraft.core.BlockPos,net.minecraft.world.level.block.state.BlockState");
+        final Method bsGetBlock = WorldgenRefDump.method("net.minecraft.world.level.block.state.BlockBehaviour$BlockStateBase", "getBlock", "");
+        final Method bsFluidState = WorldgenRefDump.method("net.minecraft.world.level.block.state.BlockBehaviour$BlockStateBase", "getFluidState", "");
         // ---- WorldGenLevel stand-in --------------------------------------------------------------------------
         String WGL = "net.minecraft.world.level.WorldGenLevel";
         Map<String, String> sigToMoj = new HashMap<>();
         String[][] wanted = {
                 {"net.minecraft.world.level.LevelReader", "getChunk", "int,int"},
-                {"net.minecraft.world.level.BlockGetter", "getBlockState", "net.minecraft.core.BlockPos"},
                 {"net.minecraft.world.level.BlockGetter", "getFluidState", "net.minecraft.core.BlockPos"},
+                {"net.minecraft.world.level.LevelAccessor", "getRandom", ""},
+                {"net.minecraft.world.level.BlockGetter", "getBlockEntity", "net.minecraft.core.BlockPos"},
+                {"net.minecraft.world.level.LevelAccessor", "getLevelData", ""},
+                {"net.minecraft.world.level.LevelAccessor", "nextSubTickCount", ""},
+                {"net.minecraft.world.level.ScheduledTickAccess", "getFluidTicks", ""},
+                {"net.minecraft.world.level.ScheduledTickAccess", "getBlockTicks", ""},
+                {"net.minecraft.world.level.LevelSimulatedReader", "isStateAtPosition", "net.minecraft.core.BlockPos,java.util.function.Predicate"},
+                {"net.minecraft.world.level.LevelSimulatedReader", "isFluidAtPosition", "net.minecraft.core.BlockPos,java.util.function.Predicate"},
+                {"net.minecraft.world.level.BlockGetter", "getBlockState", "net.minecraft.core.BlockPos"},
                 {"net.minecraft.world.level.LevelWriter", "setBlock", "net.minecraft.core.BlockPos,net.minecraft.world.level.block.state.BlockState,int"},
                 {"net.minecraft.world.level.LevelWriter", "setBlock", "net.minecraft.core.BlockPos,net.minecraft.world.level.block.state.BlockState,int,int"},
                 {"net.minecraft.world.level.LevelReader", "getHeight", HM_TYPES + ",int,int"},
@@ -338,9 +453,11 @@ public class WorldgenFeatureDump {
             sigToMoj.put(sb.append(')').toString(), w[1] + "/" + w[2].split(",").length);
         }
 
-        try (PrintStream order = new PrintStream(outDir.resolve("feature_order" + tag + ".csv").toFile());
+        try (PrintStream treeRows = System.getenv("TREE_TEST") != null ? new PrintStream(outDir.resolve("trees" + tag + ".csv").toFile()) : null;
+             PrintStream order = new PrintStream(outDir.resolve("feature_order" + tag + ".csv").toFile());
              PrintStream rows = new PrintStream(outDir.resolve("features" + tag + ".csv").toFile());
              PrintStream stats = new PrintStream(outDir.resolve("feature_stats" + tag + ".csv").toFile())) {
+            if (treeRows != null) treeRows.println("seed,target_x,target_z,tree,k,x,y,z,placed,count,hash,feature_seed");
             order.println("step,index,placed_feature");
             rows.println("seed,target_x,target_z,dx,dz,section,name_hash");
             stats.println("seed,target_x,target_z,placed_feature,calls,placed");
@@ -372,7 +489,18 @@ public class WorldgenFeatureDump {
                 };
                 Map<Long, Object> chunkCache = new HashMap<>();
 
-                for (int[] tc : TARGETS) {
+                java.util.List<int[]> targetList = new ArrayList<>();
+                if (System.getenv("FEATURE_TARGETS") != null) {
+                    // FEATURE_TARGETS="seed:x,z;seed:x,z": decorate these targets instead of the default six
+                    for (String t : System.getenv("FEATURE_TARGETS").split(";")) {
+                        String[] sp = t.split(":");
+                        String[] xz = sp[1].split(",");
+                        if (Long.parseLong(sp[0]) == seed) targetList.add(new int[]{Integer.parseInt(xz[0]), Integer.parseInt(xz[1])});
+                    }
+                } else {
+                    for (int[] tc0 : TARGETS) targetList.add(tc0);
+                }
+                for (int[] tc : targetList) {
                     int tx = tc[0], tz = tc[1];
                     // ---- region of 3 x 3 pipeline chunks ------------------------------------------------------------
                     Map<Long, Object> region = new HashMap<>();
@@ -468,6 +596,8 @@ public class WorldgenFeatureDump {
                     // each target uses a fresh cache entry set) that this does not matter. Clear the cache.
                     final Map<Long, Object> regionF = region;
                     final int minXr = (tx - 1) * 16, maxXr = (tx + 2) * 16 - 1, minZr = (tz - 1) * 16, maxZr = (tz + 2) * 16 - 1;
+                    final Map<Long, Object> touched = new java.util.TreeMap<>();
+                    final Map<Long, Object> blockEntities = new HashMap<>();
                     final Function<Object, int[]> posOf = pos -> {
                         try {
                             return new int[]{(Integer) pos.getClass().getMethod(WorldgenRefDump.METHOD_OBF.get("net.minecraft.core.Vec3i#getX()")).invoke(pos),
@@ -487,7 +617,11 @@ public class WorldgenFeatureDump {
                             if (m.getName().equals("hashCode")) return 1;
                             if (m.getName().equals("equals")) return proxy == a[0];
                             if (m.getName().equals("toString")) return "levelProxy";
-                            throw new UnsupportedOperationException("WorldGenLevel." + sig);
+                            if (m.isDefault()) return InvocationHandler.invokeDefault(proxy, m, a);
+                            StringBuilder cand = new StringBuilder();
+                            for (Map.Entry<String, String> me : WorldgenRefDump.METHOD_OBF.entrySet())
+                                if (me.getValue().equals(m.getName()) && me.getKey().contains("Level")) cand.append(' ').append(me.getKey());
+                            throw new UnsupportedOperationException("WorldGenLevel." + sig + " candidates:" + cand);
                         }
                         String name = moj.substring(0, moj.indexOf('/'));
                         switch (name) {
@@ -506,10 +640,65 @@ public class WorldgenFeatureDump {
                                 if (p[1] < minY || p[1] >= minY + height) return airState;
                                 return chunkGetState.invoke(regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL)), a[0]);
                             }
+                            case "getFluidTicks":
+                            case "getBlockTicks":
+                                return WorldgenCarverDump.proxy("net.minecraft.world.ticks.LevelTickAccess", (tp, tm, ta) -> {
+                                    if (tm.getReturnType() == boolean.class) return false;
+                                    if (tm.getReturnType() == int.class) return 0;
+                                    return null;
+                                });
+                            case "getLevelData":
+                                return WorldgenCarverDump.proxy("net.minecraft.world.level.storage.LevelData", (tp, tm, ta) -> {
+                                    Class<?> rt = tm.getReturnType();
+                                    if (rt == boolean.class) return false;
+                                    if (rt == int.class) return 0;
+                                    if (rt == long.class) return 0L;
+                                    if (rt == float.class) return 0f;
+                                    if (rt == double.class) return 0d;
+                                    return null;
+                                });
+                            case "nextSubTickCount": return 0L;
+                            case "getBlockEntity": {
+                                // WorldGenRegion.getBlockEntity: the ProtoChunk only stores a stub, the entity is created on demand
+                                int[] p = posOf.apply(a[0]);
+                                if (p[1] < minY || p[1] >= minY + height) return null;
+                                Long bk = touchKey(p[0], p[1], p[2]);
+                                if (blockEntities.containsKey(bk)) return blockEntities.get(bk);
+                                Object st = chunkGetState.invoke(regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL)), a[0]);
+                                Object blk = bsGetBlock.invoke(st);
+                                if (!entityBlockC.isInstance(blk)) return null;
+                                Object be = newBlockEntity.invoke(blk, a[0], st);
+                                blockEntities.put(bk, be);
+                                return be;
+                            }
+                            case "getRandom":
+                                return WorldgenCarverDump.construct("net.minecraft.world.level.levelgen.LegacyRandomSource", 1, 0L);
+                            case "getFluidState": {
+                                int[] p = posOf.apply(a[0]);
+                                Object st = p[1] < minY || p[1] >= minY + height ? airState
+                                        : chunkGetState.invoke(regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL)), a[0]);
+                                return bsFluidState.invoke(st);
+                            }
+                            case "isStateAtPosition": {
+                                int[] p = posOf.apply(a[0]);
+                                Object st = p[1] < minY || p[1] >= minY + height ? airState
+                                        : chunkGetState.invoke(regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL)), a[0]);
+                                return ((java.util.function.Predicate<Object>) a[1]).test(st);
+                            }
+                            case "isFluidAtPosition": {
+                                int[] p = posOf.apply(a[0]);
+                                Object st = p[1] < minY || p[1] >= minY + height ? airState
+                                        : chunkGetState.invoke(regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL)), a[0]);
+                                return ((java.util.function.Predicate<Object>) a[1]).test(bsFluidState.invoke(st));
+                            }
                             case "setBlock": {
                                 int[] p = posOf.apply(a[0]);
                                 if (p[1] < minY || p[1] >= minY + height) return false;
-                                chunkSetState.invoke(regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL)), a[0], a[1], (Integer) a[2]);
+                                if (p[0] < minXr || p[0] > maxXr || p[2] < minZr || p[2] > maxZr) return false;
+                                Object wch = regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL));
+                                long tk = touchKey(p[0], p[1], p[2]);
+                                if (!touched.containsKey(tk)) touched.put(tk, chunkGetState.invoke(wch, a[0]));
+                                chunkSetState.invoke(wch, a[0], a[1], (Integer) a[2]);
                                 return true;
                             }
                             case "getHeight": {
@@ -543,6 +732,15 @@ public class WorldgenFeatureDump {
                         }
                     });
 
+                    {
+                        // ChunkStatusTasks.generateFeatures: Heightmap.primeHeightmaps(chunk, {MOTION_BLOCKING, MOTION_BLOCKING_NO_LEAVES, OCEAN_FLOOR, WORLD_SURFACE})
+                        Class<?> typesC = WorldgenRefDump.cls(HM_TYPES);
+                        @SuppressWarnings({"unchecked", "rawtypes"})
+                        java.util.EnumSet postSet = java.util.EnumSet.noneOf((Class) typesC);
+                        for (String tn : new String[]{"MOTION_BLOCKING", "MOTION_BLOCKING_NO_LEAVES", "OCEAN_FLOOR", "WORLD_SURFACE"}) postSet.add(field(HM_TYPES, tn, null));
+                        WorldgenRefDump.method("net.minecraft.world.level.levelgen.Heightmap", "primeHeightmaps", "net.minecraft.world.level.chunk.ChunkAccess,java.util.Set")
+                                .invoke(null, region.get(((long) tx << 32) ^ (tz & 0xffffffffL)), postSet);
+                    }
                     String featFull = System.getenv("FEAT_FULL");
                     String[] ff = featFull != null ? featFull.split(",") : null;
                     boolean dumpThis = ff != null && Long.parseLong(ff[0]) == seed && Integer.parseInt(ff[1]) == tx && Integer.parseInt(ff[2]) == tz;
@@ -572,6 +770,9 @@ public class WorldgenFeatureDump {
                         for (int dx = -1; dx <= 1; dx++) java.util.Collections.addAll(biomes, genStore.chunk(tx + dx, tz + dz));
                     Object origin = bpCtor.newInstance(tx * 16, minY, tz * 16);
                     Map<String, int[]> callStats = new LinkedHashMap<>();
+                    if (treeRows != null) {
+                        runTreeTest(treeRows, seed, tx, tz, level, decoGenerator, touched);
+                    } else
                     decorate(steps, step -> step, biomes, bgsFeatures, biomeGenSettings, biomeValue, holderSetStream, sfdFeatures, sfdIndex, toIntApply, setFeatureSeed, placeWithCheck, pfFeature, cfFeature, featureRegistry, regGetKey, pfNames, allowed, random, decorationSeed, level, decoGenerator, origin, callStats);
                     for (Map.Entry<String, int[]> e : callStats.entrySet()) stats.printf("%d,%d,%d,%s,%d,%d%n", seed, tx, tz, e.getKey(), e.getValue()[0], e.getValue()[1]);
 

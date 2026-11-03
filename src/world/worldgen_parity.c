@@ -1029,6 +1029,7 @@ static void run_features_set(const char *dir, const char *datapack, Ctx *c, cons
     }
     JCarvers *cv = jcarvers_load(datapack);
     JRegion region;
+    memset(&region, 0, sizeof(region));
     uint8_t *blocks[9];
     JHeightmaps *hms[9];
     for (int i = 0; i < 9; ++i) {
@@ -1172,6 +1173,133 @@ static void run_features(const char *dir, const char *datapack, Ctx *c)
     "minecraft:patch_melon_sparse"};
     run_features_set(dir, datapack, c, "feature_order_veg.csv", "features_veg.csv", VEG_TYPES, 2, VEG_NAMES,
                      (int)(sizeof(VEG_NAMES) / sizeof(VEG_NAMES[0])), "feature_order_veg", "vegetation_blocks");
+    /* Tree placed features made only of ported parts: tree + selectors, weighted_list counts, surface water depth. */
+    static const char *const TREE_TYPES[4] = {"minecraft:tree", "minecraft:random_selector", "minecraft:simple_random_selector",
+                                              "minecraft:random_boolean_selector"};
+    static const char *const TREE_NAMES[] = {"minecraft:trees_swamp", "minecraft:trees_meadow"};
+    run_features_set(dir, datapack, c, "feature_order_trees.csv", "features_trees.csv", TREE_TYPES, 4, TREE_NAMES,
+                     (int)(sizeof(TREE_NAMES) / sizeof(TREE_NAMES[0])), "feature_order_trees", "tree_decoration_blocks");
+}
+
+/* ---- configured tree features, placed directly -------------------------------------------------------
+ * trees.csv: seed,target_x,target_z,tree,k,x,y,z,placed,count,hash,feature_seed. Per (seed, target) the 3 x 3 region is
+ * generated, then every selected configured feature is placed at K fixed columns of the target chunk with
+ * its own feature seed (the last column); each row holds the placement result and a hash of
+ * the blocks whose name changed (sorted by x, y, z). */
+static void run_trees(const char *dir, const char *datapack, Ctx *c, const char *rows_name, const char *suite)
+{
+    Table rows = load_table(dir, rows_name, c->stats);
+    if (datapack == NULL) {
+        c->stats->skipped += (uint64_t)rows.count;
+        free_table(&rows);
+        return;
+    }
+    JCarvers *cv = jcarvers_load(datapack);
+    JRegion region;
+    memset(&region, 0, sizeof(region));
+    uint8_t *blocks[9];
+    JHeightmaps *hms[9];
+    for (int i = 0; i < 9; ++i) {
+        blocks[i] = (uint8_t *)malloc((size_t)16 * 16 * JFILL_HEIGHT);
+        hms[i] = (JHeightmaps *)malloc(sizeof(JHeightmaps));
+        region.blocks[i] = blocks[i];
+        region.heightmaps[i] = hms[i];
+    }
+    char buf[160];
+    char *fld[FIELDS_MAX];
+    char last_seed[32] = "";
+    JRandomState *rs = NULL;
+    JSurface *surface = NULL;
+    JFeatures *feats = NULL;
+    static JBlockChange changes[4096];
+    int r = 0;
+    c->suite = suite;
+    while (r < rows.count) {
+        snprintf(buf, sizeof(buf), "%s", rows.lines[r]);
+        if (split_csv(buf, fld) < 12) {
+            ++r;
+            continue;
+        }
+        char seed[32];
+        snprintf(seed, sizeof(seed), "%s", fld[0]);
+        int tx = atoi(fld[1]), tz = atoi(fld[2]);
+        if (rs == NULL || strcmp(last_seed, seed) != 0) {
+            jfeatures_free(feats);
+            jsurface_free(surface);
+            jrs_destroy(rs);
+            rs = jrs_create(datapack, "overworld", (int64_t)strtoll(seed, NULL, 10));
+            surface = rs != NULL ? jsurface_create(rs) : NULL;
+            feats = surface != NULL ? jfeatures_load(datapack, surface) : NULL;
+            snprintf(last_seed, sizeof(last_seed), "%s", seed);
+        }
+        bool have = rs != NULL && surface != NULL && feats != NULL && cv != NULL;
+        jfeatures_region_reset(&region);
+        if (have) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    int slot = (dz + 1) * 3 + (dx + 1);
+                    build_pipeline_chunk(rs, surface, cv, tx + dx, tz + dz, blocks[slot], hms[slot]);
+                }
+            }
+            jsurface_prepare_biomes(surface, tx - 1, tz - 1);
+            jsurface_prepare_biomes(surface, tx + 1, tz + 1);
+            for (int dz = -2; dz <= 2; ++dz) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    jsurface_prepare_chunk(surface, tx + dx, tz + dz);
+                }
+            }
+            region.target_x = tx;
+            region.target_z = tz;
+        }
+        while (r < rows.count) {
+            snprintf(buf, sizeof(buf), "%s", rows.lines[r]);
+            if (split_csv(buf, fld) < 12 || strcmp(fld[0], seed) != 0 || atoi(fld[1]) != tx || atoi(fld[2]) != tz) {
+                break;
+            }
+            int k = atoi(fld[4]);
+            int x = atoi(fld[5]), z = atoi(fld[7]);
+            int y_expected = atoi(fld[6]);
+            int placed_expected = atoi(fld[8]);
+            int count_expected = atoi(fld[9]);
+            uint64_t hash_expected = (uint64_t)strtoll(fld[10], NULL, 10);
+            char label[200];
+            snprintf(label, sizeof(label), "%s/%d/%d/%s/%d", seed, tx, tz, fld[3], k);
+            int placed = -1, count = -1;
+            uint64_t hash = ~hash_expected;
+            int y = y_expected;
+            if (have) {
+                int slot = ((z >> 4) - (tz - 1)) * 3 + ((x >> 4) - (tx - 1));
+                y = hms[slot]->ocean_floor[(z & 15) * 16 + (x & 15)];
+                placed = jfeatures_place_configured(feats, surface, &region, fld[3], (int64_t)strtoll(fld[11], NULL, 10), x,
+                                                    y, z, changes, (int)(sizeof(changes) / sizeof(changes[0])), &count);
+                if (placed >= 0) {
+                    uint64_t h = 1125899906842597ULL;
+                    for (int i = 0; i < count && i < (int)(sizeof(changes) / sizeof(changes[0])); ++i) {
+                        h = 31u * h + (uint64_t)(int64_t)changes[i].x;
+                        h = 31u * h + (uint64_t)(int64_t)changes[i].y;
+                        h = 31u * h + (uint64_t)(int64_t)changes[i].z;
+                        h = 31u * h + (uint64_t)(int64_t)jr_java_string_hash(jfill_block_name((JFillBlock)changes[i].block));
+                    }
+                    hash = h;
+                }
+            }
+            record(c, label, (uint64_t)y_expected, (uint64_t)y);
+            record(c, label, (uint64_t)placed_expected, (uint64_t)(placed < 0 ? 2 : placed));
+            record(c, label, (uint64_t)count_expected, (uint64_t)count);
+            record(c, label, hash_expected, hash);
+            ++r;
+        }
+    }
+    jfeatures_region_reset(&region);
+    jfeatures_free(feats);
+    jsurface_free(surface);
+    jrs_destroy(rs);
+    jcarvers_free(cv);
+    for (int i = 0; i < 9; ++i) {
+        free(blocks[i]);
+        free(hms[i]);
+    }
+    free_table(&rows);
 }
 
 /* ---- structure placement -------------------------------------------------------------------------
@@ -1265,6 +1393,7 @@ uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root,
     run_carvers(fixture_dir, datapack_root, &c);
     run_surface(fixture_dir, datapack_root, &c);
     run_features(fixture_dir, datapack_root, &c);
+    run_trees(fixture_dir, datapack_root, &c, "trees.csv", "tree_blocks");
     run_structures(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }
