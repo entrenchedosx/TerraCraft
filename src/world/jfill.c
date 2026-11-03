@@ -499,19 +499,51 @@ static const char *const BLOCK_NAMES[JB_COUNT] = {
     "minecraft:light_gray_terracotta",
 };
 
+/* Blocks beyond the fixed JFillBlock ids (ores, plants, ...) are registered on demand; ids stay
+ * one byte. Only the block name is tracked (no block-state properties). */
+#define MAX_BLOCK_IDS 256
+static char *g_dyn_names[MAX_BLOCK_IDS];
+static int g_block_count = JB_COUNT;
+
+int jfill_block_count(void)
+{
+    return g_block_count;
+}
+
 const char *jfill_block_name(JFillBlock b)
 {
-    return (b >= 0 && b < JB_COUNT) ? BLOCK_NAMES[b] : "minecraft:air";
+    if (b >= 0 && b < JB_COUNT) {
+        return BLOCK_NAMES[b];
+    }
+    if (b >= JB_COUNT && b < g_block_count) {
+        return g_dyn_names[b];
+    }
+    return "minecraft:air";
 }
 
 int jfill_block_from_name(const char *name)
 {
-    for (int i = 0; i < JB_COUNT; ++i) {
-        if (strcmp(BLOCK_NAMES[i], name) == 0) {
+    for (int i = 0; i < g_block_count; ++i) {
+        if (strcmp(jfill_block_name((JFillBlock)i), name) == 0) {
             return i;
         }
     }
     return -1;
+}
+
+int jfill_block_register(const char *name)
+{
+    int id = jfill_block_from_name(name);
+    if (id >= 0 || g_block_count >= MAX_BLOCK_IDS) {
+        return id;
+    }
+    size_t n = strlen(name) + 1;
+    g_dyn_names[g_block_count] = (char *)malloc(n);
+    if (g_dyn_names[g_block_count] == NULL) {
+        return -1;
+    }
+    memcpy(g_dyn_names[g_block_count], name, n);
+    return g_block_count++;
 }
 
 bool jblock_is_air(int b)

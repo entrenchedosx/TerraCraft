@@ -3,6 +3,7 @@
 #include "world/jbiome.h"
 #include "world/jcarver.h"
 #include "world/jdensity.h"
+#include "world/jfeature.h"
 #include "world/jfill.h"
 #include "world/jnoise.h"
 #include "world/jrandom.h"
@@ -992,6 +993,150 @@ static void run_surface(const char *dir, const char *datapack, Ctx *c)
     free_table(&simp);
 }
 
+/* ---- feature stage ------------------------------------------------------------------------------
+ * feature_order.csv: step,index,placed_feature         (FeatureSorter)
+ * features.csv:      seed,target_x,target_z,dx,dz,section,name_hash   (3 x 3 region after decoration) */
+static void build_pipeline_chunk(JRandomState *rs, JSurface *surface, JCarvers *cv, int cx, int cz, uint8_t *blocks,
+                                 JHeightmaps *hm)
+{
+    JChunk *ch = jchunk_create(rs, cx, cz);
+    if (ch == NULL || !jchunk_fill(ch, blocks)) {
+        jchunk_free(ch);
+        return;
+    }
+    jheightmaps_prime(hm, blocks);
+    jsurface_build(surface, ch, blocks, hm);
+    JAquifer *aq = jaquifer_create(ch);
+    JSurfaceTopUser top = {surface, ch, blocks, hm};
+    JCarveSurface cs = {hm, jsurface_top_material, &top};
+    jchunk_carve(ch, cv, aq, blocks, NULL, NULL, &cs);
+    jaquifer_free(aq);
+    jchunk_free(ch);
+}
+
+static void run_features(const char *dir, const char *datapack, Ctx *c)
+{
+    Table order = load_table(dir, "feature_order.csv", c->stats);
+    Table rows = load_table(dir, "features.csv", c->stats);
+    if (datapack == NULL) {
+        c->stats->skipped += (uint64_t)(order.count + rows.count);
+        free_table(&order);
+        free_table(&rows);
+        return;
+    }
+    JCarvers *cv = jcarvers_load(datapack);
+    JRegion region;
+    uint8_t *blocks[9];
+    JHeightmaps *hms[9];
+    for (int i = 0; i < 9; ++i) {
+        blocks[i] = (uint8_t *)malloc((size_t)16 * 16 * JFILL_HEIGHT);
+        hms[i] = (JHeightmaps *)malloc(sizeof(JHeightmaps));
+        region.blocks[i] = blocks[i];
+        region.heightmaps[i] = hms[i];
+    }
+    char buf[160];
+    char *fld[FIELDS_MAX];
+    char last_seed[32] = "";
+    JRandomState *rs = NULL;
+    JSurface *surface = NULL;
+    JFeatures *feats = NULL;
+    const char *types[1] = {"minecraft:ore"};
+    int r = 0;
+    bool order_done = false;
+    while (r < rows.count) {
+        snprintf(buf, sizeof(buf), "%s", rows.lines[r]);
+        if (split_csv(buf, fld) < 7) {
+            ++r;
+            continue;
+        }
+        char seed[32];
+        snprintf(seed, sizeof(seed), "%s", fld[0]);
+        int tx = atoi(fld[1]), tz = atoi(fld[2]);
+        if (rs == NULL || strcmp(last_seed, seed) != 0) {
+            jfeatures_free(feats);
+            jsurface_free(surface);
+            jrs_destroy(rs);
+            rs = jrs_create(datapack, "overworld", (int64_t)strtoll(seed, NULL, 10));
+            surface = rs != NULL ? jsurface_create(rs) : NULL;
+            feats = surface != NULL ? jfeatures_load(datapack, surface) : NULL;
+            snprintf(last_seed, sizeof(last_seed), "%s", seed);
+            if (feats != NULL && !order_done) {
+                order_done = true;
+                c->suite = "feature_order";
+                for (int i = 0; i < order.count; ++i) {
+                    char ob[160];
+                    char *of[FIELDS_MAX];
+                    snprintf(ob, sizeof(ob), "%s", order.lines[i]);
+                    if (split_csv(ob, of) < 3) {
+                        continue;
+                    }
+                    int step = atoi(of[0]), index = atoi(of[1]);
+                    const char *got = (step >= 0 && step < jfeatures_step_count(feats) && index >= 0 &&
+                                       index < jfeatures_step_size(feats, step))
+                                          ? jfeatures_step_feature(feats, step, index)
+                                          : "<missing>";
+                    record(c, order.lines[i], (uint64_t)(int64_t)jr_java_string_hash(of[2]),
+                           (uint64_t)(int64_t)jr_java_string_hash(got));
+                }
+                /* A step list longer than the reference would hide extra features. */
+                int expected_total = order.count, got_total = 0;
+                for (int st = 0; st < jfeatures_step_count(feats); ++st) {
+                    got_total += jfeatures_step_size(feats, st);
+                }
+                record(c, "feature_order/total", (uint64_t)expected_total, (uint64_t)got_total);
+            }
+        }
+        bool have = false;
+        uint64_t hashes[9][24];
+        if (rs != NULL && surface != NULL && feats != NULL && cv != NULL) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    int slot = (dz + 1) * 3 + (dx + 1);
+                    build_pipeline_chunk(rs, surface, cv, tx + dx, tz + dz, blocks[slot], hms[slot]);
+                }
+            }
+            jsurface_prepare_biomes(surface, tx - 1, tz - 1);
+            jsurface_prepare_biomes(surface, tx + 1, tz + 1);
+            for (int dz = -2; dz <= 2; ++dz) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    jsurface_prepare_chunk(surface, tx + dx, tz + dz);
+                }
+            }
+            region.target_x = tx;
+            region.target_z = tz;
+            have = jfeatures_decorate(feats, surface, (int64_t)strtoll(seed, NULL, 10), &region, types, 1);
+            for (int slot = 0; slot < 9; ++slot) {
+                for (int sec = 0; sec < 24; ++sec) {
+                    hashes[slot][sec] = hash_names(blocks[slot], sec);
+                }
+            }
+        }
+        c->suite = "feature_blocks";
+        while (r < rows.count) {
+            snprintf(buf, sizeof(buf), "%s", rows.lines[r]);
+            if (split_csv(buf, fld) < 7 || strcmp(fld[0], seed) != 0 || atoi(fld[1]) != tx || atoi(fld[2]) != tz) {
+                break;
+            }
+            int dx = atoi(fld[3]), dz = atoi(fld[4]), sec = atoi(fld[5]);
+            uint64_t e = (uint64_t)strtoll(fld[6], NULL, 10);
+            char label[96];
+            snprintf(label, sizeof(label), "%s/%d/%d/%d/%d/sec%d", seed, tx, tz, dx, dz, sec);
+            record(c, label, e, have ? hashes[(dz + 1) * 3 + (dx + 1)][sec] : ~e);
+            ++r;
+        }
+    }
+    jfeatures_free(feats);
+    jsurface_free(surface);
+    jrs_destroy(rs);
+    jcarvers_free(cv);
+    for (int i = 0; i < 9; ++i) {
+        free(blocks[i]);
+        free(hms[i]);
+    }
+    free_table(&order);
+    free_table(&rows);
+}
+
 uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root, FILE *report,
                              WorldgenParityStats *stats)
 {
@@ -1017,5 +1162,6 @@ uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root,
     run_chunks(fixture_dir, datapack_root, &c);
     run_carvers(fixture_dir, datapack_root, &c);
     run_surface(fixture_dir, datapack_root, &c);
+    run_features(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }

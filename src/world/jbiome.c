@@ -459,3 +459,13 @@ const char *jbiome_find_brute(const JBiomeList *l, const JTargetPoint *t)
     }
     return l->names[l->name_idx[bi]];
 }
+
+int jbiome_name_count(const JBiomeList *l)
+{
+    return l != NULL ? l->nnames : 0;
+}
+
+const char *jbiome_name(const JBiomeList *l, int i)
+{
+    return (l != NULL && i >= 0 && i < l->nnames) ? l->names[i] : NULL;
+}

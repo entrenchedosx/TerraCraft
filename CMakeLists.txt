@@ -103,6 +103,7 @@ set(TERRACRAFT_SOURCES
   src/world/jfill.c
   src/world/jcarver.c
     src/world/jsurface.c
+    src/world/jfeature.c
   src/world/worldgen_parity.c
   src/world/streamer.c
   src/world/biome.c

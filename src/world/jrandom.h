@@ -18,7 +18,8 @@
 
 typedef enum JrKind {
     JR_LEGACY = 0,    /* java.util.Random 48-bit LCG. */
-    JR_XOROSHIRO = 1  /* Xoroshiro128++. */
+    JR_XOROSHIRO = 1, /* Xoroshiro128++. */
+    JR_WORLDGEN = 2   /* WorldgenRandom over XoroshiroRandomSource: legacy algorithms on xoroshiro bits. */
 } JrKind;
 
 typedef struct JrRandom {
@@ -39,6 +40,9 @@ typedef struct JrPositional {
 void jr_legacy_init(JrRandom *r, int64_t seed);
 /* new XoroshiroRandomSource(seed): upgradeSeedTo128bit(seed). */
 void jr_xoroshiro_init(JrRandom *r, int64_t seed);
+/* new WorldgenRandom(new XoroshiroRandomSource(seed)): setSeed(seed) re-seeds the same way. Positional
+ * forks are not supported for this kind. */
+void jr_worldgen_xoroshiro_init(JrRandom *r, int64_t seed);
 /* new XoroshiroRandomSource(seedLo, seedHi) (all-zero state is fixed up). */
 void jr_xoroshiro_init128(JrRandom *r, int64_t seed_lo, int64_t seed_hi);
 

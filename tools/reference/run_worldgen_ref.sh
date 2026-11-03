@@ -22,9 +22,9 @@ PY
 SEP=";"; case "$(uname -s)" in Linux*|Darwin*) SEP=":";; esac
 LIBS="$(find "$R/bundle/META-INF/libraries" -name '*.jar' | tr '\n' "$SEP")"
 CP="$WORK$SEP$R/bundle/META-INF/versions/1.21.11/server-1.21.11.jar$SEP$LIBS"
-javac -d "$WORK" "$ROOT/tools/reference/WorldgenRefDump.java" "$ROOT/tools/reference/WorldgenRouterDump.java" "$ROOT/tools/reference/WorldgenBiomeDump.java" "$ROOT/tools/reference/WorldgenChunkDump.java" "$ROOT/tools/reference/WorldgenCarverDump.java" "$ROOT/tools/reference/WorldgenSurfaceDump.java"
+javac -d "$WORK" "$ROOT/tools/reference/WorldgenRefDump.java" "$ROOT/tools/reference/WorldgenRouterDump.java" "$ROOT/tools/reference/WorldgenBiomeDump.java" "$ROOT/tools/reference/WorldgenChunkDump.java" "$ROOT/tools/reference/WorldgenCarverDump.java" "$ROOT/tools/reference/WorldgenSurfaceDump.java" "$ROOT/tools/reference/WorldgenFeatureDump.java"
 mkdir -p "$OUT"
-# ONLY=carver / ONLY=surface regenerate just those fixtures (slow: replay NoiseChunk fills).
+# ONLY=carver / surface / feature regenerate just those fixtures (slow: replay NoiseChunk fills).
 if [ "${ONLY:-all}" = "all" ]; then
 java -cp "$CP" tcref.WorldgenRefDump "$R/server_mappings.txt" "$OUT"
 (cd "$WORK" && java -cp "$CP" tcref.WorldgenRouterDump "$R/server_mappings.txt" "$OUT")
@@ -36,4 +36,7 @@ if [ "${ONLY:-all}" = "all" ] || [ "${ONLY:-all}" = "carver" ]; then
 fi
 if [ "${ONLY:-all}" = "all" ] || [ "${ONLY:-all}" = "surface" ]; then
 (cd "$WORK" && java -cp "$CP" tcref.WorldgenSurfaceDump "$R/server_mappings.txt" "$OUT" "$R/run/out")
+fi
+if [ "${ONLY:-all}" = "all" ] || [ "${ONLY:-all}" = "feature" ]; then
+(cd "$WORK" && java -cp "$CP" tcref.WorldgenFeatureDump "$R/server_mappings.txt" "$OUT" "$R/run/out")
 fi

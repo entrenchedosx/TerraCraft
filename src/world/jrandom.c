@@ -32,8 +32,14 @@ void jr_legacy_init(JrRandom *r, int64_t seed)
     r->have_gaussian = false;
 }
 
+static uint64_t xoro_next_long(JrRandom *r);
+
 static int32_t legacy_next(JrRandom *r, int bits)
 {
+    if (r->kind == JR_WORLDGEN) {
+        /* WorldgenRandom over XoroshiroRandomSource: next(bits) = (int)(nextLong() >>> (64 - bits)). */
+        return (int32_t)(uint32_t)(xoro_next_long(r) >> (64 - bits));
+    }
     r->a = (r->a * LEGACY_MULT + LEGACY_INC) & LEGACY_MASK;
     return (int32_t)(uint32_t)(r->a >> (48 - bits)); /* bits <= 32: value fits uint32 */
 }
@@ -46,6 +52,12 @@ static void xoro_fix_zero(JrRandom *r)
         r->a = 0x9E3779B97F4A7C15ULL; /* -7046029254386353131 */
         r->b = 0x6A09E667F3BCC909ULL; /* 7640891576956012809 */
     }
+}
+
+void jr_worldgen_xoroshiro_init(JrRandom *r, int64_t seed)
+{
+    jr_xoroshiro_init(r, seed);
+    r->kind = JR_WORLDGEN;
 }
 
 void jr_xoroshiro_init128(JrRandom *r, int64_t seed_lo, int64_t seed_hi)
@@ -89,7 +101,7 @@ static uint64_t xoro_next_long(JrRandom *r)
 
 int32_t jr_next_int(JrRandom *r)
 {
-    if (r->kind == JR_LEGACY) {
+    if ((r->kind == JR_LEGACY || r->kind == JR_WORLDGEN)) {
         return legacy_next(r, 32);
     }
     return (int32_t)(uint32_t)xoro_next_long(r);
@@ -100,7 +112,7 @@ int32_t jr_next_int_bound(JrRandom *r, int32_t bound)
     if (bound <= 0) {
         return 0;
     }
-    if (r->kind == JR_LEGACY) {
+    if ((r->kind == JR_LEGACY || r->kind == JR_WORLDGEN)) {
         if ((bound & (bound - 1)) == 0) {
             return (int32_t)(((int64_t)bound * (int64_t)legacy_next(r, 31)) >> 31);
         }
@@ -128,7 +140,7 @@ int32_t jr_next_int_bound(JrRandom *r, int32_t bound)
 
 int64_t jr_next_long(JrRandom *r)
 {
-    if (r->kind == JR_LEGACY) {
+    if ((r->kind == JR_LEGACY || r->kind == JR_WORLDGEN)) {
         int32_t i = legacy_next(r, 32);
         int32_t j = legacy_next(r, 32);
         return (int64_t)(((uint64_t)(int64_t)i << 32) + (uint64_t)(int64_t)j);
@@ -138,7 +150,7 @@ int64_t jr_next_long(JrRandom *r)
 
 bool jr_next_boolean(JrRandom *r)
 {
-    if (r->kind == JR_LEGACY) {
+    if ((r->kind == JR_LEGACY || r->kind == JR_WORLDGEN)) {
         return legacy_next(r, 1) != 0;
     }
     return (xoro_next_long(r) & 1ULL) != 0;
@@ -146,7 +158,7 @@ bool jr_next_boolean(JrRandom *r)
 
 float jr_next_float(JrRandom *r)
 {
-    if (r->kind == JR_LEGACY) {
+    if ((r->kind == JR_LEGACY || r->kind == JR_WORLDGEN)) {
         return (float)legacy_next(r, 24) * 5.9604645E-8f;
     }
     return (float)(xoro_next_long(r) >> 40) * 5.9604645E-8f;
@@ -154,7 +166,7 @@ float jr_next_float(JrRandom *r)
 
 double jr_next_double(JrRandom *r)
 {
-    if (r->kind == JR_LEGACY) {
+    if ((r->kind == JR_LEGACY || r->kind == JR_WORLDGEN)) {
         uint64_t hi = (uint64_t)(uint32_t)legacy_next(r, 26);
         uint64_t lo = (uint64_t)(uint32_t)legacy_next(r, 27);
         return (double)((hi << 27) + lo) * 1.1102230246251565E-16;

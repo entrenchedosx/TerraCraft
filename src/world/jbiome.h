@@ -41,3 +41,8 @@ int64_t jbiome_list_hash(const JBiomeList *l);
 const char *jbiome_find(JBiomeList *l, const JTargetPoint *t);
 /* Climate.ParameterList.findValueBruteForce (first minimum). */
 const char *jbiome_find_brute(const JBiomeList *l, const JTargetPoint *t);
+
+/* Distinct biome ids in order of first appearance in the parameter list (this is the
+ * order of MultiNoiseBiomeSource.possibleBiomes()). */
+int jbiome_name_count(const JBiomeList *l);
+const char *jbiome_name(const JBiomeList *l, int i);

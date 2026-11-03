@@ -62,6 +62,10 @@ typedef enum JFillBlock {
 const char *jfill_block_name(JFillBlock b);
 /* JFillBlock for a registry name, or -1 if unknown. */
 int jfill_block_from_name(const char *name);
+/* Like jfill_block_from_name but registers an unknown name (up to 255 ids); -1 when full. */
+int jfill_block_register(const char *name);
+/* Number of block ids currently in use (JB_COUNT plus registered ones). */
+int jfill_block_count(void);
 /* BlockState.isAir / getFluidState().isEmpty() / blocksMotion for a block id. */
 bool jblock_is_air(int b);
 bool jblock_is_fluid(int b);

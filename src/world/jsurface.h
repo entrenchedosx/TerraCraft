@@ -33,6 +33,13 @@ const char *jsurface_biome_at(JSurface *s, int x, int y, int z);
  * neighbours, in the canonical order; BiomeManager reads only stored biomes. Called
  * automatically by jsurface_build; exposed so callers can pin the fill order. */
 void jsurface_prepare_biomes(JSurface *s, int chunk_x, int chunk_z);
+/* Fill the stored biomes of exactly one chunk (no neighbours) if absent. */
+void jsurface_prepare_chunk(JSurface *s, int chunk_x, int chunk_z);
+/* Distinct stored biomes of a chunk (writes up to cap names, returns the count). */
+int jsurface_chunk_biomes(JSurface *s, int chunk_x, int chunk_z, const char **out, int cap);
+/* Distinct biome ids of the surface system's parameter list, in possibleBiomes() order. */
+int jsurface_possible_biome_count(const JSurface *s);
+const char *jsurface_possible_biome(const JSurface *s, int i);
 /* MultiNoiseBiomeSource.getNoiseBiome at a quart position (y clamped to the
  * overworld column the way ChunkAccess.getNoiseBiome does). */
 const char *jsurface_noise_biome(JSurface *s, int qx, int qy, int qz);

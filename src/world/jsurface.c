@@ -724,6 +724,40 @@ void jsurface_prepare_biomes(JSurface *s, int cx, int cz)
     }
 }
 
+void jsurface_prepare_chunk(JSurface *s, int chunk_x, int chunk_z)
+{
+    biome_chunk(s, chunk_x, chunk_z);
+}
+
+int jsurface_chunk_biomes(JSurface *s, int chunk_x, int chunk_z, const char **out, int cap)
+{
+    BiomeChunk *bc = biome_chunk(s, chunk_x, chunk_z);
+    int n = 0;
+    for (int i = 0; bc != NULL && i < 16 * BIOME_QUART_Y; ++i) {
+        bool seen = false;
+        for (int k = 0; k < n; ++k) {
+            if (out[k] == bc->q[i] || strcmp(out[k], bc->q[i]) == 0) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen && n < cap) {
+            out[n++] = bc->q[i];
+        }
+    }
+    return n;
+}
+
+int jsurface_possible_biome_count(const JSurface *s)
+{
+    return jbiome_name_count(s->biomes);
+}
+
+const char *jsurface_possible_biome(const JSurface *s, int i)
+{
+    return jbiome_name(s->biomes, i);
+}
+
 const char *jsurface_noise_biome(JSurface *s, int qx, int qy, int qz)
 {
     if (qy < -16) {

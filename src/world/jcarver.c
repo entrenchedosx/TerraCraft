@@ -89,7 +89,7 @@ typedef struct CarverCfg {
 struct JCarvers {
     int count;
     CarverCfg cfg[JCARVER_MAX];
-    bool replaceable[JB_COUNT];
+    bool replaceable[256];
 };
 
 static bool parse_fp(const JJson *j, FloatProvider *out)
@@ -314,7 +314,7 @@ JCarvers *jcarvers_load(const char *datapack_root)
         ok = resolve_tag(datapack_root, "minecraft:overworld_carver_replaceables", &tags, 0);
     }
     if (ok) {
-        for (int b = 0; b < JB_COUNT; ++b) {
+        for (int b = 0; b < jfill_block_count(); ++b) {
             cv->replaceable[b] = nameset_has(&tags, jfill_block_name((JFillBlock)b));
         }
     }
