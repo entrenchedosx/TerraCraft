@@ -152,8 +152,23 @@ static int feature_debug(char **argv)
     }
     region.target_x = tx;
     region.target_z = tz;
-    const char *types[1] = {"minecraft:ore"};
-    jfeatures_decorate(feats, surf, seed, &region, types, 1);
+    const char *types[2] = {"minecraft:ore", NULL};
+    int ntypes = 1;
+    const char *names[64];
+    int nnames = 0;
+    char *name_buf = NULL;
+    if (getenv("FEATURE_NAMES") != NULL) {
+        /* Vegetation debugging: FEATURE_NAMES=a,b,c selects random_patch / flower placed features. */
+        types[0] = "minecraft:random_patch";
+        types[1] = "minecraft:flower";
+        ntypes = 2;
+        name_buf = _strdup(getenv("FEATURE_NAMES"));
+        for (char *tok = strtok(name_buf, ","); tok != NULL && nnames < 64; tok = strtok(NULL, ",")) {
+            names[nnames++] = tok;
+        }
+    }
+    jfeatures_decorate(feats, surf, seed, &region, types, ntypes, names, nnames);
+    free(name_buf);
     /* Load the reference's changed blocks. */
     FILE *f = fopen(argv[6], "r");
     if (f == NULL) {

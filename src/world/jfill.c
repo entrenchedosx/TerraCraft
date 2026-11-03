@@ -557,8 +557,20 @@ bool jblock_is_fluid(int b)
 }
 
 /* BlockState.blocksMotion: solid collision. Powder snow has no default collision. */
+static bool g_no_collision[MAX_BLOCK_IDS];
+
+void jblock_set_no_collision(int id)
+{
+    if (id >= 0 && id < MAX_BLOCK_IDS) {
+        g_no_collision[id] = true;
+    }
+}
+
 bool jblock_blocks_motion(int b)
 {
+    if (b >= 0 && b < MAX_BLOCK_IDS && g_no_collision[b]) {
+        return false;
+    }
     return !(b == JB_AIR || b == JB_WATER || b == JB_LAVA || b == JB_POWDER_SNOW);
 }
 

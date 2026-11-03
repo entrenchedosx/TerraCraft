@@ -108,3 +108,19 @@ Done after the jar became available (2026-11-02):
 4. Debugging a mismatch: `SURF_FULL=seed,cx,cz,file ONLY=surface ...` dumps one chunk block
    by block and `worldgen_diff --surface <datapack> <seed> <cx> <cz> <file>` lists the
    differing blocks with their biome. `SURF_PROBE=x,z` prints the real iceberg noise terms.
+
+## Method used for decoration and structure placement (worldgen stage 6)
+
+1. `WorldgenFeatureDump.java` generates, per seed, a 3 x 3 region around each target chunk through the same fill, surface and
+   carver pipeline as `WorldgenSurfaceDump`, behind a `WorldGenLevel` stand-in (a `java.lang.reflect.Proxy` that serves the
+   region's real `ProtoChunk`s and fails loudly on any method it does not know). `ChunkGenerator.applyBiomeDecoration`'s loop is
+   replayed verbatim - decoration seed, candidate biomes, `FeatureSorter` indices from the real generator, `setFeatureSeed`, real
+   `PlacedFeature.placeWithBiomeCheck` - for placed features whose configured type is in `FEATURES` and (optionally) whose id is in
+   `FEATURE_NAMES`; `FEATURE_TAG` suffixes the output files. Data-pack block tags are bound into the block registry first.
+2. `ONLY=feature [FEATURES=... FEATURE_NAMES=... FEATURE_TAG=...] tools/reference/run_worldgen_ref.sh <dir>` regenerates
+   `feature_order*.csv`, `features*.csv` and `feature_stats*.csv`; `FEAT_FULL=seed,tx,tz,file` additionally dumps every block the
+   reference changed for one target and `worldgen_diff --feature <datapack> <seed> <tx> <tz> <file>` lists missing / wrong / extra
+   blocks of the C port (`FEATURE_NAMES=...` selects the vegetation set there).
+3. `WorldgenStructureDump.java` evaluates the real `StructurePlacement.isStructureChunk` of every random-spread structure set
+   through a real `ChunkGeneratorStructureState` (constructed directly, because `createForNormal` needs biome tags).
+   `ONLY=structure` regenerates `structure_chunks.csv`.

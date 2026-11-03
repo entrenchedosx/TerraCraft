@@ -52,3 +52,13 @@ Walking, swimming and falling run the vanilla 20 TPS model (see
   jar). Content scale: vanilla has 1,166 blocks / 29,671 block states, 1,505
   items, 157 entity types (from the 1.21.11 data generator); TerraCraft has
   tens of each.
+
+## World generation core (not wired into the game yet)
+
+- The vanilla-exact generator (`jrandom` ... `jfeature`, `jstructure`) runs only in the differential harness and in
+  `worldgen_diff`; the game still uses its own terrain profiles.
+- The core tracks block *names*, not block states (no `axis`, `half`, `distance`, `waterlogged`, ...) and caps the registry at
+  255 names; leaf decay distances, double-plant halves and similar properties are therefore absent.
+- Features implemented and verified: ores, 22 vegetation patch features, structure-set placement. Trees and most other feature
+  types, structure piece generation, strongholds (concentric rings), Nether and End are not implemented.
+- See [WORLDGEN_PARITY.md](WORLDGEN_PARITY.md) for the per-stage evidence.

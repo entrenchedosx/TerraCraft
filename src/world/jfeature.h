@@ -39,8 +39,9 @@ typedef struct JRegion {
 
 /* applyBiomeDecoration for the target chunk, restricted to placed features whose configured feature
  * type is in `types` (e.g. {"minecraft:ore"}); seed is the world seed. Returns false if an allowed
- * feature uses a placement modifier or feature type that is not implemented. */
+ * feature uses a placement modifier or feature type that is not implemented. If name_count > 0 only
+ * the listed placed features (ids like "minecraft:patch_grass_plain") run, in addition to the type filter. */
 bool jfeatures_decorate(JFeatures *f, JSurface *surface, int64_t seed, JRegion *region, const char *const *types,
-                        int type_count);
+                        int type_count, const char *const *names, int name_count);
 /* Number of blocks changed by the most recent decorate call. */
 int jfeatures_last_changed(const JFeatures *f);

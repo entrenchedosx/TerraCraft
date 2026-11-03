@@ -33,6 +33,7 @@ import java.util.function.Function;
  */
 public class WorldgenFeatureDump {
     static final long[] SEEDS = {0L, 42L, 123456789012345L};
+    static java.util.Set<String> NAMES = null;
     static final int[][] TARGETS = {{0, 0}, {-1, -1}, {5, -7}, {31, 12}, {-20, 3}, {100, 100}};
 
     static Object call(String cls, String name, String args, Object target, Object... a) throws Exception {
@@ -103,6 +104,10 @@ public class WorldgenFeatureDump {
         Files.createDirectories(outDir);
         java.util.Set<String> allowed = new java.util.HashSet<>(java.util.Arrays.asList(
                 (System.getenv("FEATURES") != null ? System.getenv("FEATURES") : "ore,scattered_ore").split(",")));
+        // FEATURE_NAMES limits the run to the listed placed features; FEATURE_TAG suffixes the output files.
+        String namesEnv = System.getenv("FEATURE_NAMES");
+        NAMES = namesEnv != null ? new java.util.HashSet<>(java.util.Arrays.asList(namesEnv.split(","))) : null;
+        String tag = System.getenv("FEATURE_TAG") != null ? "_" + System.getenv("FEATURE_TAG") : "";
 
         call("net.minecraft.SharedConstants", "tryDetectVersion", "", null);
         call("net.minecraft.server.Bootstrap", "bootStrap", "", null);
@@ -309,6 +314,7 @@ public class WorldgenFeatureDump {
                 {"net.minecraft.world.level.LevelReader", "getSeaLevel", ""},
                 {"net.minecraft.world.level.WorldGenLevel", "getSeed", ""},
                 {"net.minecraft.world.level.LevelReader", "getBiome", "net.minecraft.core.BlockPos"},
+                {"net.minecraft.world.level.LevelReader", "isEmptyBlock", "net.minecraft.core.BlockPos"},
                 {"net.minecraft.world.level.LevelReader", "hasChunk", "int,int"},
                 {"net.minecraft.world.level.LevelHeightAccessor", "getMinSectionY", ""},
                 {"net.minecraft.world.level.LevelHeightAccessor", "getMaxSectionY", ""},
@@ -332,9 +338,9 @@ public class WorldgenFeatureDump {
             sigToMoj.put(sb.append(')').toString(), w[1] + "/" + w[2].split(",").length);
         }
 
-        try (PrintStream order = new PrintStream(outDir.resolve("feature_order.csv").toFile());
-             PrintStream rows = new PrintStream(outDir.resolve("features.csv").toFile());
-             PrintStream stats = new PrintStream(outDir.resolve("feature_stats.csv").toFile())) {
+        try (PrintStream order = new PrintStream(outDir.resolve("feature_order" + tag + ".csv").toFile());
+             PrintStream rows = new PrintStream(outDir.resolve("features" + tag + ".csv").toFile());
+             PrintStream stats = new PrintStream(outDir.resolve("feature_stats" + tag + ".csv").toFile())) {
             order.println("step,index,placed_feature");
             rows.println("seed,target_x,target_z,dx,dz,section,name_hash");
             stats.println("seed,target_x,target_z,placed_feature,calls,placed");
@@ -527,6 +533,12 @@ public class WorldgenFeatureDump {
                             case "getSeaLevel": return 63;
                             case "getSeed": return seed;
                             case "getBiome": return managerGetter.apply(a[0]);
+                            case "isEmptyBlock": {
+                                int[] p = posOf.apply(a[0]);
+                                if (p[1] < minY || p[1] >= minY + height) return true;
+                                Object st = chunkGetState.invoke(regionF.get((((long) (p[0] >> 4)) << 32) ^ ((p[2] >> 4) & 0xffffffffL)), a[0]);
+                                return String.valueOf(st).contains("minecraft:air");
+                            }
                             default: throw new UnsupportedOperationException("WorldGenLevel." + sig + " -> " + name);
                         }
                     });
@@ -637,6 +649,7 @@ public class WorldgenFeatureDump {
                 String type = String.valueOf(regGetKey.invoke(featureRegistry, feature));
                 type = type.substring(type.indexOf(':') + 1);
                 if (!allowed.contains(type)) continue;
+                if (NAMES != null && !NAMES.contains(pfNames.get(pf))) continue;
                 String only = System.getenv("JF_ONLY");
                 if (only != null && !only.equals(pfNames.get(pf))) continue;
                 setFeatureSeed.invoke(random, decorationSeed, index, step);

@@ -75,13 +75,50 @@ typedef struct HeightProv {
     int plateau;
 } HeightProv;
 
-typedef enum ModKind { M_COUNT, M_IN_SQUARE, M_HEIGHT_RANGE, M_RARITY, M_BIOME, M_UNSUPPORTED } ModKind;
+typedef enum ModKind {
+    M_COUNT,
+    M_IN_SQUARE,
+    M_HEIGHT_RANGE,
+    M_RARITY,
+    M_BIOME,
+    M_HEIGHTMAP,
+    M_NOISE_THRESHOLD_COUNT,
+    M_PRED_FILTER,
+    M_UNSUPPORTED
+} ModKind;
+
+/* BlockPredicate subset: matching_blocks, matching_fluids, not, all_of, any_of, true. */
+typedef enum PredKind { P_TRUE, P_BLOCKS, P_FLUIDS, P_NOT, P_ALL, P_ANY, P_REPLACEABLE, P_UNSUPPORTED } PredKind;
+
+typedef struct Pred {
+    PredKind kind;
+    int blocks[8];
+    int block_count;
+    int fluids[2];  /* JB_WATER / JB_LAVA, or -1 for "empty" */
+    int fluid_count;
+    int off[3];
+    struct Pred **children;
+    int child_count;
+} Pred;
+
+/* BlockStateProvider subset: simple_state_provider, weighted_state_provider. */
+typedef struct StateProvider {
+    int kind;  /* 0 simple, 1 weighted, -1 unsupported */
+    int states[16];
+    int weights[16];
+    int count;
+    int total_weight;
+} StateProvider;
 
 typedef struct Mod {
     ModKind kind;
     IntProv count;
     HeightProv height;
     int chance;
+    int hm_type;  /* 0 WORLD_SURFACE_WG, 1 OCEAN_FLOOR_WG, 2 MOTION_BLOCKING */
+    int above_noise, below_noise;
+    double noise_level;
+    Pred *pred;
 } Mod;
 
 typedef struct OreTarget {
@@ -102,6 +139,13 @@ typedef struct PlacedFeature {
     int target_count;
     bool mods_supported;
     bool loaded;
+    int self_index;  /* index in JFeatures.pf, or -1 for an inline placed feature */
+    /* random_patch / flower */
+    int patch_tries, patch_xz, patch_y;
+    struct PlacedFeature *inner;
+    /* simple_block */
+    StateProvider provider;
+    bool feature_supported;
 } PlacedFeature;
 
 typedef struct BiomeFeatures {
@@ -247,18 +291,135 @@ static int sample_height(const HeightProv *h, JrRandom *r)
     return i + random_between_inclusive(r, 0, m) + random_between_inclusive(r, 0, l);
 }
 
-static bool load_placed(JFeatures *f, PlacedFeature *pf)
+static void pred_free(Pred *p)
 {
-    char path[1200];
-    snprintf(path, sizeof(path), "%s/data/minecraft/worldgen/placed_feature/%s.json", f->root, local_name(pf->name));
-    JJson *j = jj_parse_file(path);
-    if (j == NULL) {
+    if (p == NULL) {
+        return;
+    }
+    for (int i = 0; i < p->child_count; ++i) {
+        pred_free(p->children[i]);
+    }
+    free(p->children);
+    free(p);
+}
+
+static Pred *parse_pred(const JJson *j)
+{
+    Pred *p = (Pred *)calloc(1, sizeof(Pred));
+    if (p == NULL) {
+        return NULL;
+    }
+    const char *t = local_name(jstr(jj_get(j, "type")));
+    p->kind = P_UNSUPPORTED;
+    const JJson *off = jj_get(j, "offset");
+    if (off != NULL && off->type == JJ_ARR && off->count == 3) {
+        for (int i = 0; i < 3; ++i) {
+            p->off[i] = (int)jj_double(off->items[i]);
+        }
+    }
+    if (strcmp(t, "true") == 0) {
+        p->kind = P_TRUE;
+    } else if (strcmp(t, "replaceable") == 0) {
+        p->kind = P_REPLACEABLE;
+    } else if (strcmp(t, "matching_blocks") == 0 || strcmp(t, "matching_fluids") == 0) {
+        bool blocks = t[9] == 'b';
+        const JJson *list = jj_get(j, blocks ? "blocks" : "fluids");
+        p->kind = blocks ? P_BLOCKS : P_FLUIDS;
+        if (list != NULL && list->type == JJ_STR) {
+            list = NULL;
+            const char *one = jstr(jj_get(j, blocks ? "blocks" : "fluids"));
+            if (blocks) {
+                p->blocks[p->block_count++] = jfill_block_register(one);
+            } else {
+                p->fluids[p->fluid_count++] = strcmp(one, "minecraft:water") == 0 || strcmp(one, "minecraft:flowing_water") == 0
+                                                  ? JB_WATER
+                                                  : (strcmp(one, "minecraft:lava") == 0 ? JB_LAVA : -1);
+            }
+        } else if (list != NULL && list->type == JJ_ARR) {
+            for (int i = 0; i < list->count && i < 8; ++i) {
+                const char *one = jstr(list->items[i]);
+                if (blocks) {
+                    p->blocks[p->block_count++] = jfill_block_register(one);
+                } else {
+                    p->fluids[p->fluid_count < 2 ? p->fluid_count++ : 1] =
+                        strcmp(one, "minecraft:water") == 0 ? JB_WATER : (strcmp(one, "minecraft:lava") == 0 ? JB_LAVA : -1);
+                }
+            }
+        } else {
+            p->kind = P_UNSUPPORTED;
+        }
+    } else if (strcmp(t, "not") == 0) {
+        p->kind = P_NOT;
+        p->children = (Pred **)calloc(1, sizeof(Pred *));
+        p->children[0] = parse_pred(jj_get(j, "predicate"));
+        p->child_count = 1;
+    } else if (strcmp(t, "all_of") == 0 || strcmp(t, "any_of") == 0) {
+        p->kind = t[1] == 'l' ? P_ALL : P_ANY;
+        const JJson *list = jj_get(j, "predicates");
+        if (list != NULL && list->type == JJ_ARR) {
+            p->children = (Pred **)calloc((size_t)list->count + 1, sizeof(Pred *));
+            p->child_count = list->count;
+            for (int i = 0; i < list->count; ++i) {
+                p->children[i] = parse_pred(list->items[i]);
+            }
+        }
+    }
+    return p;
+}
+
+static bool pred_supported(const Pred *p)
+{
+    if (p == NULL || p->kind == P_UNSUPPORTED) {
         return false;
     }
+    for (int i = 0; i < p->child_count; ++i) {
+        if (!pred_supported(p->children[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void mark_plant_state(int id);
+
+static StateProvider parse_provider(const JJson *j)
+{
+    StateProvider sp;
+    memset(&sp, 0, sizeof(sp));
+    sp.kind = -1;
+    const char *t = local_name(jstr(jj_get(j, "type")));
+    if (strcmp(t, "simple_state_provider") == 0) {
+        sp.kind = 0;
+        sp.states[0] = jfill_block_register(jstr(jj_get(jj_get(j, "state"), "Name")));
+        mark_plant_state(sp.states[0]);
+        sp.count = 1;
+    } else if (strcmp(t, "weighted_state_provider") == 0) {
+        const JJson *entries = jj_get(j, "entries");
+        if (entries != NULL && entries->type == JJ_ARR && entries->count > 0 && entries->count <= 16) {
+            sp.kind = 1;
+            sp.count = entries->count;
+            for (int i = 0; i < entries->count; ++i) {
+                sp.states[i] = jfill_block_register(jstr(jj_get(jj_get(entries->items[i], "data"), "Name")));
+                mark_plant_state(sp.states[i]);
+                sp.weights[i] = (int)jj_double(jj_get(entries->items[i], "weight"));
+                sp.total_weight += sp.weights[i];
+            }
+        }
+    }
+    return sp;
+}
+
+static void free_placed_contents(PlacedFeature *pf);
+
+/* Parse a placed-feature object ({"feature": ..., "placement": [...]}) into pf. */
+static bool parse_placed(JFeatures *f, PlacedFeature *pf, const JJson *j)
+{
+    char path[1200];
     const JJson *placement = jj_get(j, "placement");
     pf->mods_supported = true;
+    pf->feature_supported = true;
     if (placement != NULL && placement->type == JJ_ARR) {
-        pf->mods = (Mod *)calloc((size_t)placement->count, sizeof(Mod));
+        pf->mods = (Mod *)calloc((size_t)placement->count + 1, sizeof(Mod));
         pf->mod_count = placement->count;
         for (int i = 0; i < placement->count; ++i) {
             const JJson *m = placement->items[i];
@@ -284,6 +445,18 @@ static bool load_placed(JFeatures *f, PlacedFeature *pf)
                 mod->chance = (int)jj_double(jj_get(m, "chance"));
             } else if (strcmp(t, "biome") == 0) {
                 mod->kind = M_BIOME;
+            } else if (strcmp(t, "heightmap") == 0) {
+                const char *hm = jstr(jj_get(m, "heightmap"));
+                mod->hm_type = strcmp(hm, "WORLD_SURFACE_WG") == 0 ? 0 : (strcmp(hm, "OCEAN_FLOOR_WG") == 0 ? 1 : (strcmp(hm, "MOTION_BLOCKING") == 0 ? 2 : -1));
+                mod->kind = mod->hm_type >= 0 ? M_HEIGHTMAP : M_UNSUPPORTED;
+            } else if (strcmp(t, "noise_threshold_count") == 0) {
+                mod->kind = M_NOISE_THRESHOLD_COUNT;
+                mod->above_noise = (int)jj_double(jj_get(m, "above_noise"));
+                mod->below_noise = (int)jj_double(jj_get(m, "below_noise"));
+                mod->noise_level = jj_double(jj_get(m, "noise_level"));
+            } else if (strcmp(t, "block_predicate_filter") == 0) {
+                mod->pred = parse_pred(jj_get(m, "predicate"));
+                mod->kind = pred_supported(mod->pred) ? M_PRED_FILTER : M_UNSUPPORTED;
             }
             if (mod->kind == M_UNSUPPORTED) {
                 pf->mods_supported = false;
@@ -323,12 +496,59 @@ static bool load_placed(JFeatures *f, PlacedFeature *pf)
                     t->state = jfill_block_register(jstr(jj_get(jj_get(targets->items[i], "state"), "Name")));
                 }
             }
+        } else if ((strcmp(pf->type, "minecraft:random_patch") == 0 || strcmp(pf->type, "minecraft:flower") == 0) && cfg != NULL) {
+            pf->patch_tries = (int)jj_double(jj_get(cfg, "tries"));
+            pf->patch_xz = (int)jj_double(jj_get(cfg, "xz_spread"));
+            pf->patch_y = (int)jj_double(jj_get(cfg, "y_spread"));
+            const JJson *inner = jj_get(cfg, "feature");
+            JJson *inner_file = NULL;
+            if (inner != NULL && inner->type == JJ_STR) {
+                snprintf(path, sizeof(path), "%s/data/minecraft/worldgen/placed_feature/%s.json", f->root, local_name(inner->text));
+                inner_file = jj_parse_file(path);
+                inner = inner_file;
+            }
+            pf->inner = (PlacedFeature *)calloc(1, sizeof(PlacedFeature));
+            if (pf->inner != NULL && inner != NULL) {
+                pf->inner->self_index = -1;
+                parse_placed(f, pf->inner, inner);
+            } else {
+                pf->feature_supported = false;
+            }
+            jj_free(inner_file);
+        } else if (strcmp(pf->type, "minecraft:simple_block") == 0 && cfg != NULL) {
+            pf->provider = parse_provider(jj_get(cfg, "to_place"));
+            pf->feature_supported = pf->provider.kind >= 0;
         }
     }
     jj_free(cf);
-    jj_free(j);
     pf->loaded = true;
     return true;
+}
+
+static bool load_placed(JFeatures *f, PlacedFeature *pf)
+{
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/data/minecraft/worldgen/placed_feature/%s.json", f->root, local_name(pf->name));
+    JJson *j = jj_parse_file(path);
+    if (j == NULL) {
+        return false;
+    }
+    bool ok = parse_placed(f, pf, j);
+    jj_free(j);
+    return ok;
+}
+
+static void free_placed_contents(PlacedFeature *pf)
+{
+    for (int i = 0; i < pf->mod_count; ++i) {
+        pred_free(pf->mods[i].pred);
+    }
+    free(pf->mods);
+    free(pf->targets);
+    if (pf->inner != NULL) {
+        free_placed_contents(pf->inner);
+        free(pf->inner);
+    }
 }
 
 static int pf_index(JFeatures *f, const char *name)
@@ -345,6 +565,7 @@ static int pf_index(JFeatures *f, const char *name)
     PlacedFeature *pf = &f->pf[f->pf_count];
     memset(pf, 0, sizeof(*pf));
     snprintf(pf->name, sizeof(pf->name), "%s", name);
+    pf->self_index = f->pf_count;
     return f->pf_count++;
 }
 
@@ -527,8 +748,7 @@ void jfeatures_free(JFeatures *f)
         return;
     }
     for (int i = 0; i < f->pf_count; ++i) {
-        free(f->pf[i].mods);
-        free(f->pf[i].targets);
+        free_placed_contents(&f->pf[i]);
     }
     free(f->pf);
     for (int i = 0; i < f->biome_count; ++i) {
@@ -691,6 +911,8 @@ typedef struct Level {
     JSurface *surface;
     JRegion *region;
     JrRandom *rnd;
+    int mb[9][256];       /* Heightmap.Types.MOTION_BLOCKING, primed lazily like ChunkAccess.getHeight */
+    bool mb_ready[9];
 } Level;
 
 static int chunk_slot(const Level *l, int x, int z)
@@ -940,12 +1162,286 @@ static bool biome_has_feature(JFeatures *f, const char *biome, int pfi)
     return false;
 }
 
-static bool run_mods(Level *l, int pfi, int mi, int x, int y, int z)
+/* Plants: which blocks may stand where (Block.canSurvive), by block name. */
+enum { PLANT_NONE = 0, PLANT_DIRT, PLANT_DIRT_DOUBLE, PLANT_DEAD_BUSH, PLANT_FREE };
+
+static int plant_kind(const char *name)
 {
-    const PlacedFeature *pf = &l->f->pf[pfi];
+    static const char *const SINGLE[] = {"short_grass", "fern", "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet",
+                                         "red_tulip", "orange_tulip", "white_tulip", "pink_tulip", "oxeye_daisy",
+                                         "cornflower", "lily_of_the_valley", "torchflower"};
+    static const char *const DOUBLE[] = {"tall_grass", "large_fern", "sunflower", "lilac", "rose_bush", "peony"};
+    static const char *const FREE[] = {"pumpkin", "melon"};
+    if (strncmp(name, "minecraft:", 10) != 0) {
+        return PLANT_NONE;
+    }
+    const char *n = name + 10;
+    for (size_t i = 0; i < sizeof(SINGLE) / sizeof(SINGLE[0]); ++i) {
+        if (strcmp(n, SINGLE[i]) == 0) {
+            return PLANT_DIRT;
+        }
+    }
+    for (size_t i = 0; i < sizeof(DOUBLE) / sizeof(DOUBLE[0]); ++i) {
+        if (strcmp(n, DOUBLE[i]) == 0) {
+            return PLANT_DIRT_DOUBLE;
+        }
+    }
+    if (strcmp(n, "dead_bush") == 0) {
+        return PLANT_DEAD_BUSH;
+    }
+    for (size_t i = 0; i < sizeof(FREE) / sizeof(FREE[0]); ++i) {
+        if (strcmp(n, FREE[i]) == 0) {
+            return PLANT_FREE;
+        }
+    }
+    return PLANT_NONE;
+}
+
+static void mark_plant_state(int id)
+{
+    int k = plant_kind(jfill_block_name((JFillBlock)id));
+    if (k == PLANT_DIRT || k == PLANT_DIRT_DOUBLE || k == PLANT_DEAD_BUSH) {
+        jblock_set_no_collision(id);
+    }
+}
+
+static bool provider_supported(const StateProvider *sp)
+{
+    if (sp->kind < 0 || sp->count <= 0) {
+        return false;
+    }
+    for (int i = 0; i < sp->count; ++i) {
+        if (plant_kind(jfill_block_name((JFillBlock)sp->states[i])) == PLANT_NONE) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* ---- heightmaps (WORLD_SURFACE_WG / OCEAN_FLOOR_WG from the region, MOTION_BLOCKING lazily) ---------------- */
+
+static bool motion_or_fluid(int b)
+{
+    return jblock_blocks_motion(b) || jblock_is_fluid(b);
+}
+
+static void mb_prime(Level *l, int slot)
+{
+    const uint8_t *blocks = l->region->blocks[slot];
+    for (int lz = 0; lz < 16; ++lz) {
+        for (int lx = 0; lx < 16; ++lx) {
+            int h = MIN_Y;
+            for (int y = MIN_Y + HEIGHT - 1; y >= MIN_Y; --y) {
+                if (motion_or_fluid(blocks[JFILL_INDEX(lx, lz, y)])) {
+                    h = y + 1;
+                    break;
+                }
+            }
+            l->mb[slot][lz * 16 + lx] = h;
+        }
+    }
+    l->mb_ready[slot] = true;
+}
+
+/* LevelReader.getHeight(type, x, z): first available Y. */
+static int level_height(Level *l, int type, int x, int z)
+{
+    int slot = chunk_slot(l, x, z);
+    if (slot < 0) {
+        return MIN_Y;
+    }
+    int idx = (z & 15) * 16 + (x & 15);
+    if (type == 0) {
+        return l->region->heightmaps[slot]->world_surface[idx];
+    }
+    if (type == 1) {
+        return l->region->heightmaps[slot]->ocean_floor[idx];
+    }
+    if (!l->mb_ready[slot]) {
+        mb_prime(l, slot);
+    }
+    return l->mb[slot][idx];
+}
+
+/* ChunkAccess.setBlockState through WorldGenRegion.setBlock: block plus all generation heightmaps. */
+static void level_set(Level *l, int x, int y, int z, int state)
+{
+    int slot = chunk_slot(l, x, z);
+    if (slot < 0 || y < MIN_Y || y >= MIN_Y + HEIGHT) {
+        return;
+    }
+    int lx = x & 15, lz = z & 15;
+    uint8_t *blocks = l->region->blocks[slot];
+    blocks[JFILL_INDEX(lx, lz, y)] = (uint8_t)state;
+    l->f->changed++;
+    jheightmaps_update(l->region->heightmaps[slot], blocks, lx, y, lz, state);
+    if (l->mb_ready[slot]) {
+        int *cell = &l->mb[slot][lz * 16 + lx];
+        int cur = *cell;
+        if (y > cur - 2) {
+            if (motion_or_fluid(state)) {
+                if (y >= cur) {
+                    *cell = y + 1;
+                }
+            } else if (cur - 1 == y) {
+                int found = MIN_Y;
+                for (int yy = y - 1; yy >= MIN_Y; --yy) {
+                    if (motion_or_fluid(blocks[JFILL_INDEX(lx, lz, yy)])) {
+                        found = yy + 1;
+                        break;
+                    }
+                }
+                *cell = found;
+            }
+        }
+    }
+}
+
+/* ---- block predicates, state providers, simple_block, random_patch --------------------------------------- */
+
+static bool pred_test(Level *l, const Pred *p, int x, int y, int z)
+{
+    int px = x + p->off[0], py = y + p->off[1], pz = z + p->off[2];
+    switch (p->kind) {
+    case P_TRUE:
+        return true;
+    case P_BLOCKS: {
+        int b = level_get(l, px, py, pz);
+        for (int i = 0; i < p->block_count; ++i) {
+            if (p->blocks[i] == b) {
+                return true;
+            }
+        }
+        return false;
+    }
+    case P_FLUIDS: {
+        int b = level_get(l, px, py, pz);
+        int fluid = jblock_is_fluid(b) ? b : -1;
+        for (int i = 0; i < p->fluid_count; ++i) {
+            if (p->fluids[i] == fluid) {
+                return true;
+            }
+        }
+        return false;
+    }
+    case P_REPLACEABLE: {
+        /* BlockState.canBeReplaced(): air, liquids and replaceable plants. */
+        int b = level_get(l, px, py, pz);
+        if (jblock_is_air(b) || jblock_is_fluid(b)) {
+            return true;
+        }
+        const char *n = jfill_block_name((JFillBlock)b);
+        return strcmp(n, "minecraft:short_grass") == 0 || strcmp(n, "minecraft:tall_grass") == 0 ||
+               strcmp(n, "minecraft:fern") == 0 || strcmp(n, "minecraft:large_fern") == 0 ||
+               strcmp(n, "minecraft:dead_bush") == 0;
+    }
+    case P_NOT:
+        return !pred_test(l, p->children[0], x, y, z);
+    case P_ALL:
+        for (int i = 0; i < p->child_count; ++i) {
+            if (!pred_test(l, p->children[i], x, y, z)) {
+                return false;
+            }
+        }
+        return true;
+    case P_ANY:
+        for (int i = 0; i < p->child_count; ++i) {
+            if (pred_test(l, p->children[i], x, y, z)) {
+                return true;
+            }
+        }
+        return false;
+    case P_UNSUPPORTED:
+        break;
+    }
+    return false;
+}
+
+static int provider_state(const StateProvider *sp, JrRandom *r)
+{
+    if (sp->kind == 0) {
+        return sp->states[0];
+    }
+    int k = jr_next_int_bound(r, sp->total_weight);
+    for (int i = 0; i < sp->count; ++i) {
+        k -= sp->weights[i];
+        if (k < 0) {
+            return sp->states[i];
+        }
+    }
+    return sp->states[sp->count - 1];
+}
+
+static bool state_survives(Level *l, int state, int x, int y, int z)
+{
+    switch (plant_kind(jfill_block_name((JFillBlock)state))) {
+    case PLANT_DIRT:
+    case PLANT_DIRT_DOUBLE:
+        return tag_has(l->f, "minecraft:dirt", level_get(l, x, y - 1, z));
+    case PLANT_DEAD_BUSH:
+        return tag_has(l->f, "minecraft:dry_vegetation_may_place_on", level_get(l, x, y - 1, z));
+    case PLANT_FREE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* SimpleBlockFeature.place */
+static bool simple_block_place(Level *l, const PlacedFeature *pf, int x, int y, int z)
+{
+    int state = provider_state(&pf->provider, l->rnd);
+    if (!state_survives(l, state, x, y, z)) {
+        return false;
+    }
+    if (plant_kind(jfill_block_name((JFillBlock)state)) == PLANT_DIRT_DOUBLE) {
+        if (!jblock_is_air(level_get(l, x, y + 1, z))) {
+            return false;
+        }
+        level_set(l, x, y, z, state);
+        level_set(l, x, y + 1, z, state);
+        return true;
+    }
+    level_set(l, x, y, z, state);
+    return true;
+}
+
+static bool run_pf(Level *l, const PlacedFeature *pf, int mi, int x, int y, int z);
+
+/* RandomPatchFeature.place */
+static bool random_patch_place(Level *l, const PlacedFeature *pf, int ox, int oy, int oz)
+{
+    int placed = 0;
+    int j = pf->patch_xz + 1;
+    int k = pf->patch_y + 1;
+    for (int i = 0; i < pf->patch_tries; ++i) {
+        int a1 = jr_next_int_bound(l->rnd, j);
+        int a2 = jr_next_int_bound(l->rnd, j);
+        int b1 = jr_next_int_bound(l->rnd, k);
+        int b2 = jr_next_int_bound(l->rnd, k);
+        int c1 = jr_next_int_bound(l->rnd, j);
+        int c2 = jr_next_int_bound(l->rnd, j);
+        if (run_pf(l, pf->inner, 0, ox + (a1 - a2), oy + (b1 - b2), oz + (c1 - c2))) {
+            ++placed;
+        }
+    }
+    return placed > 0;
+}
+
+static bool run_pf(Level *l, const PlacedFeature *pf, int mi, int x, int y, int z)
+{
     if (mi == pf->mod_count) {
         if (strcmp(pf->type, "minecraft:ore") == 0) {
             return ore_place(l, pf, x, y, z);
+        }
+        if (!pf->feature_supported) {
+            return false;
+        }
+        if (strcmp(pf->type, "minecraft:random_patch") == 0 || strcmp(pf->type, "minecraft:flower") == 0) {
+            return random_patch_place(l, pf, x, y, z);
+        }
+        if (strcmp(pf->type, "minecraft:simple_block") == 0) {
+            return simple_block_place(l, pf, x, y, z);
         }
         return false;
     }
@@ -955,7 +1451,18 @@ static bool run_mods(Level *l, int pfi, int mi, int x, int y, int z)
         int n = sample_int(&m->count, l->rnd);
         bool any = false;
         for (int i = 0; i < n; ++i) {
-            if (run_mods(l, pfi, mi + 1, x, y, z)) {
+            if (run_pf(l, pf, mi + 1, x, y, z)) {
+                any = true;
+            }
+        }
+        return any;
+    }
+    case M_NOISE_THRESHOLD_COUNT: {
+        double d = jsurface_simplex_noise(2, (double)x / 200.0, (double)z / 200.0);
+        int n = d < m->noise_level ? m->below_noise : m->above_noise;
+        bool any = false;
+        for (int i = 0; i < n; ++i) {
+            if (run_pf(l, pf, mi + 1, x, y, z)) {
                 any = true;
             }
         }
@@ -964,24 +1471,36 @@ static bool run_mods(Level *l, int pfi, int mi, int x, int y, int z)
     case M_IN_SQUARE: {
         int nx = jr_next_int_bound(l->rnd, 16) + x;
         int nz = jr_next_int_bound(l->rnd, 16) + z;
-        return run_mods(l, pfi, mi + 1, nx, y, nz);
+        return run_pf(l, pf, mi + 1, nx, y, nz);
     }
     case M_HEIGHT_RANGE: {
         int ny = sample_height(&m->height, l->rnd);
-        return run_mods(l, pfi, mi + 1, x, ny, z);
+        return run_pf(l, pf, mi + 1, x, ny, z);
+    }
+    case M_HEIGHTMAP: {
+        int h = level_height(l, m->hm_type, x, z);
+        if (h == MIN_Y) {
+            return false;
+        }
+        return run_pf(l, pf, mi + 1, x, h, z);
     }
     case M_RARITY:
         if (jr_next_float(l->rnd) < 1.0f / (float)m->chance) {
-            return run_mods(l, pfi, mi + 1, x, y, z);
+            return run_pf(l, pf, mi + 1, x, y, z);
         }
         return false;
     case M_BIOME: {
         const char *biome = jsurface_biome_at(l->surface, x, y, z);
-        if (biome_has_feature(l->f, biome, pfi)) {
-            return run_mods(l, pfi, mi + 1, x, y, z);
+        if (pf->self_index >= 0 && biome_has_feature(l->f, biome, pf->self_index)) {
+            return run_pf(l, pf, mi + 1, x, y, z);
         }
         return false;
     }
+    case M_PRED_FILTER:
+        if (pred_test(l, m->pred, x, y, z)) {
+            return run_pf(l, pf, mi + 1, x, y, z);
+        }
+        return false;
     case M_UNSUPPORTED:
         break;
     }
@@ -1001,7 +1520,7 @@ static bool type_allowed(const char *type, const char *const *types, int count)
 }
 
 bool jfeatures_decorate(JFeatures *f, JSurface *surface, int64_t seed, JRegion *region, const char *const *types,
-                        int type_count)
+                        int type_count, const char *const *names, int name_count)
 {
     if (f == NULL || surface == NULL || region == NULL) {
         return false;
@@ -1038,7 +1557,12 @@ bool jfeatures_decorate(JFeatures *f, JSurface *surface, int64_t seed, JRegion *
             }
         }
     }
-    Level lvl = {f, surface, region, &rnd};
+    Level lvl;
+    memset(&lvl, 0, sizeof(lvl));
+    lvl.f = f;
+    lvl.surface = surface;
+    lvl.region = region;
+    lvl.rnd = &rnd;
     bool ok = true;
     bool *mark = (bool *)calloc((size_t)f->pf_count + 1, 1);
     for (int step = 0; step < STEPS; ++step) {
@@ -1061,13 +1585,18 @@ bool jfeatures_decorate(JFeatures *f, JSurface *surface, int64_t seed, JRegion *
             if (!type_allowed(pf->type, types, type_count)) {
                 continue;
             }
-            if (!pf->mods_supported) {
+            if (name_count > 0 && !type_allowed(pf->name, names, name_count)) {
+                continue;
+            }
+            if (!pf->mods_supported || (pf->inner != NULL && (!pf->inner->mods_supported || !pf->feature_supported)) ||
+                (strcmp(pf->type, "minecraft:random_patch") == 0 && pf->inner != NULL && !pf->inner->feature_supported)) {
+                fprintf(stderr, "jfeature: placed feature %s uses an unsupported modifier, feature or predicate\n", pf->name);
                 ok = false;
                 continue;
             }
             /* WorldgenRandom.setFeatureSeed(decorationSeed, index, step) */
             jr_worldgen_xoroshiro_init(&rnd, decoration_seed + (int64_t)index + (int64_t)(10000 * step));
-            run_mods(&lvl, pfi, 0, tx * 16, MIN_Y, tz * 16);
+            run_pf(&lvl, pf, 0, tx * 16, MIN_Y, tz * 16);
         }
     }
     free(mark);

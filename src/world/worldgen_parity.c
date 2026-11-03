@@ -1015,10 +1015,12 @@ static void build_pipeline_chunk(JRandomState *rs, JSurface *surface, JCarvers *
     jchunk_free(ch);
 }
 
-static void run_features(const char *dir, const char *datapack, Ctx *c)
+static void run_features_set(const char *dir, const char *datapack, Ctx *c, const char *order_name, const char *rows_name,
+                             const char *const *types, int type_count, const char *const *names, int name_count,
+                             const char *order_suite, const char *blocks_suite)
 {
-    Table order = load_table(dir, "feature_order.csv", c->stats);
-    Table rows = load_table(dir, "features.csv", c->stats);
+    Table order = load_table(dir, order_name, c->stats);
+    Table rows = load_table(dir, rows_name, c->stats);
     if (datapack == NULL) {
         c->stats->skipped += (uint64_t)(order.count + rows.count);
         free_table(&order);
@@ -1041,7 +1043,6 @@ static void run_features(const char *dir, const char *datapack, Ctx *c)
     JRandomState *rs = NULL;
     JSurface *surface = NULL;
     JFeatures *feats = NULL;
-    const char *types[1] = {"minecraft:ore"};
     int r = 0;
     bool order_done = false;
     while (r < rows.count) {
@@ -1063,7 +1064,7 @@ static void run_features(const char *dir, const char *datapack, Ctx *c)
             snprintf(last_seed, sizeof(last_seed), "%s", seed);
             if (feats != NULL && !order_done) {
                 order_done = true;
-                c->suite = "feature_order";
+                c->suite = order_suite;
                 for (int i = 0; i < order.count; ++i) {
                     char ob[160];
                     char *of[FIELDS_MAX];
@@ -1105,14 +1106,15 @@ static void run_features(const char *dir, const char *datapack, Ctx *c)
             }
             region.target_x = tx;
             region.target_z = tz;
-            have = jfeatures_decorate(feats, surface, (int64_t)strtoll(seed, NULL, 10), &region, types, 1);
+            have = jfeatures_decorate(feats, surface, (int64_t)strtoll(seed, NULL, 10), &region, types, type_count, names,
+                                      name_count);
             for (int slot = 0; slot < 9; ++slot) {
                 for (int sec = 0; sec < 24; ++sec) {
                     hashes[slot][sec] = hash_names(blocks[slot], sec);
                 }
             }
         }
-        c->suite = "feature_blocks";
+        c->suite = blocks_suite;
         while (r < rows.count) {
             snprintf(buf, sizeof(buf), "%s", rows.lines[r]);
             if (split_csv(buf, fld) < 7 || strcmp(fld[0], seed) != 0 || atoi(fld[1]) != tx || atoi(fld[2]) != tz) {
@@ -1136,6 +1138,40 @@ static void run_features(const char *dir, const char *datapack, Ctx *c)
     }
     free_table(&order);
     free_table(&rows);
+}
+
+static void run_features(const char *dir, const char *datapack, Ctx *c)
+{
+    static const char *const ORE_TYPES[1] = {"minecraft:ore"};
+    run_features_set(dir, datapack, c, "feature_order.csv", "features.csv", ORE_TYPES, 1, NULL, 0, "feature_order",
+                     "feature_blocks");
+    /* Vegetation patches: random_patch / flower features whose block states and predicates are ported. */
+    static const char *const VEG_TYPES[2] = {"minecraft:random_patch", "minecraft:flower"};
+    static const char *const VEG_NAMES[] = {
+    "minecraft:patch_grass_plain",
+    "minecraft:patch_grass_forest",
+    "minecraft:patch_grass_normal",
+    "minecraft:patch_grass_taiga",
+    "minecraft:patch_grass_taiga_2",
+    "minecraft:patch_grass_savanna",
+    "minecraft:patch_grass_jungle",
+    "minecraft:patch_grass_meadow",
+    "minecraft:patch_grass_badlands",
+    "minecraft:patch_tall_grass",
+    "minecraft:patch_tall_grass_2",
+    "minecraft:patch_large_fern",
+    "minecraft:patch_dead_bush",
+    "minecraft:patch_dead_bush_2",
+    "minecraft:patch_dead_bush_badlands",
+    "minecraft:flower_default",
+    "minecraft:flower_swamp",
+    "minecraft:flower_warm",
+    "minecraft:patch_sunflower",
+    "minecraft:patch_pumpkin",
+    "minecraft:patch_melon",
+    "minecraft:patch_melon_sparse"};
+    run_features_set(dir, datapack, c, "feature_order_veg.csv", "features_veg.csv", VEG_TYPES, 2, VEG_NAMES,
+                     (int)(sizeof(VEG_NAMES) / sizeof(VEG_NAMES[0])), "feature_order_veg", "vegetation_blocks");
 }
 
 /* ---- structure placement -------------------------------------------------------------------------

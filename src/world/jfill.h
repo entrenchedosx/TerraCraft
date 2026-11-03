@@ -70,6 +70,8 @@ int jfill_block_count(void);
 bool jblock_is_air(int b);
 bool jblock_is_fluid(int b);
 bool jblock_blocks_motion(int b);
+/* Mark a registered block as having no collision (plants), so it is not motion blocking. */
+void jblock_set_no_collision(int id);
 
 /* ChunkAccess heightmaps used during generation: Heightmap.Types.WORLD_SURFACE_WG
  * (first non-air block) and OCEAN_FLOOR_WG (first motion-blocking block). Values
