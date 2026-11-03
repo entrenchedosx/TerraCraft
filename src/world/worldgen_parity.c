@@ -7,6 +7,7 @@
 #include "world/jfill.h"
 #include "world/jnoise.h"
 #include "world/jrandom.h"
+#include "world/jstructure.h"
 #include "world/jsurface.h"
 
 #include <inttypes.h>
@@ -1137,6 +1138,71 @@ static void run_features(const char *dir, const char *datapack, Ctx *c)
     free_table(&rows);
 }
 
+/* ---- structure placement -------------------------------------------------------------------------
+ * structure_chunks.csv: seed,structure_set,chunk_x,chunk_z  (every chunk where isStructureChunk is true
+ * inside the scanned square: +-64 chunks, +-12 for the densest sets) */
+static void run_structures(const char *dir, const char *datapack, Ctx *c)
+{
+    Table rows = load_table(dir, "structure_chunks.csv", c->stats);
+    if (datapack == NULL) {
+        c->stats->skipped += (uint64_t)rows.count;
+        free_table(&rows);
+        return;
+    }
+    JStructureSets *sets = jstructures_load(datapack);
+    c->suite = "structure_chunks";
+    if (sets == NULL) {
+        record(c, "structure_sets/load", 1, 0);
+        free_table(&rows);
+        return;
+    }
+    static const long long SEEDS[8] = {0LL, 1LL, 42LL, -1LL, 123456789012345LL, (-9223372036854775807LL - 1LL),
+                                       9223372036854775807LL, -8760239871234567LL};
+    for (int si = 0; si < 8; ++si) {
+        char seed_s[32];
+        snprintf(seed_s, sizeof(seed_s), "%lld", SEEDS[si]);
+        for (int k = 0; k < jstructures_count(sets); ++k) {
+            if (!jstructures_is_random_spread(sets, k)) {
+                continue;
+            }
+            const char *name = jstructures_name(sets, k);
+            int spacing_probe_x, spacing_probe_z;
+            jstructures_potential_chunk(sets, k, SEEDS[si], 0, 0, &spacing_probe_x, &spacing_probe_z);
+            /* The reference scans +-12 chunks for spacing <= 2 sets other than buried treasure/mineshafts. */
+            int range = 64;
+            if ((strstr(name, "nether_fossils") != NULL)) {
+                range = 12;
+            }
+            int expected = 0, found = 0;
+            for (int r = 0; r < rows.count; ++r) {
+                char buf[160];
+                char *fld[FIELDS_MAX];
+                snprintf(buf, sizeof(buf), "%s", rows.lines[r]);
+                if (split_csv(buf, fld) < 4 || strcmp(fld[0], seed_s) != 0 || strcmp(fld[1], name) != 0) {
+                    continue;
+                }
+                ++expected;
+                bool hit = jstructures_is_structure_chunk(sets, k, SEEDS[si], atoi(fld[2]), atoi(fld[3]));
+                char label[120];
+                snprintf(label, sizeof(label), "%s/%s/%s/%s", seed_s, name, fld[2], fld[3]);
+                record(c, label, 1, hit ? 1 : 0);
+            }
+            for (int x = -range; x <= range; ++x) {
+                for (int z = -range; z <= range; ++z) {
+                    if (jstructures_is_structure_chunk(sets, k, SEEDS[si], x, z)) {
+                        ++found;
+                    }
+                }
+            }
+            char label[120];
+            snprintf(label, sizeof(label), "%s/%s/count", seed_s, name);
+            record(c, label, (uint64_t)expected, (uint64_t)found);
+        }
+    }
+    jstructures_free(sets);
+    free_table(&rows);
+}
+
 uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root, FILE *report,
                              WorldgenParityStats *stats)
 {
@@ -1163,5 +1229,6 @@ uint64_t worldgen_parity_run(const char *fixture_dir, const char *datapack_root,
     run_carvers(fixture_dir, datapack_root, &c);
     run_surface(fixture_dir, datapack_root, &c);
     run_features(fixture_dir, datapack_root, &c);
+    run_structures(fixture_dir, datapack_root, &c);
     return stats->mismatched + stats->missing;
 }
