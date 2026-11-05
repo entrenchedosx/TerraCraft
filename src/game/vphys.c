@@ -332,9 +332,15 @@ static float player_speed(const VPhys *s)
     return (float)v;
 }
 
+/* Player.getFlyingSpeed: abilities.flyingSpeed (0.05) doubles while sprinting in creative flight. */
+#define VPHYS_ABILITY_FLY_SPEED 0.05f
+
 static float flying_speed(const VPhys *s)
 {
-    return s->sprinting ? 0.025999999f : 0.02f; /* Player.getFlyingSpeed */
+    if (s->flying) {
+        return s->sprinting ? VPHYS_ABILITY_FLY_SPEED * 2.0f : VPHYS_ABILITY_FLY_SPEED;
+    }
+    return s->sprinting ? 0.025999999f : 0.02f;
 }
 
 /* Entity.moveRelative */
@@ -553,6 +559,15 @@ static void travel(VPhys *s, const World *w, V3 in, float yaw_deg, float pitch_d
             s->vy += (look_y - s->vy) * e;
         }
     }
+    if (s->flying) {
+        /* Player.travel with abilities.flying: normal air travel, then the vertical speed is reset to
+         * 0.6 of what it was at the start (so Space/Shift give a steady 7.5 blocks/s) and no fall damage. */
+        double y_before = s->vy;
+        travel_in_air(s, w, in, yaw_deg);
+        s->vy = y_before * 0.6;
+        s->fall_distance = 0.0;
+        return;
+    }
     if (s->in_water) {
         bool falling = s->vy <= 0.0;
         double y0 = s->y;
@@ -595,7 +610,7 @@ static void update_pose(VPhys *s, const World *w)
     VPose want = VPOSE_STANDING;
     if (s->swimming) {
         want = VPOSE_SWIMMING;
-    } else if (s->shift_key) {
+    } else if (s->shift_key && !s->flying) {
         want = VPOSE_CROUCHING;
     }
     VPose order[3] = {want, VPOSE_CROUCHING, VPOSE_SWIMMING};
@@ -631,6 +646,26 @@ void vphys_tick(VPhys *s, const VInput *in, const World *w, float yaw_deg, float
     s->landed_fall = -1.0;
     s->ticks++;
 
+    /* LocalPlayer.aiStep: landing ends creative flight; a second jump tap within 7 ticks toggles it. */
+    if (s->jump_trigger > 0) {
+        s->jump_trigger--;
+    }
+    if (s->flying && s->on_ground) {
+        s->flying = false;
+    }
+    if (s->may_fly && in->jump && !s->was_jumping) {
+        if (s->jump_trigger == 0) {
+            s->jump_trigger = 7;
+        } else if (!s->swimming) {
+            s->flying = !s->flying;
+            if (s->flying && s->on_ground) {
+                s->vy = (double)VPHYS_JUMP_POWER > s->vy ? (double)VPHYS_JUMP_POWER : s->vy;
+            }
+            s->jump_trigger = 0;
+        }
+    }
+    s->was_jumping = in->jump;
+
     /* Entity.baseTick: water state, swimming, underwater. */
     s->shift_key = in->shift;
     bool touching = update_fluid_height(s, w);
@@ -640,7 +675,9 @@ void vphys_tick(VPhys *s, const VInput *in, const World *w, float yaw_deg, float
     s->in_water = touching;
     s->eye_in_water = eye_in_water(s, w);
     bool under_water = s->eye_in_water && s->in_water;
-    if (s->swimming) {
+    if (s->flying) {
+        s->swimming = false;
+    } else if (s->swimming) {
         s->swimming = s->sprinting && s->in_water;
     } else {
         s->swimming = s->sprinting && under_water;
@@ -663,7 +700,13 @@ void vphys_tick(VPhys *s, const VInput *in, const World *w, float yaw_deg, float
         s->sprinting = true;
     }
 
-    if (in->shift && s->in_water) {
+    if (s->flying) {
+        /* LocalPlayer.aiStep: Space / Shift add flyingSpeed * 3 of vertical speed per tick. */
+        int dir = (in->jump ? 1 : 0) - (in->shift ? 1 : 0);
+        if (dir != 0) {
+            s->vy += (double)((float)dir * VPHYS_ABILITY_FLY_SPEED * 3.0f);
+        }
+    } else if (in->shift && s->in_water) {
         s->vy += -0.03999999910593033; /* LocalPlayer.aiStep: goDownInWater */
     }
     s->jumping = in->jump;
@@ -680,7 +723,7 @@ void vphys_tick(VPhys *s, const VInput *in, const World *w, float yaw_deg, float
         s->vy = 0.0;
     }
     modify_input(s, in->left, in->forward, &s->xxa, &s->zza);
-    bool jumping = in->jump;
+    bool jumping = in->jump && !s->flying;
     if (jumping) {
         double fluid_h = s->water_height;
         bool in_water = s->in_water && fluid_h > 0.0;

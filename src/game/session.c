@@ -242,9 +242,7 @@ int session_open_world(AppContext *app, const char *world_dir)
 
     player_init(&app->player);
     player_anim_init(&app->panim);
-    if (m.mode == WORLD_MODE_CREATIVE) {
-        app->player.flying = true;
-    }
+    app->player.flying = false; /* Creative players start on the ground; double-tap Space to fly. */
     app->player.mode = m.mode;
     if (m.has_player) {
         app->player.pos = mmath_vec3(m.px, m.py, m.pz);

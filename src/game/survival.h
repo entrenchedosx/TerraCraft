@@ -82,7 +82,7 @@ typedef struct MineResult {
     int bx, by, bz;   /* Cell that broke (valid when finished). */
 } MineResult;
 
-/* True when the player is in creative mode (fly/no-clip/infinite).
+/* True when the player is in creative mode (flight/instant break/infinite).
  *
  * Args:
  *   p: player (NULL reads as survival).

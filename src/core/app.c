@@ -281,6 +281,7 @@ int app_init(AppContext *app, int width, int height, const char *title)
     app->prev_f3_key = false;
     app->prev_f5_key = false;
     app->third_person = false;
+    app->third_front = false;
     app->prev_e_key = false;
     app->prev_f6_key = false;
     app->prev_f8_key = false;
@@ -439,17 +440,8 @@ static void app_position_camera(AppContext *app);
 static void app_draw_player_third(AppContext *app, float aspect);
 static void app_poll_discrete_input(AppContext *app)
 {
-    bool creative = survival_is_creative(&app->player);
-
-    /* Fly toggle on F press (creative only; survival has no flight). */
-    bool f_down = window_is_key_down(SDL_SCANCODE_F);
-    bool f_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F);
-    if (f_pressed && creative) {
-        app->player.flying = !app->player.flying;
-        app->player.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
-        LOG_INFO("Game mode: %s", app->player.flying ? "Creative (fly/no-clip)" : "Survival (gravity/collision)");
-    }
-    app->prev_fly_key = f_down;
+    /* Creative flight is toggled by double-tapping Space (vphys), as in Java Edition. */
+    app->prev_fly_key = false;
 
     /* F3 debug overlay toggle. */
     bool f3_down = window_is_key_down(SDL_SCANCODE_F3);
@@ -464,8 +456,17 @@ static void app_poll_discrete_input(AppContext *app)
     bool f5_down = window_is_key_down(SDL_SCANCODE_F5);
     bool f5_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F5);
     if (f5_pressed) {
-        app->third_person = !app->third_person;
-        LOG_INFO("Camera: %s", app->third_person ? "third-person" : "first-person");
+        /* Java Edition F5 cycle: first person -> third person (back) -> third person (front) -> first person. */
+        if (!app->third_person) {
+            app->third_person = true;
+            app->third_front = false;
+        } else if (!app->third_front) {
+            app->third_front = true;
+        } else {
+            app->third_person = false;
+            app->third_front = false;
+        }
+        LOG_INFO("Camera: %s", !app->third_person ? "first-person" : (app->third_front ? "third-person (front)" : "third-person (back)"));
     }
     app->prev_f5_key = f5_down;
 
@@ -499,6 +500,7 @@ static void app_poll_discrete_input(AppContext *app)
      * (shift+F6 gives bow + arrows). */
 #ifndef NDEBUG
     bool cheats_on = app_world_rules(app)->allow_cheats;
+    bool creative = survival_is_creative(&app->player);
     bool f6_down = window_is_key_down(SDL_SCANCODE_F6);
     bool f6_pressed = window_take_key_pressed(app->window, SDL_SCANCODE_F6);
     if (f6_pressed && !cheats_on) {
@@ -3595,6 +3597,7 @@ static void app_tick_playing(AppContext *app, float dt)
         app->player.walk_speed *= SURVIVAL_BOW_MOVE_SCALE;
         app->player.sprint_speed *= SURVIVAL_BOW_MOVE_SCALE;
     }
+    app->player.swing_active = app->panim.state == PLAYER_ANIM_ATTACK;
     player_update(&app->player, &in, app->world, dt);
     if (drawing) {
         app->player.walk_speed = saved_walk;
@@ -4099,8 +4102,12 @@ static void app_position_camera(AppContext *app)
         camera_set_view_bob(app->camera, &bob);
         camera_set_position(app->camera, eye);
     } else {
-        HitResult back = raycast_from_eye(eye, app->player.yaw + MMATH_PI, -app->player.pitch,
-                                          app->world, APP_THIRD_PERSON_DIST);
+        /* Camera.setup: the third-person camera sits 4 blocks away along (or against) the view direction,
+         * pulled in so it never ends up inside a block. The front view looks back at the player. */
+        bool front = app->third_front;
+        float ray_yaw = front ? app->player.yaw : app->player.yaw + MMATH_PI;
+        float ray_pitch = front ? app->player.pitch : -app->player.pitch;
+        HitResult back = raycast_from_eye(eye, ray_yaw, ray_pitch, app->world, APP_THIRD_PERSON_DIST);
         float d = back.hit ? back.dist - 0.3f : APP_THIRD_PERSON_DIST;
         if (d < 0.5f) {
             d = 0.5f;
@@ -4108,8 +4115,13 @@ static void app_position_camera(AppContext *app)
         float cp = cosf(app->player.pitch);
         Vec3 fwd = mmath_vec3(-sinf(app->player.yaw) * cp, sinf(app->player.pitch),
                                     -cosf(app->player.yaw) * cp);
-        camera_set_position(app->camera, mmath_vec3_sub(eye, mmath_vec3_scale(fwd, d)));
+        Vec3 offset = mmath_vec3_scale(fwd, d);
+        camera_set_position(app->camera, front ? mmath_vec3_add(eye, offset) : mmath_vec3_sub(eye, offset));
         camera_set_view_bob(app->camera, NULL);
+        if (front) {
+            camera_set_yaw_pitch(app->camera, app->player.yaw + MMATH_PI, -app->player.pitch);
+            return;
+        }
     }
     camera_set_yaw_pitch(app->camera, app->player.yaw, app->player.pitch);
 }

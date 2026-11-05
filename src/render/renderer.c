@@ -77,6 +77,7 @@ struct Renderer {
     int render_distance;
     int lightmap_loc, fog_start_loc, fog_end_loc, underwater_loc, viewmodel_loc, entity_lighting_loc;
     int chunk_visibility_loc;
+    int cutout_loc;
     int mvp_loc; /* Uniform locations (-1 when unavailable). */
     int atlas_loc;
     int fog_color_loc;
@@ -327,8 +328,20 @@ static Vec3 mob_rot_z(Vec3 p, float a)
  *     pre-C2X GCC -Wpedantic rejects the const array-pointer conversion;
  *     never written).
  */
+static void mob_emit_part_ex(float *dst, Vec3 mob_pos, float yaw, const MobModelPart *part, float pitch,
+                             float own_yaw, float roll, float orbit, bool pivot_override, float fuv[6][4]);
+
 static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPart *part, float pitch,
                           bool pivot_override, float fuv[6][4])
+{
+    mob_emit_part_ex(dst, mob_pos, yaw, part, pitch, 0.0f, 0.0f, 0.0f, pivot_override, fuv);
+}
+
+/* mob_emit_part with the extra ModelPart rotations of the humanoid animation: own_yaw about the part's
+ * vertical axis and roll about Z (applied after pitch, like rotationZYX), and orbit, a rotation of the
+ * whole part about the body axis (the arms follow a twisting torso). */
+static void mob_emit_part_ex(float *dst, Vec3 mob_pos, float yaw, const MobModelPart *part, float pitch,
+                             float own_yaw, float roll, float orbit, bool pivot_override, float fuv[6][4])
 {
     Vec3 pivot;
     if (pivot_override) {
@@ -337,7 +350,7 @@ static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPar
         pivot = mmath_vec3(part->offset.x + part->size.x * 0.5f, part->pivot_y,
                            part->offset.z + part->size.z * 0.5f);
     }
-    float ya = yaw + 3.14159265f;
+    float ya = yaw + 3.14159265f + orbit;
     Vec3 root_pivot = mob_rot_y(pivot, ya);
     /* Transform the 8 unit corners once. */
     Vec3 corners[8];
@@ -350,15 +363,27 @@ static void mob_emit_part(float *dst, Vec3 mob_pos, float yaw, const MobModelPar
                                 part->offset.y + ly * part->size.y - pivot.y,
                                 part->offset.z + lz * part->size.z - pivot.z);
         Vec3 pitched = mob_rot_x(local, pitch);
+        if (own_yaw != 0.0f) {
+            pitched = mob_rot_y(pitched, own_yaw);
+        }
+        if (roll != 0.0f) {
+            pitched = mob_rot_z(pitched, roll);
+        }
         Vec3 yawed = mob_rot_y(pitched, ya);
         corners[i] = mmath_vec3(mob_pos.x + yawed.x + root_pivot.x,
                                 mob_pos.y + yawed.y + root_pivot.y,
                                 mob_pos.z + yawed.z + root_pivot.z);
     }
     for (int f = 0; f < 6; ++f) {
-        Vec3 n = mob_rot_y(mob_rot_x(mmath_vec3(MOB_FACE_N[f][0], MOB_FACE_N[f][1], MOB_FACE_N[f][2]),
-                                     pitch),
-                           ya);
+        Vec3 n = mmath_vec3(MOB_FACE_N[f][0], MOB_FACE_N[f][1], MOB_FACE_N[f][2]);
+        n = mob_rot_x(n, pitch);
+        if (own_yaw != 0.0f) {
+            n = mob_rot_y(n, own_yaw);
+        }
+        if (roll != 0.0f) {
+            n = mob_rot_z(n, roll);
+        }
+        n = mob_rot_y(n, ya);
         norms[f] = n;
     }
     size_t n = 0;
@@ -681,6 +706,28 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
     bi.sneaking = p->sneaking;
     bi.grounded = p->grounded;
     bi.use_hold = p->eat_active || p->bow_drawing;
+    /* Java Edition humanoid animation: interpolated walk animation, body yaw and swing progress. */
+    float alpha = isfinite(p->interp_alpha) ? p->interp_alpha : 1.0f;
+    alpha = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
+    bi.vanilla = true;
+    bi.limb_amount = p->limb_speed_prev + (p->limb_speed - p->limb_speed_prev) * alpha;
+    bi.limb_pos = p->limb_pos - p->limb_speed * (1.0f - alpha);
+    bi.age_ticks = p->anim_time * 20.0f + alpha;
+    float two_pi = 6.28318530717958647692f, pi_f = 3.14159265358979f;
+    float body_delta = fmodf(p->body_yaw - p->body_yaw_prev, two_pi);
+    body_delta = body_delta > pi_f ? body_delta - two_pi : (body_delta < -pi_f ? body_delta + two_pi : body_delta);
+    float body_yaw = p->body_yaw_prev + body_delta * alpha;
+    float head_rel = fmodf(p->yaw - body_yaw, two_pi);
+    head_rel = head_rel > pi_f ? head_rel - two_pi : (head_rel < -pi_f ? head_rel + two_pi : head_rel);
+    bi.head_yaw = head_rel;
+    if (anim != NULL) {
+        const ItemStack *main_hand = &p->inv.slots[p->hotbar_sel];
+        bi.holding_item = !stack_is_empty(main_hand);
+        if (anim->state == PLAYER_ANIM_ATTACK) {
+            bi.attack_active = true;
+            bi.attack_progress = player_swing_phase(anim->t);
+        }
+    }
     if (anim != NULL) {
         float phase = 0.0f;
         switch (anim->state) {
@@ -722,8 +769,8 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
         } else {
             mob_tile_uvs(&posed, fuv);
         }
-        mob_emit_part(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, p->yaw, &posed,
-                      body[i].pitch, false, fuv);
+        mob_emit_part_ex(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, body_yaw, &posed, body[i].pitch,
+                         body[i].yaw, body[i].roll, body[i].orbit, false, fuv);
         o += 36;
     }
     /* Held item follows the right hand (local avatars only: remote hotbar
@@ -751,8 +798,9 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
                 } else {
                     mob_tile_uvs(&item, fuv);
                 }
-                mob_emit_part(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, p->yaw, &item,
-                              body[PLAYER_PART_ARM_R].pitch, false, fuv);
+                mob_emit_part_ex(r->mob_verts + o * MESHER_FLOATS_PER_VERTEX, base, body_yaw, &item,
+                                 body[PLAYER_PART_ARM_R].pitch, body[PLAYER_PART_ARM_R].yaw,
+                                 body[PLAYER_PART_ARM_R].roll, body[PLAYER_PART_ARM_R].orbit, false, fuv);
                 o += 36;
             }
         }
@@ -1295,6 +1343,7 @@ Renderer *renderer_create(GlContext *gl)
         r->viewmodel_loc = shader_get_uniform_location(r->shader, "uViewModel");
         r->entity_lighting_loc = shader_get_uniform_location(r->shader, "uEntityLighting");
         r->chunk_visibility_loc = shader_get_uniform_location(r->shader, "uChunkVisibility");
+        r->cutout_loc = shader_get_uniform_location(r->shader, "uCutout");
         r->colored_water_loc = shader_get_uniform_location(r->shader, "uColoredWater");
         r->fog_color_loc = shader_get_uniform_location(r->shader, "uFogColor");
         r->cam_pos_loc = shader_get_uniform_location(r->shader, "uCamPos");
@@ -1825,6 +1874,7 @@ static bool renderer_begin_voxel_tex(Renderer *r, const Camera *cam, float aspec
     shader_set_uniform_float(r->colored_water_loc, r->colored_water ? 1.0f : 0.0f);
     shader_set_uniform_float(r->entity_lighting_loc, tex == r->atlas ? 0.0f : 1.0f);
     shader_set_uniform_float(r->viewmodel_loc, 0);
+    shader_set_uniform_float(r->cutout_loc, 1.0f);
     shader_set_uniform_float(r->chunk_visibility_loc, 1.0f);
     shader_set_uniform_float(r->underwater_loc, r->underwater ? 1.0f : 0.0f);
     Vec3 eye = camera_get_position(cam), fog = renderer_fog_color(r, cam, ts);
@@ -2032,6 +2082,7 @@ void renderer_draw_world(Renderer *r, const World *w, const Camera *cam, float a
             order[j] = key;
         }
         glDepthMask(GL_FALSE);
+        shader_set_uniform_float(r->cutout_loc, 0.0f); /* water and glass keep their alpha */
         for (size_t i = 0; i < n; ++i) {
             shader_set_uniform_float(
                 r->chunk_visibility_loc,

@@ -1763,6 +1763,89 @@ int test_player_body_pose(void)
     return failures;
 }
 
+/* Test: the Java Edition humanoid animation (vanilla mode): limb swing formulas, head yaw clamp,
+ * arm sway, the item-holding arm and the swing twist.
+ *
+ * Returns: failure count.
+ */
+int test_player_body_pose_vanilla(void)
+{
+    int failures = 0;
+    PlayerBodyPartPose pose[PLAYER_PART_COUNT];
+    PlayerBodyAnimInput in;
+    memset(&in, 0, sizeof(in));
+    in.vanilla = true;
+    in.grounded = true;
+    /* At rest: no leg swing, the arms only sway (age 0: zRot 0.1, xRot 0). */
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_LEG_L].pitch, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_LEG_R].pitch, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_R].pitch, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_R].roll, -0.1f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_L].roll, 0.1f, 1e-5f);
+
+    /* limbSwing 0, full amount: right leg cos(0) * 1.4 forward-back, left leg opposite, arms 1.0. */
+    in.limb_pos = 0.0f;
+    in.limb_amount = 1.0f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_LEG_R].pitch, 1.4f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_LEG_L].pitch, -1.4f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_L].pitch, 1.0f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_R].pitch, -1.0f, 1e-5f);
+    /* Arms oppose the leg on their own side. */
+    TEST_ASSERT(pose[PLAYER_PART_ARM_L].pitch * pose[PLAYER_PART_LEG_L].pitch < 0.0f);
+
+    /* The amount is capped at 1 and scales the swing. */
+    in.limb_amount = 5.0f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_LEG_R].pitch, 1.4f, 1e-5f);
+    in.limb_amount = 0.5f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_LEG_R].pitch, 0.7f, 1e-5f);
+
+    /* The head turns relative to the body, at most 50 degrees. */
+    in.head_yaw = 0.3f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_HEAD].yaw, 0.3f, 1e-6f);
+    in.head_yaw = 2.0f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_HEAD].yaw, 0.87266463f, 1e-5f);
+
+    /* The holding arm is raised a little (ArmPose.ITEM: xRot * 0.5 - pi / 10). */
+    memset(&in, 0, sizeof(in));
+    in.vanilla = true;
+    in.grounded = true;
+    in.holding_item = true;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_R].pitch, -0.31415927f, 1e-5f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_L].pitch, 0.0f, 1e-5f);
+
+    /* Swing: partway through, the arm is out in front and the torso twists. */
+    memset(&in, 0, sizeof(in));
+    in.vanilla = true;
+    in.grounded = true;
+    in.attack_active = true;
+    in.attack_progress = 0.3f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT(pose[PLAYER_PART_ARM_R].pitch < -1.0f);
+    TEST_ASSERT(fabsf(pose[PLAYER_PART_TORSO].yaw) > 0.05f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_R].orbit, pose[PLAYER_PART_TORSO].yaw, 1e-6f);
+    in.attack_progress = 0.0f;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_TORSO].yaw, 0.0f, 1e-6f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_R].pitch, 0.0f, 1e-5f);
+
+    /* Crouching leans the body by 0.5 and tips the arms forward by 0.4. */
+    memset(&in, 0, sizeof(in));
+    in.vanilla = true;
+    in.grounded = true;
+    in.sneaking = true;
+    player_body_pose(&in, pose);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_TORSO].pitch, 0.5f, 0.02f);
+    TEST_ASSERT_FLOAT_EQ(pose[PLAYER_PART_ARM_L].pitch, 0.4f, 1e-5f);
+    return failures;
+}
+
 /* Test: mob water contact + the fall-cushion condition (landing wet
  * with a fall report is exactly what the damage gate forgives).
  */

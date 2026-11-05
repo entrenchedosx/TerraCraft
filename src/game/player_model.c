@@ -120,7 +120,7 @@ void player_body_pose(const PlayerBodyAnimInput *in, PlayerBodyPartPose out[PLAY
         amp_leg = 0.25f;
         amp_arm = 0.0f;
     } else if (in->sneaking) {
-        torso_pitch = 0.58f;
+        torso_pitch = in->vanilla ? 0.5f : 0.58f; /* HumanoidModel crouch: body.xRot = 0.5 */
         upper.y = -0.15f;
         amp_leg *= 0.70f;
         amp_arm *= 0.60f;
@@ -153,6 +153,11 @@ void player_body_pose(const PlayerBodyAnimInput *in, PlayerBodyPartPose out[PLAY
     }
     out[PLAYER_PART_TORSO].pitch = torso_pitch;
     out[PLAYER_PART_HEAD].pitch = -head_pitch;
+    if (in->vanilla) {
+        float limit = 50.0f * 0.017453292519943295f;
+        float hy = isfinite(in->head_yaw) ? in->head_yaw : 0.0f;
+        out[PLAYER_PART_HEAD].yaw = hy < -limit ? -limit : (hy > limit ? limit : hy);
+    }
     out[PLAYER_PART_HEAD].offset = upper;
     out[PLAYER_PART_ARM_L].offset = upper;
     out[PLAYER_PART_ARM_R].offset = upper;
@@ -162,6 +167,12 @@ void player_body_pose(const PlayerBodyAnimInput *in, PlayerBodyPartPose out[PLAY
     if (swim) {
         out[PLAYER_PART_LEG_L].pitch = 0.30f * sinf(stride * 1.6f);
         out[PLAYER_PART_LEG_R].pitch = 0.30f * sinf(stride * 1.6f + pi);
+    } else if (in->vanilla) {
+        /* HumanoidModel: legs swing cos(limbSwing * 0.6662) * 1.4 * limbSwingAmount, in opposite phase. */
+        float lp = (isfinite(in->limb_pos) ? in->limb_pos : 0.0f) * 0.6662f;
+        float amt = body_clamp01(in->limb_amount);
+        out[PLAYER_PART_LEG_L].pitch = cosf(lp + pi) * 1.4f * amt;
+        out[PLAYER_PART_LEG_R].pitch = cosf(lp) * 1.4f * amt;
     } else if (air) {
         float rise = body_clamp_pm1(in->vertical_speed / 8.0f);
         float split = 0.26f - 0.10f * rise;
@@ -179,7 +190,22 @@ void player_body_pose(const PlayerBodyAnimInput *in, PlayerBodyPartPose out[PLAY
     } else {
         float arm_l = sinf(stride + pi) * amp_arm;
         float arm_r = sinf(stride) * amp_arm;
-        float drive = (in->sprinting && moving) ? -0.12f : 0.0f;
+        if (in->vanilla) {
+            /* cos(limbSwing * 0.6662) * 2 * limbSwingAmount * 0.5, the arm opposite its leg. */
+            float lp = (isfinite(in->limb_pos) ? in->limb_pos : 0.0f) * 0.6662f;
+            float amt = body_clamp01(in->limb_amount);
+            arm_l = cosf(lp) * amt;
+            arm_r = cosf(lp + pi) * amt;
+            if (in->sneaking) {
+                arm_l += 0.4f;
+                arm_r += 0.4f;
+            }
+            if (in->holding_item && !in->use_hold) {
+                arm_r = arm_r * 0.5f - 0.31415927f; /* ArmPose.ITEM */
+            }
+            air = false;
+        }
+        float drive = (in->sprinting && moving && !in->vanilla) ? -0.12f : 0.0f;
         arm_l += drive;
         arm_r += drive;
         if (air) {
@@ -195,10 +221,42 @@ void player_body_pose(const PlayerBodyAnimInput *in, PlayerBodyPartPose out[PLAY
             arm_r = -0.90f;
             arm_l = -0.20f;
         }
-        if (attack > 0.0f) {
+        float arm_roll_l = 0.0f, arm_roll_r = 0.0f; /* vanilla zRot values */
+        if (in->vanilla && in->attack_active) {
+            /* HumanoidModel.setupAttackAnimation (right arm). */
+            float t = body_clamp01(in->attack_progress);
+            float twist = sinf(sqrtf(t) * 2.0f * pi) * 0.2f; /* body.yRot */
+            float f = 1.0f - t;
+            f *= f;
+            f *= f;
+            f = 1.0f - f;
+            float g = sinf(f * pi);
+            float head_x = -head_pitch; /* vanilla head.xRot: positive looks down */
+            float h = sinf(t * pi) * -(head_x - 0.7f) * 0.75f;
+            out[PLAYER_PART_TORSO].yaw = -twist;
+            out[PLAYER_PART_ARM_R].orbit = -twist;
+            out[PLAYER_PART_ARM_L].orbit = -twist;
+            arm_l += twist; /* leftArm.xRot += body.yRot */
+            arm_r -= g * 1.2f + h;
+            out[PLAYER_PART_ARM_R].yaw = -(twist + twist * 2.0f);
+            out[PLAYER_PART_ARM_L].yaw = -twist;
+            arm_roll_r += sinf(t * pi) * -0.4f;
+        } else if (attack > 0.0f) {
             /* Right-hand jab: wind back, then swipe forward. */
             arm_r = 0.35f - 1.95f * attack;
             arm_l -= 0.25f * attack;
+        }
+        if (in->vanilla) {
+            /* AnimationUtils.bobArms: the idle sway of both arms. */
+            float age = isfinite(in->age_ticks) ? in->age_ticks : 0.0f;
+            float sway_z = cosf(age * 0.09f) * 0.05f + 0.05f;
+            float sway_x = sinf(age * 0.067f) * 0.05f;
+            arm_roll_r += sway_z;
+            arm_roll_l -= sway_z;
+            arm_r += sway_x;
+            arm_l -= sway_x;
+            out[PLAYER_PART_ARM_R].roll = -arm_roll_r; /* engine roll = -zRot */
+            out[PLAYER_PART_ARM_L].roll = -arm_roll_l;
         }
         if (hurt > 0.0f) {
             arm_l += 0.30f * hurt;

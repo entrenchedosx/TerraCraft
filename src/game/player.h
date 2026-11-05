@@ -80,7 +80,7 @@ typedef struct Player {
     float height;     /* Body height (1.8). */
     float eye_height; /* Eye above feet (1.62). */
     bool grounded;    /* Standing on solid (set by Y collision). */
-    bool flying;      /* Creative flight (no gravity, no-clip). */
+    bool flying;      /* Creative flight (no gravity; collides with blocks; double-tap Space). */
     bool sprinting;   /* Sprint flag from input (informational). */
     bool sneaking;    /* Sneak flag from input (half speed on ground). */
     float walk_speed;   /* 4.317 */
@@ -117,6 +117,13 @@ typedef struct Player {
     float bob_amp;      /* Smoothed view-bob amplitude (0 still .. 0.1 walk). */
     float water_contact; /* Last physics step's water fraction (0 dry .. 1 wet). */
     float anim_time;    /* Monotonic simulation seconds for idle/breathing. */
+    /* Third-person body animation (LivingEntity.walkAnimation / yBodyRot, advanced once per 20 Hz tick). */
+    float limb_pos, limb_pos_prev;     /* WalkAnimationState.position (radians-ish, grows with speed). */
+    float limb_speed, limb_speed_prev; /* WalkAnimationState.speed: smoothed min(blocks per tick * 4, 1). */
+    float body_yaw, body_yaw_prev;     /* yBodyRot in radians (same convention as yaw). */
+    float yaw_prev;                    /* Head yaw at the previous tick (for interpolation). */
+    bool swing_active;                 /* Arm swing in progress: the body faces the look direction. */
+    float interp_alpha;                /* 0..1 position between the last two ticks (set by player_interpolate). */
     bool mine_active;   /* Survival mining in progress. */
     int mine_bx, mine_by, mine_bz; /* Mining target cell. */
     uint16_t mine_block; /* Block ID at target when started. */
@@ -239,11 +246,11 @@ void player_view_bob_offset(const Player *p, float *out_lateral, float *out_vert
  */
 void player_apply_knockback(Player *p, float kx, float ky, float kz);
 
-/* Advance the player by dt seconds using fixed 1/60 s substeps.
- * Flying: velocity set directly from input (incl. vertical), no gravity,
- * no collision (creative no-clip). Walking: horizontal velocity set from
- * wish direction * speed; vertical integrates gravity with terminal clamp;
- * axes resolve X, Z, then Y (down hits set grounded).
+/* Advance the player by dt seconds on the vanilla 20 TPS movement tick (vphys).
+ * Creative flight (double-tap Space) is the same tick with abilities.flying: no
+ * gravity, 7.5 blocks/s vertical, 10.9 blocks/s horizontal, and it still collides
+ * with blocks; touching the ground ends it. Walking: friction/accel movement,
+ * jumping, sneaking and swimming as in Java Edition.
  *
  * Args:
  *   p: player (must not be NULL).

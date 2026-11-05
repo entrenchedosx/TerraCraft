@@ -2,6 +2,7 @@
 #include "game/vphys.h"
 #include "core/log.h"
 #include "world/block.h"
+#include "world/world_meta.h"
 #include "world/chunk.h"
 #include "world/world.h"
 
@@ -108,6 +109,12 @@ void player_init(Player *p)
     p->bob_amp = 0.0f;
     p->water_contact = 0.0f;
     p->anim_time = 0.0f;
+    p->limb_pos = p->limb_pos_prev = 0.0f;
+    p->limb_speed = p->limb_speed_prev = 0.0f;
+    p->body_yaw = p->body_yaw_prev = p->yaw;
+    p->yaw_prev = p->yaw;
+    p->swing_active = false;
+    p->interp_alpha = 1.0f;
     p->mine_active = false;
     p->mine_bx = 0;
     p->mine_by = 0;
@@ -340,73 +347,6 @@ void player_view_bob_offset(const Player *p, float *out_lateral, float *out_vert
     }
 }
 
-/* Single fixed physics step.
- *
- * Args:
- *   p: player.
- *   in: input.
- *   w: world (collision skipped when NULL).
- */
-static void player_step(Player *p, const PlayerInput *in, World *w)
-{
-    float fwd = in ? in->fwd : 0.0f;
-    float strafe = in ? in->strafe : 0.0f;
-    bool jump = in ? in->jump : false;
-    bool sneak_in = in ? in->sneak : false;
-    bool sprint = in ? in->sprint : false;
-    const float dt = PLAYER_STEP_DT;
-    p->anim_time += dt;
-
-    /* Pose first (feet stay, head shrinks/grows): sneak forces the 1.5 /
-     * 1.27 crouch; releasing sneak stands only with headroom, otherwise
-     * the crouch persists (forced). Flying never crouches (sneak is
-     * fly-down there). Camera rides eye_height via player_eye_pos. */
-    if (p->flying) {
-        p->sneaking = false;
-        p->height = PLAYER_STAND_HEIGHT;
-        p->eye_height = PLAYER_STAND_EYE;
-    } else if (sneak_in) {
-        p->sneaking = true;
-        p->height = PLAYER_SNEAK_HEIGHT;
-        p->eye_height = PLAYER_SNEAK_EYE;
-    } else if (player_can_stand(p, w)) {
-        p->sneaking = false;
-        p->height = PLAYER_STAND_HEIGHT;
-        p->eye_height = PLAYER_STAND_EYE;
-    } else {
-        p->sneaking = true;
-        p->height = PLAYER_SNEAK_HEIGHT;
-        p->eye_height = PLAYER_SNEAK_EYE;
-    }
-    bool sneak = p->sneaking;
-
-    float water_contact = player_water_contact(w, p);
-    p->water_contact = water_contact;
-
-    p->sprinting = sprint && !sneak && fwd > 0.0f;
-
-    if (p->flying) {
-        /* Creative no-clip flight: direct velocity, no gravity/collision. */
-        Vec3 wish = player_wish_dir(p->yaw, fwd, strafe);
-        float vy = 0.0f;
-        if (jump) {
-            vy += 1.0f;
-        }
-        if (sneak_in) {
-            vy -= 1.0f;
-        }
-        p->vel = mmath_vec3_add(mmath_vec3_scale(wish, p->fly_speed), mmath_vec3(0.0f, vy * p->fly_speed, 0.0f));
-        p->acc = mmath_vec3(0.0f, 0.0f, 0.0f);
-        p->pos = mmath_vec3_add(p->pos, mmath_vec3_scale(p->vel, dt));
-        p->grounded = false;
-        p->fall_peak = -1.0f; /* Flight never counts as falling. */
-        p->last_fall = -1.0f;
-        p->bob_amp += (0.0f - p->bob_amp) * PLAYER_BOB_LERP;
-        return;
-    }
-
-}
-
 /* ---- vanilla 20 TPS walking path -------------------------------------------- */
 
 #define RAD_TO_DEG 57.29577951308232f
@@ -446,6 +386,54 @@ static void player_phys_import(Player *p)
     }
 }
 
+/* Wrap an angle difference into -pi..pi. */
+static float wrap_pi(float a)
+{
+    const float two_pi = 6.28318530717958647692f;
+    a = fmodf(a, two_pi);
+    if (a > 3.14159265358979f) {
+        a -= two_pi;
+    } else if (a < -3.14159265358979f) {
+        a += two_pi;
+    }
+    return a;
+}
+
+/* LivingEntity.tick body animation, once per 20 Hz tick: the walk animation speed/position
+ * (calculateEntityAnimation + WalkAnimationState.update with factor 0.4) and the body rotation
+ * (yBodyRot follows the movement direction, tickHeadTurn lets the head turn 50 degrees from it). */
+static void player_tick_body_animation(Player *p)
+{
+    const float rad_to_deg = 57.29577951308232f;
+    float dx = (float)(p->ph.x - p->ph.px);
+    float dz = (float)(p->ph.z - p->ph.pz);
+    float moved = sqrtf(dx * dx + dz * dz);
+    float target = moved * 4.0f < 1.0f ? moved * 4.0f : 1.0f;
+    p->limb_pos_prev = p->limb_pos;
+    p->limb_speed_prev = p->limb_speed;
+    p->limb_speed += (target - p->limb_speed) * 0.4f;
+    p->limb_pos += p->limb_speed;
+
+    p->body_yaw_prev = p->body_yaw;
+    p->yaw_prev = p->yaw;
+    float want = p->body_yaw;
+    if (dx * dx + dz * dz > 0.0025000002f) {
+        /* Heading in this engine's yaw convention (0 faces -Z, forward = (-sin, -cos)). */
+        float heading = atan2f(-dx, -dz);
+        float off = fabsf(wrap_pi(p->yaw - heading)) * rad_to_deg;
+        want = (off > 95.0f && off < 265.0f) ? heading + 3.14159265358979f : heading;
+    }
+    if (p->swing_active) {
+        want = p->yaw;
+    }
+    p->body_yaw += wrap_pi(want - p->body_yaw) * 0.3f;
+    float rel = wrap_pi(p->yaw - p->body_yaw);
+    const float max_rel = 50.0f / rad_to_deg;
+    if (fabsf(rel) > max_rel) {
+        p->body_yaw += rel - (rel < 0.0f ? -max_rel : max_rel);
+    }
+}
+
 static void player_phys_tick(Player *p, const PlayerInput *in, World *w)
 {
     VInput vi;
@@ -456,8 +444,13 @@ static void player_phys_tick(Player *p, const PlayerInput *in, World *w)
     vi.sprint_key = in != NULL && in->sprint;
     float yaw_deg = 180.0f - p->yaw * RAD_TO_DEG;
     float pitch_deg = -p->pitch * RAD_TO_DEG;
+    /* Creative may toggle flight with a double jump tap; vphys ends it on landing. */
+    p->ph.may_fly = p->mode == WORLD_MODE_CREATIVE;
+    p->ph.flying = p->flying && p->ph.may_fly;
     vphys_tick(&p->ph, &vi, w, yaw_deg, pitch_deg);
+    p->flying = p->ph.flying;
     p->anim_time += VPHYS_TICK_SECONDS;
+    player_tick_body_animation(p);
 
     p->pos = mmath_vec3((float)p->ph.x, (float)p->ph.y, (float)p->ph.z);
     p->vel = mmath_vec3((float)(p->ph.vx * 20.0), (float)(p->ph.vy * 20.0), (float)(p->ph.vz * 20.0));
@@ -466,6 +459,10 @@ static void player_phys_tick(Player *p, const PlayerInput *in, World *w)
     p->grounded = p->ph.on_ground;
     p->sprinting = p->ph.sprinting;
     p->sneaking = p->ph.pose == VPOSE_CROUCHING;
+    if (p->flying) {
+        p->fall_peak = -1.0f; /* Flight never counts as falling. */
+        p->last_fall = -1.0f;
+    }
     p->width = (float)p->ph.width;
     p->height = (float)p->ph.height;
     p->acc = mmath_vec3(0.0f, 0.0f, 0.0f);
@@ -498,7 +495,7 @@ void player_interpolate(Player *p, float extra_seconds)
     if (p == NULL) {
         return;
     }
-    if (!p->ph_init || p->flying) {
+    if (!p->ph_init) {
         p->render_pos = p->pos;
         return;
     }
@@ -507,6 +504,7 @@ void player_interpolate(Player *p, float extra_seconds)
     }
     float a = (p->ph_accum + extra_seconds) / VPHYS_TICK_SECONDS;
     a = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a);
+    p->interp_alpha = a;
     p->render_pos = mmath_vec3((float)(p->ph.px + (p->ph.x - p->ph.px) * (double)a),
                                (float)(p->ph.py + (p->ph.y - p->ph.py) * (double)a),
                                (float)(p->ph.pz + (p->ph.z - p->ph.pz) * (double)a));
@@ -539,20 +537,6 @@ void player_update(Player *p, const PlayerInput *in, World *w, float dt)
     }
     if (p->pitch < -PLAYER_PITCH_LIMIT) {
         p->pitch = -PLAYER_PITCH_LIMIT;
-    }
-    if (p->flying) {
-        p->ph_init = false; /* Re-import position when walking resumes. */
-        p->step_accum += dt;
-        int steps = 0;
-        while (p->step_accum >= PLAYER_STEP_DT && steps < PLAYER_MAX_STEPS) {
-            player_step(p, in, w);
-            p->step_accum -= PLAYER_STEP_DT;
-            steps++;
-        }
-        if (steps == PLAYER_MAX_STEPS) {
-            p->step_accum = 0.0f; /* Spiral-of-death guard: drop excess time. */
-        }
-        return;
     }
     player_phys_import(p);
     p->ph_accum += dt;

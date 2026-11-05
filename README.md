@@ -71,10 +71,9 @@ open.
 | Input | Action |
 | --- | --- |
 | `W A S D` | Move |
-| `Space` | Jump; fly upward in Creative |
-| `Shift` | Sneak; fly downward in Creative |
+| `Space` | Jump; double-tap in Creative to start/stop flying, hold to fly up |
+| `Shift` | Sneak; fly down while flying in Creative |
 | `Ctrl` | Sprint |
-| `F` | Toggle Creative flight |
 | `1`–`9`, mouse wheel | Select hotbar slot |
 | Left mouse | Mine a block or attack a creature |
 | Right mouse | Place/use the selected item |
@@ -82,7 +81,7 @@ open.
 | `E` | Open inventory |
 | `Esc` | Pause or close the current screen |
 | `F3` | Toggle debug overlay |
-| `F5` | Toggle first/third-person camera |
+| `F5` | Cycle first person, third person (behind), third person (front) |
 | `T` | Open chat and scrollable recent history while playing |
 
 Developer-only keys (F6 give, F7/F8 hurt, F9–F11 mob spawn, F12 clear

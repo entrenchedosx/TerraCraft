@@ -61,6 +61,107 @@ static PlayerInput no_input(void)
     return in;
 }
 
+/* Test: creative flight toggles with a double jump tap, moves at the vanilla speeds, collides with
+ * blocks (no clipping through the floor) and ends when the player lands.
+ *
+ * Returns: failure count.
+ */
+int test_physics_creative_flight(void)
+{
+    int failures = 0;
+    World *w = make_floor_world();
+    TEST_ASSERT(w != NULL);
+    if (w == NULL) {
+        return failures + 1;
+    }
+    Player p;
+    player_init(&p);
+    p.mode = 1; /* WORLD_MODE_CREATIVE */
+    p.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    p.render_pos = p.pos;
+    PlayerInput idle = no_input();
+    for (int i = 0; i < 5; ++i) {
+        player_update(&p, &idle, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(p.grounded && !p.flying);
+
+    /* Tap, release, tap within 7 ticks: flying starts (and the second tap jumps off the ground). */
+    PlayerInput tap = no_input();
+    tap.jump = true;
+    player_update(&p, &tap, w, PLAYER_STEP_DT);
+    player_update(&p, &idle, w, PLAYER_STEP_DT);
+    player_update(&p, &tap, w, PLAYER_STEP_DT);
+    TEST_ASSERT(p.flying);
+    PlayerInput up = no_input();
+    up.jump = true;
+    for (int i = 0; i < 40; ++i) {
+        player_update(&p, &up, w, PLAYER_STEP_DT);
+    }
+    /* Holding Space climbs at 7.5 blocks per second once the speed has settled. */
+    float y0 = p.pos.y;
+    for (int i = 0; i < 20; ++i) {
+        player_update(&p, &up, w, PLAYER_STEP_DT);
+    }
+    float climb = (p.pos.y - y0) / 1.0f;
+    TEST_ASSERT_FLOAT_EQ(climb, 7.5f, 0.15f);
+    TEST_ASSERT(p.flying && p.fall_peak < 0.0f);
+
+    /* Hovering holds the height (no gravity). */
+    for (int i = 0; i < 30; ++i) {
+        player_update(&p, &idle, w, PLAYER_STEP_DT);
+    }
+    float hover = p.pos.y;
+    for (int i = 0; i < 20; ++i) {
+        player_update(&p, &idle, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT_FLOAT_EQ(p.pos.y, hover, 0.001f);
+
+    /* Flying forward settles at the vanilla 10.89 blocks per second (21.78 sprinting). */
+    p.yaw = 0.0f;
+    PlayerInput fwd = no_input();
+    fwd.fwd = 1.0f;
+    for (int i = 0; i < 90; ++i) {
+        player_update(&p, &fwd, w, PLAYER_STEP_DT);
+    }
+    float z0 = p.pos.z;
+    for (int i = 0; i < 4; ++i) {
+        player_update(&p, &fwd, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT_FLOAT_EQ(fabsf(p.pos.z - z0) / 0.2f, 10.89f, 0.15f);
+    p.pos = mmath_vec3(8.5f, hover, 8.5f); /* Back above the floor. */
+    p.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < 10; ++i) {
+        player_update(&p, &idle, w, PLAYER_STEP_DT);
+    }
+
+    /* Flying down never passes through the floor; touching it ends the flight. */
+    PlayerInput down = no_input();
+    down.sneak = true;
+    for (int i = 0; i < 120; ++i) {
+        player_update(&p, &down, w, PLAYER_STEP_DT);
+    }
+    TEST_ASSERT(p.pos.y >= 65.0f - 1e-3f);
+    TEST_ASSERT(p.grounded);
+    player_update(&p, &idle, w, PLAYER_STEP_DT);
+    TEST_ASSERT(!p.flying);
+
+    /* Survival players never fly, whatever the input. */
+    Player s;
+    player_init(&s);
+    s.mode = 0;
+    s.pos = mmath_vec3(8.5f, 65.0f, 8.5f);
+    s.render_pos = s.pos;
+    for (int i = 0; i < 5; ++i) {
+        player_update(&s, &idle, w, PLAYER_STEP_DT);
+    }
+    player_update(&s, &tap, w, PLAYER_STEP_DT);
+    player_update(&s, &idle, w, PLAYER_STEP_DT);
+    player_update(&s, &tap, w, PLAYER_STEP_DT);
+    TEST_ASSERT(!s.flying);
+    world_destroy(w);
+    return failures;
+}
+
 /* Test: free fall ends grounded exactly on the floor (no tunneling).
  *
  * Returns: failure count.
@@ -1259,6 +1360,7 @@ int test_player_view_bob(void)
     /* Flight never bobs. */
     Player f;
     player_init(&f);
+    f.mode = 1; /* creative */
     f.flying = true;
     f.pos = mmath_vec3(8.5f, 70.0f, 8.5f);
     PlayerInput fly = no_input();

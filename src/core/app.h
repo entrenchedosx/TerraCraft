@@ -220,6 +220,7 @@ typedef struct AppContext {
     size_t process_working_set_bytes; /* OS resident memory sample, or 0 if unavailable. */
     bool show_debug;      /* F3 debug overlay toggle. */
     bool third_person;    /* F5 camera: chase view + visible player body. */
+    bool third_front;     /* Third-person facing the player (second F5 press). */
     double autosave_timer; /* Seconds since last autosave (PLAYING only). */
     int load_done;        /* LOADING progress: chunks resident. */
     int load_total;       /* LOADING progress: chunks expected. */

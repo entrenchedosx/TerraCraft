@@ -54,11 +54,25 @@ typedef struct PlayerBodyAnimInput {
     bool sneaking;       /* Sneak held (crouched upper body). */
     bool grounded;       /* Standing on solid. */
     bool use_hold;       /* Eating or drawing a bow (raised hands). */
+    /* Java Edition humanoid animation (HumanoidModel.setupAnim). When `vanilla` is set the limbs use
+     * limb_pos / limb_amount instead of walk_phase / move_blend, the attack uses attack_progress and the
+     * arms get the idle sway; the other fields keep their meaning (sneak, swim, use, hurt, landing). */
+    bool vanilla;
+    float limb_pos;        /* WalkAnimationState.position (interpolated). */
+    float limb_amount;     /* WalkAnimationState.speed (interpolated, 0..1). */
+    float age_ticks;       /* ageInTicks: tick counter plus partial tick (idle arm sway). */
+    float head_yaw;        /* Head yaw relative to the body (radians, within +-50 degrees). */
+    bool attack_active;    /* Arm swing in progress. */
+    float attack_progress; /* attackTime: 0..1 through the swing. */
+    bool holding_item;     /* Right hand holds an item (arm raised a little). */
 } PlayerBodyAnimInput;
 
 /* Per-part rotation (about the part pivot) plus body-space translation. */
 typedef struct PlayerBodyPartPose {
     float pitch; /* Rotation about X (radians). */
+    float yaw;   /* Extra rotation about the part's own vertical axis (head turn, arm twist). */
+    float roll;  /* Rotation about Z, positive swings the part's free end toward +X. */
+    float orbit; /* Rotation of the whole part about the body axis (arms follow the torso twist). */
     Vec3 offset; /* Body-space translation applied before yaw. */
 } PlayerBodyPartPose;
 

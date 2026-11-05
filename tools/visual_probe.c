@@ -19,6 +19,8 @@
 #include "render/camera.h"
 #include "render/texture_atlas.h"
 #include "game/hand_view.h"
+#include "game/player.h"
+#include "game/player_animation.h"
 #include "game/time_system.h"
 #include "game/inventory.h"
 #include "world/world.h"
@@ -80,12 +82,14 @@ int main(int argc, char **argv)
 {
     if (argc < 3 || argc > 6 ||
         (strcmp(argv[1], "snow") && strcmp(argv[1], "water") && strcmp(argv[1], "forest") &&
-         strcmp(argv[1], "underwater") && strcmp(argv[1], "cave") && strcmp(argv[1], "cave-dark"))) {
+         strcmp(argv[1], "underwater") && strcmp(argv[1], "cave") && strcmp(argv[1], "cave-dark") &&
+         strncmp(argv[1], "third-", 6))) {
         fprintf(stderr, "Usage: visual_probe snow|water|forest|underwater|cave|cave-dark OUTPUT.bmp [DAY_PROGRESS "
                         "[ANIMATION_SECONDS [PACK]]]\n");
         return 1;
     }
-    bool snow = strcmp(argv[1], "snow") == 0, forest = strcmp(argv[1], "forest") == 0;
+    bool third = strncmp(argv[1], "third-", 6) == 0;
+    bool snow = strcmp(argv[1], "snow") == 0, forest = strcmp(argv[1], "forest") == 0 || third;
     bool underwater = strcmp(argv[1], "underwater") == 0, cave = strncmp(argv[1], "cave", 4) == 0;
     SDL_SetMainReady();
     log_set_level(LOG_LEVEL_WARN);
@@ -146,6 +150,53 @@ int main(int argc, char **argv)
             if (world->chunks[i]->dirty)
                 dirty = true;
     }
+    Player player;
+    PlayerAnim panim;
+    player_init(&player);
+    player_anim_init(&panim);
+    if (third) {
+        /* Third-person body poses: the player stands where the forest camera was, the camera orbits it. */
+        player.pos = mmath_vec3(eye.x, eye.y - 1.62f, eye.z);
+        player.render_pos = player.pos;
+        player.yaw = yaw;
+        player.pitch = pitch;
+        player.body_yaw = player.body_yaw_prev = yaw;
+        player.grounded = true;
+        player.interp_alpha = 1.0f;
+        player.anim_time = 3.0f;
+        bool front = strstr(argv[1], "front") != NULL;
+        if (strstr(argv[1], "walk") != NULL || strstr(argv[1], "sprint") != NULL) {
+            player.limb_speed = player.limb_speed_prev = 0.86f;
+            player.limb_pos = 9.0f;
+            player.sprinting = strstr(argv[1], "sprint") != NULL;
+        }
+        if (strstr(argv[1], "sneak") != NULL) {
+            player.sneaking = true;
+        }
+        if (strstr(argv[1], "turn") != NULL) {
+            player.body_yaw = player.body_yaw_prev = yaw + 0.6f; /* head turned 34 degrees from the body */
+        }
+        if (strstr(argv[1], "attack") != NULL) {
+            panim.state = PLAYER_ANIM_ATTACK;
+            panim.t = 0.10f;
+        }
+        player.inv.slots[0].item = BLOCK_WOOD;
+        player.inv.slots[0].count = 1;
+        player.hotbar_sel = 0;
+        float cp = cosf(pitch);
+        Vec3 fwd = mmath_vec3(-sinf(yaw) * cp, sinf(pitch), -cosf(yaw) * cp);
+        eye = mmath_vec3_add(eye, mmath_vec3_scale(fwd, front ? 3.2f : -3.2f));
+        if (strstr(argv[1], "side") != NULL) {
+            /* Camera 3.2 blocks to the player's right, looking at the body from the side. */
+            eye = mmath_vec3(player.pos.x + cosf(yaw) * 3.2f, player.pos.y + 1.2f, player.pos.z - sinf(yaw) * 3.2f);
+            yaw += MMATH_PI * 0.5f;
+            pitch = 0.0f;
+        } else if (front) {
+            yaw += MMATH_PI;
+            pitch = -pitch;
+        }
+        yaw += 0.0f;
+    }
     camera_set_position(camera, eye);
     camera_set_yaw_pitch(camera, yaw, pitch);
     camera_set_fov_y(camera, 70);
@@ -158,6 +209,13 @@ int main(int argc, char **argv)
     window_get_size(window, &width, &height);
     renderer_set_viewport(renderer, width, height);
     renderer_draw_world(renderer, world, camera, (float)width / (float)height, &clock);
+    if (third) {
+        renderer_draw_player(renderer, camera, (float)width / (float)height, &clock, &player, 1.0f, &panim);
+        glFinish();
+        int tr = export_frame(argv[2], width, height);
+        printf("%s: %s\n", argv[1], tr ? "FAILED" : argv[2]);
+        return tr;
+    }
     HandView hand;
     hand_view_init(&hand);
     HandViewSample sample = {0};

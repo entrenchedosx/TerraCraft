@@ -136,6 +136,7 @@ int test_physics_fall_land(void);
 int test_physics_high_drop(void);
 int test_physics_wall_slide(void);
 int test_physics_jump(void);
+int test_physics_creative_flight(void);
 int test_physics_acceleration(void);
 int test_physics_water_motion(void);
 int test_physics_water_contact(void);
@@ -303,6 +304,7 @@ int test_player_swing_animation(void);
 int test_player_anim_states(void);
 int test_player_body_model(void);
 int test_player_body_pose(void);
+int test_player_body_pose_vanilla(void);
 int test_mob_strike_pitch(void);
 int test_mob_water_cushion(void);
 

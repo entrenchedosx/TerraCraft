@@ -30,7 +30,7 @@ Manual acceptance and remaining limitations are recorded in the pass report.
 
 ## Milestone 3 — Player, Physics & Interaction (DONE)
 - [x] AABB player (0.6x1.8m, eye 1.62), gravity 32, jump 8.8, terminal -55, fixed 1/60 s substeps.
-- [x] Axis-separated collision (X/Z/Y, snap-out, grounded on landing, wall slide); sneak 0.5x, sprint, fly no-clip on F.
+- [x] Axis-separated collision (X/Z/Y, snap-out, grounded on landing, wall slide); sneak 0.5x, sprint; creative flight on double-tap Space (collides, ends on landing).
 - [x] DDA raycast (Amanatides & Woo, 5 blocks, face normals) from eye and camera.
 - [x] Break (bedrock/air safe, border dirty, particle log stub) / place (air/water only, self-overlap reject).
 - [x] HUD overlay: ortho flat-shader pass, crosshair, 9-slot hotbar + selection + icons; debug text stays in logs.

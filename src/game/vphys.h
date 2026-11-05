@@ -49,6 +49,10 @@ typedef struct VPhys {
     VPose pose;
     double width, height, eye_height;
     double landed_fall;    /* Fall distance at the last landing (>= 0), else -1; consumed by the caller. */
+    bool flying;           /* abilities.flying (creative flight, collides with blocks, no gravity). */
+    bool may_fly;          /* abilities.mayfly: double-tap jump toggles flying. */
+    int jump_trigger;      /* LocalPlayer.jumpTriggerTime: ticks left for the second jump tap. */
+    bool was_jumping;      /* LocalPlayer.wasJumping (jump key last tick). */
     float xxa, zza;        /* Processed input impulses of the last tick. */
     unsigned long long ticks;
 } VPhys;
