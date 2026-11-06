@@ -1042,11 +1042,15 @@ static void screen_create_world(AppContext *app, const UiFrame *ui)
         {
             bool blank = false;
             long seed = seed_parse(app->menu.seed_buf, &blank);
+            WorldMeta defaults;
+            world_meta_defaults(&defaults);
+            long long shown = defaults.terrain_version >= 6 ? (long long)seed_parse_vanilla(app->menu.seed_buf, &blank)
+                                                              : (long long)seed;
             char prev[96];
             if (blank) {
                 snprintf(prev, sizeof(prev), "Seed: <random on create>");
             } else {
-                snprintf(prev, sizeof(prev), "Seed: %ld", seed);
+                snprintf(prev, sizeof(prev), "Seed: %lld", shown);
             }
             renderer_draw_text(app->renderer, fx, y, SCR_SMALL_SCALE, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B, 1.0f, prev);
             y += 22.0f;
@@ -2039,11 +2043,13 @@ void screens_draw_debug(AppContext *app)
     const ItemInfo *sel = item_get_info(sel_slot->item);
     snprintf(lines[0], sizeof(lines[0]), "TerraCraft debug - %.1f FPS  %.2f ms/frame", (double)app->fps_smooth,
              (double)app->frame_ms_avg);
-    snprintf(lines[1], sizeof(lines[1]), "XYZ: %.2f / %.2f / %.2f", (double)p.x, (double)p.y, (double)p.z);
+    /* Vanilla worlds store Minecraft's y -64..319 as 0..383: show the Minecraft height. */
+    snprintf(lines[1], sizeof(lines[1]), "XYZ: %.2f / %.2f / %.2f", (double)p.x,
+             (double)p.y - (app->world->terrain_version >= 6 ? 64.0 : 0.0), (double)p.z);
     snprintf(lines[2], sizeof(lines[2]), "Chunk: %d %d", (int)floorf(p.x / 16.0f), (int)floorf(p.z / 16.0f));
     snprintf(lines[3], sizeof(lines[3]), "Chunks: %zu loaded, %zu drawn (+%zu transp), %zu culled",
              world_chunk_count(app->world), perf.drawn, perf.drawn_t, perf.culled);
-    snprintf(lines[4], sizeof(lines[4]), "Seed: %lld", (long long)app->world->seed);
+    snprintf(lines[4], sizeof(lines[4]), "Seed: %lld", (long long)(app->world->seed64 != 0 ? app->world->seed64 : (int64_t)app->world->seed));
     snprintf(lines[5], sizeof(lines[5]), "Day: %.3f (%s)", (double)app->clock.day_progress,
              app->player.flying ? "creative" : "survival");
     snprintf(lines[6], sizeof(lines[6]), "Held: %s x%u", sel != NULL ? sel->name : "?",

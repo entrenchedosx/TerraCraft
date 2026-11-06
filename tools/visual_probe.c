@@ -31,6 +31,7 @@
 #include "world/world.h"
 #include "world/chunk.h"
 #include "world/world_gen.h"
+#include "world/streamer.h"
 #include "world/block.h"
 
 #include <math.h>
@@ -81,6 +82,181 @@ static int export_frame(const char *path, int width, int height)
         ok = 0;
     free(pixels);
     return ok ? 0 : 1;
+}
+
+/* vanilla OUTPUT.bmp SEED X Z [YAW_DEG [PITCH_DEG [LIFT [RADIUS [DAY]]]]]: a vanilla-generator world rendered from
+ * (X, ground + 1.62 + LIFT, Z). Needs the data pack. */
+static int probe_vanilla(Window *window, Renderer *renderer, int argc, char **argv)
+{
+    if (argc < 6) {
+        fprintf(stderr, "Usage: visual_probe vanilla OUTPUT.bmp SEED X Z [YAW_DEG [PITCH_DEG [LIFT [RADIUS [DAY]]]]]\n");
+        return 1;
+    }
+    World *world = world_create();
+    Camera *camera = camera_create();
+    if (!world || !camera)
+        return 1;
+    world->seed = (long)atol(argv[3]);
+    world->terrain_version = 6;
+    float ex = (float)atof(argv[4]), ez = (float)atof(argv[5]);
+    float yaw = (argc > 6 ? (float)atof(argv[6]) : 0.0f) * MMATH_PI / 180.0f;
+    float pitch = (argc > 7 ? (float)atof(argv[7]) : -10.0f) * MMATH_PI / 180.0f;
+    float lift = argc > 8 ? (float)atof(argv[8]) : 6.0f;
+    int radius = argc > 9 ? atoi(argv[9]) : 6;
+    float day = argc > 10 ? (float)atof(argv[10]) : 0.5f;
+    int cx = (int)floorf(ex / 16.0f), cz = (int)floorf(ez / 16.0f);
+    for (int z = cz - radius; z <= cz + radius; ++z)
+        for (int x = cx - radius; x <= cx + radius; ++x)
+            if (world_generate_chunk(world, x, z) != 0) {
+                fprintf(stderr, "chunk (%d,%d) failed: is the vanilla data pack installed?\n", x, z);
+                return 1;
+            }
+    if (getenv("VPROBE_MAP") != NULL) {
+        /* Coarse top-block map, one character per 4 blocks: ~ water, g grass, s sand, S snow, # stone, T tree, . other. */
+        for (int z = (cz - radius) * 16; z < (cz + radius + 1) * 16; z += 4) {
+            for (int x = (cx - radius) * 16; x < (cx + radius + 1) * 16; x += 4) {
+                int top = -1;
+                for (int y = CHUNK_Y - 1; y > 0 && top < 0; --y)
+                    if (world_get_block(world, x, y, z) != BLOCK_AIR)
+                        top = y;
+                uint16_t id = top >= 0 ? world_get_block(world, x, top, z) : BLOCK_AIR;
+                char c = id == BLOCK_WATER ? '~' : id == BLOCK_GRASS ? 'g' : id == BLOCK_SAND ? 's' : id == BLOCK_SNOW ? 'S'
+                         : id == BLOCK_LEAVES || id == BLOCK_WOOD ? 'T' : (id == BLOCK_STONE || id == BLOCK_DEEPSLATE) ? '#' : '.';
+                putchar(c);
+            }
+            putchar('\n');
+        }
+    }
+    if (getenv("VPROBE_BIOMES") != NULL) {
+        /* Tint biome class per 8 blocks: O ocean, B beach, P plains, F forest, D desert/savanna/badlands, S snowy, M mountains. */
+        for (int z = (cz - radius) * 16; z < (cz + radius + 1) * 16; z += 8) {
+            for (int x = (cx - radius) * 16; x < (cx + radius + 1) * 16; x += 8) {
+                const Chunk *c = world_get_chunk(world, x >> 4, z >> 4);
+                putchar(c ? "OBPFDSM"[c->biome[(z & 15) * 16 + (x & 15)] % 7] : '?');
+            }
+            putchar('\n');
+        }
+    }
+    if (getenv("VPROBE_STATS") != NULL) {
+        long counts[64] = {0};
+        for (size_t i = 0; i < world->count; ++i)
+            for (int k = 0; k < CHUNK_VOLUME; ++k)
+                if (world->chunks[i]->blocks[k] < 64)
+                    counts[world->chunks[i]->blocks[k]]++;
+        for (int b = 1; b < BLOCK_COUNT && b < 64; ++b)
+            printf("%s=%ld ", block_get_info((uint16_t)b)->name, counts[b]);
+        putchar('\n');
+    }
+    int ground = 0;
+    for (int y = CHUNK_Y - 1; y > 0; --y)
+        if (block_is_solid(world_get_block(world, (int)floorf(ex), y, (int)floorf(ez)))) {
+            ground = y;
+            break;
+        }
+    Vec3 eye = mmath_vec3(ex, (float)ground + 1.0f + 1.62f + lift, ez);
+    bool dirty = true;
+    double mesh_t0 = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+    while (dirty) {
+        renderer_refresh_world(renderer, world);
+        dirty = false;
+        for (size_t i = 0; i < world->count; ++i)
+            if (world->chunks[i]->dirty)
+                dirty = true;
+    }
+    printf("meshing: %.1f ms per chunk\n",
+           ((double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() - mesh_t0) * 1000.0 /
+               (double)world->count);
+    camera_set_position(camera, eye);
+    camera_set_yaw_pitch(camera, yaw, pitch);
+    camera_set_fov_y(camera, 70);
+    renderer_set_render_distance(renderer, radius);
+    TimeSystem clock;
+    time_system_init(&clock, day, 0);
+    renderer_advance_visuals(renderer, 4.0);
+    int width, height;
+    window_get_size(window, &width, &height);
+    renderer_set_viewport(renderer, width, height);
+    renderer_draw_world(renderer, world, camera, (float)width / (float)height, &clock);
+    glFinish();
+    int result = export_frame(argv[2], width, height);
+    printf("vanilla seed %s at (%.0f, %d, %.0f): %zu chunks; %s\n", argv[3], ex, ground, ez, world->count,
+           result ? "FAILED" : argv[2]);
+    return result;
+}
+
+/* stream SEED SECONDS [SPEED [RADIUS]]: the main loop of a vanilla world without the game logic. The camera flies
+ * along +x at SPEED blocks per second while the streamer (async worker), mesher and renderer run every frame;
+ * prints the frame-time distribution. */
+static int probe_stream(Window *window, Renderer *renderer, int argc, char **argv)
+{
+    if (argc < 4) {
+        fprintf(stderr, "Usage: visual_probe stream OUT.txt SEED SECONDS [SPEED [RADIUS]]\n");
+        return 1;
+    }
+    World *world = world_create();
+    Camera *camera = camera_create();
+    if (!world || !camera)
+        return 1;
+    world->seed = (long)atol(argv[3]);
+    world->seed64 = (int64_t)atoll(argv[3]);
+    world->terrain_version = 6;
+    double seconds = atof(argv[4]);
+    float speed = argc > 5 ? (float)atof(argv[5]) : 8.0f;
+    int radius = argc > 6 ? atoi(argv[6]) : 8;
+    Streamer streamer;
+    streamer_init(&streamer, world, world->seed, radius);
+    Vec3 pos = mmath_vec3(0.0f, 150.0f, 0.0f);
+    camera_set_fov_y(camera, 70);
+    renderer_set_render_distance(renderer, radius);
+    TimeSystem clock;
+    time_system_init(&clock, 0.5f, 0);
+    int width, height;
+    window_get_size(window, &width, &height);
+    renderer_set_viewport(renderer, width, height);
+    enum { MAX_FRAMES = 100000 };
+    double *ms = (double *)malloc(sizeof(double) * MAX_FRAMES);
+    int frames = 0;
+    double start = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency(), last = start;
+    double ready_at = -1.0;
+    while (frames < MAX_FRAMES) {
+        double now = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+        double dt = now - last;
+        last = now;
+        if (now - start > seconds)
+            break;
+        if (ready_at >= 0.0)
+            pos.x += speed * (float)dt;
+        streamer_update(&streamer, pos, 4);
+        renderer_prune_world(renderer, world);
+        renderer_refresh_world(renderer, world);
+        camera_set_position(camera, pos);
+        camera_set_yaw_pitch(camera, -MMATH_PI * 0.5f, -0.2f);
+        renderer_advance_visuals(renderer, dt);
+        renderer_draw_world(renderer, world, camera, (float)width / (float)height, &clock);
+        glFinish();
+        double after = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+        if (ready_at < 0.0 && (int)world_chunk_count(world) >= 49)
+            ready_at = after - start;
+        ms[frames++] = (after - now) * 1000.0;
+    }
+    /* Sort a copy for percentiles. */
+    double worst = 0.0, total = 0.0;
+    for (int i = 0; i < frames; ++i) {
+        total += ms[i];
+        if (ms[i] > worst)
+            worst = ms[i];
+    }
+    int over33 = 0, over50 = 0;
+    for (int i = 0; i < frames; ++i) {
+        over33 += ms[i] > 33.0;
+        over50 += ms[i] > 50.0;
+    }
+    printf("stream seed %s: %d frames in %.0f s, avg %.1f ms, worst %.1f ms, %d frames over 33 ms, %d over 50 ms; "
+           "49 chunks ready after %.1f s; %zu chunks loaded, %zu generated, player x %.0f\n",
+           argv[3], frames, seconds, total / (frames > 0 ? frames : 1), worst, over33, over50, ready_at,
+           world_chunk_count(world), streamer.generated_total, (double)pos.x);
+    free(ms);
+    return 0;
 }
 
 /* Draw one real container screen (inv, inv-crafting, inv-creative) through screens_update(). The optional
@@ -140,7 +316,9 @@ static int probe_container(Window *window, Renderer *renderer, const char *mode,
 int main(int argc, char **argv)
 {
     bool container = argc >= 3 && strncmp(argv[1], "inv", 3) == 0;
-    if (!container && (argc < 3 || argc > 6 ||
+    bool vanilla = argc >= 3 && strcmp(argv[1], "vanilla") == 0;
+    bool stream = argc >= 3 && strcmp(argv[1], "stream") == 0;
+    if (!container && !vanilla && !stream && (argc < 3 || argc > 6 ||
         (strcmp(argv[1], "snow") && strcmp(argv[1], "water") && strcmp(argv[1], "forest") &&
          strcmp(argv[1], "underwater") && strcmp(argv[1], "cave") && strcmp(argv[1], "cave-dark") &&
          strncmp(argv[1], "third-", 6) && strncmp(argv[1], "hand-", 5) && strcmp(argv[1], "torch-world")))) {
@@ -168,6 +346,10 @@ int main(int argc, char **argv)
     Renderer *renderer = renderer_create(gl);
     if (container && renderer)
         return probe_container(window, renderer, argv[1], argv[2], argc, argv);
+    if (vanilla && renderer)
+        return probe_vanilla(window, renderer, argc, argv);
+    if (stream && renderer)
+        return probe_stream(window, renderer, argc, argv);
     if (renderer && argc >= 6 && renderer_reload_atlas(renderer, argv[5]) != 0)
         return 1;
     World *world = world_create();

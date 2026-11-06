@@ -65,7 +65,7 @@ ItemStack survival_block_drop(uint16_t block, ItemId held)
     ItemStack out = {ITEM_NONE, 0, 0};
     const BlockInfo *info = block_get_info(block);
     /* Loot tables: shears take short grass and leaves as blocks; by hand short grass gives nothing. */
-    if (held == ITEM_SHEARS && (block == (uint16_t)BLOCK_GRASS_PLANT || block == (uint16_t)BLOCK_LEAVES)) {
+    if (held == ITEM_SHEARS && (block == (uint16_t)BLOCK_GRASS_PLANT || block_is_leaves(block))) {
         out.item = (ItemId)block;
         out.count = 1;
         return out;
@@ -292,7 +292,7 @@ bool survival_bonus_drop_held(long seed, uint16_t block, int x, int y, int z, It
         out->count = 1;
         return true;
     }
-    if (block != (uint16_t)BLOCK_LEAVES) {
+    if (!block_is_leaves(block)) {
         return false;
     }
     if (survival_cell_hash(seed, x, y, z) % (uint32_t)SURVIVAL_LEAF_APPLE_ONE_IN == 0u) {

@@ -628,7 +628,24 @@ void audio_play(AudioSystem *sys, AudioEvent ev)
 /* Block ID to material class. */
 AudioMaterial audio_block_material(uint16_t block)
 {
+    if (block_is_leaves(block)) {
+        return AUDIO_MAT_GRASS;
+    }
+    if (block_is_log(block)) {
+        return AUDIO_MAT_WOOD;
+    }
     switch (block) {
+    case BLOCK_PODZOL:
+    case BLOCK_COARSE_DIRT:
+    case BLOCK_MYCELIUM:
+    case BLOCK_MUD:
+    case BLOCK_CLAY:
+        return AUDIO_MAT_GRAVEL;
+    case BLOCK_RED_SAND:
+        return AUDIO_MAT_SAND;
+    case BLOCK_ICE:
+    case BLOCK_PACKED_ICE:
+        return AUDIO_MAT_GLASS;
     case BLOCK_GRASS:
     case BLOCK_LEAVES:
     case BLOCK_GRASS_PLANT:

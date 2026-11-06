@@ -24,6 +24,10 @@ typedef struct JFeatures JFeatures;
 JFeatures *jfeatures_load(const char *datapack_root, JSurface *surface);
 void jfeatures_free(JFeatures *f);
 
+/* Silence (true) or restore (false) the stderr note printed for each placed feature that is skipped
+ * because it uses something that is not ported. The game runs quiet. */
+void jfeatures_set_quiet(JFeatures *f, bool quiet);
+
 /* FeatureSorter result: number of features in a decoration step and the id of one of them. */
 int jfeatures_step_count(const JFeatures *f);
 int jfeatures_step_size(const JFeatures *f, int step);

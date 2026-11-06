@@ -11,12 +11,16 @@
  * this module for all runtime chunks.
  */
 
+#include "math/mmath.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* Forward declaration (full type in world.h). */
+/* Forward declarations (full types in world.h, chunk.h and vgen.h). */
 typedef struct World World;
+typedef struct Chunk Chunk;
+struct VGen;
 
 /* Legacy profile-1 column height for world (x,z): continental base +
  * mountain lift + hills + detail. Typical range roughly [25..155];
@@ -86,3 +90,16 @@ uint16_t world_gen_vegetation_version(long seed, int wx, int wz, int h, int terr
  * Returns: 0 on success, non-zero when present/full/OOM.
  */
 int world_generate_chunk(World *w, int cx, int cz);
+
+/* Vanilla generator (terrain_version >= 6) of a world; created on first use from the world seed.
+ * NULL for older terrain versions and when the data pack is missing. */
+struct VGen *world_vgen(World *w);
+
+/* Adopt a chunk produced by the vanilla generator (the async streamer uses this): a saved copy of the
+ * chunk on disk replaces the generated blocks (player edits win) while the generated biome columns are
+ * kept. Takes ownership of c; it is freed on failure. Returns 0 on success. */
+int world_adopt_vanilla_chunk(World *w, Chunk *c);
+
+/* Spawn search for vanilla worlds: walks outwards from the origin, generating chunks, until it finds
+ * dry open ground. Returns 0 and the feet position, or non-zero. */
+int world_find_spawn_vanilla(World *w, Vec3 *out);

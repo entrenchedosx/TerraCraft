@@ -77,7 +77,7 @@ bool interaction_cross_supported(const World *w, int wx, int wy, int wz, uint16_
     }
     uint16_t support = world_get_block(w, wx, wy - 1, wz);
     if (block == BLOCK_TORCH) {
-        return block_is_solid(support) && support != BLOCK_LEAVES && !block_is_cross(support);
+        return block_is_solid(support) && !block_is_leaves(support) && !block_is_cross(support);
     }
     /* The engine's snow biome grounds its vegetation on snow blocks, which stand in for snowy grass blocks. */
     return support == BLOCK_GRASS || support == BLOCK_DIRT || support == BLOCK_SNOW;

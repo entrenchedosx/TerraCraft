@@ -13,9 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Chunk payload: 16*256*16 u16 entries. */
-#define CHUNK_FILE_BLOCKS 65536u
+/* Chunk payload: CHUNK_VOLUME u16 entries (versions 1 and 2 held 16*256*16 = 65536). */
+#define CHUNK_FILE_BLOCKS ((uint32_t)CHUNK_VOLUME)
 #define CHUNK_FILE_SIZE (16u + CHUNK_FILE_BLOCKS * 2u)
+#define CHUNK_LEGACY_BLOCKS 65536u
+#define CHUNK_LEGACY_SIZE (16u + CHUNK_LEGACY_BLOCKS * 2u)
 
 /* Build "<dir>/chunks/c_<cx>_<cz>.bin" (always terminates, truncates).
  * Negative coords use a literal '-' (e.g. c_-1_4.bin) — parseable below.
@@ -194,22 +196,23 @@ int world_save_read_chunk(const char *dir, Chunk *c)
         return -3;
     }
     long sz = ftell(f);
-    if (sz != (long)CHUNK_FILE_SIZE) {
+    if (sz != (long)CHUNK_FILE_SIZE && sz != (long)CHUNK_LEGACY_SIZE) {
         fclose(f);
         return -4; /* Truncated/padded: reject. */
     }
+    const size_t file_size = (size_t)sz;
     if (fseek(f, 0, SEEK_SET) != 0) {
         fclose(f);
         return -3;
     }
-    unsigned char *buf = (unsigned char *)malloc(CHUNK_FILE_SIZE);
+    unsigned char *buf = (unsigned char *)malloc(file_size);
     if (buf == NULL) {
         fclose(f);
         return -5;
     }
-    size_t got = fread(buf, 1, CHUNK_FILE_SIZE, f);
+    size_t got = fread(buf, 1, file_size, f);
     fclose(f);
-    if (got != CHUNK_FILE_SIZE) {
+    if (got != file_size) {
         free(buf);
         return -6;
     }
@@ -219,15 +222,21 @@ int world_save_read_chunk(const char *dir, Chunk *c)
         return -7;
     }
     uint16_t file_version = get_u16(buf + 4);
-    if (file_version != 1 && file_version != (uint16_t)WORLD_CHUNK_VERSION) {
+    if (file_version != 1 && file_version != 2 && file_version != (uint16_t)WORLD_CHUNK_VERSION) {
         free(buf);
         return -8; /* Unknown version: refuse, don't guess. */
+    }
+    /* The size must match the version: 256-high files are versions 1 and 2 only. */
+    if ((file_version <= 2) != (file_size == CHUNK_LEGACY_SIZE)) {
+        free(buf);
+        return -4;
     }
     if (get_i32(buf + 6) != (int32_t)c->cx || get_i32(buf + 10) != (int32_t)c->cz) {
         free(buf);
         return -9;
     }
-    for (uint32_t i = 0; i < CHUNK_FILE_BLOCKS; ++i) {
+    const uint32_t file_blocks = file_version <= 2 ? CHUNK_LEGACY_BLOCKS : CHUNK_FILE_BLOCKS;
+    for (uint32_t i = 0; i < file_blocks; ++i) {
         uint16_t id = get_u16(buf + 16 + i * 2);
         /* Clamp unknown future IDs to stone (never crash on new blocks);
          * AIR..TORCH range is authoritative, anything else is suspect. */
@@ -263,7 +272,7 @@ int world_save_all(const char *dir, World *w, const Player *p, Vec3 spawn, bool 
     }
     memcpy(m.name, w->name, nl);
     m.name[nl] = '\0';
-    m.seed = (int64_t)w->seed;
+    m.seed = w->seed64 != 0 ? w->seed64 : (int64_t)w->seed;
     m.mode = w->mode;
     m.rules = w->rules;
     m.terrain_version = w->terrain_version;

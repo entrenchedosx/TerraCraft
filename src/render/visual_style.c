@@ -1,6 +1,7 @@
 #include "render/visual_style.h"
 #include "render/texture_atlas.h"
 #include "world/biome.h"
+#include "world/chunk.h"
 #include "world/world.h"
 #include "world/world_gen.h"
 #include "world/worldgen_v4.h"
@@ -30,6 +31,11 @@ static int visual_biome(const World *w, int x, int z)
 {
     if (!w)
         return BIOME_PLAINS;
+    if (w->terrain_version >= 6) {
+        /* Vanilla worlds store the tint biome of every column in its chunk. */
+        const Chunk *c = world_get_chunk(w, x >> 4, z >> 4);
+        return c ? c->biome[(z & 15) * 16 + (x & 15)] : BIOME_PLAINS;
+    }
     if (w->terrain_version >= 5)
         return worldgen5_climate(w->seed, x, z).biome;
     if (w->terrain_version >= 4)
@@ -70,7 +76,7 @@ static Vec3 tint_for_colors(Vec3 grass, Vec3 foliage, int tile)
      * Apply a relative tint so legacy owner assets and packs keep working. */
     if (tile == TILE_GRASS_TOP || tile == TILE_PLANT)
         return mmath_vec3(grass.x / (145.0f / 255), grass.y / (189.0f / 255), grass.z / (89.0f / 255));
-    if (tile == TILE_LEAVES)
+    if (tile == TILE_LEAVES || tile == TILE_JUNGLE_LEAVES || tile == TILE_ACACIA_LEAVES || tile == TILE_DARK_OAK_LEAVES)
         return mmath_vec3(foliage.x / (119.0f / 255), foliage.y / (171.0f / 255), foliage.z / (47.0f / 255));
     if (tile == TILE_GRASS_SIDE_OVERLAY)
         return grass;
@@ -88,7 +94,8 @@ Vec3 visual_tile_tint(const VisualTintGrid *g, int x, int z, int tile)
 
 Vec3 visual_world_tint(const World *w, int x, int z, int tile)
 {
-    if (tile != TILE_GRASS_TOP && tile != TILE_PLANT && tile != TILE_LEAVES && tile != TILE_GRASS_SIDE_OVERLAY)
+    if (tile != TILE_GRASS_TOP && tile != TILE_PLANT && tile != TILE_LEAVES && tile != TILE_GRASS_SIDE_OVERLAY &&
+        tile != TILE_JUNGLE_LEAVES && tile != TILE_ACACIA_LEAVES && tile != TILE_DARK_OAK_LEAVES)
         return tint_for_colors(mmath_vec3(1, 1, 1), mmath_vec3(1, 1, 1), tile);
     Vec3 g = {0}, f = {0};
     for (int dz = -2; dz <= 2; ++dz)

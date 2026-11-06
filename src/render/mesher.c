@@ -137,7 +137,7 @@ static int mesh_reserve_indices(MeshData *m, size_t extra_idx)
  */
 static bool mesher_occludes(uint16_t id)
 {
-    return id != (uint16_t)BLOCK_GLASS && id != (uint16_t)BLOCK_LEAVES && block_is_solid(id);
+    return id != (uint16_t)BLOCK_GLASS && id != (uint16_t)BLOCK_ICE && !block_is_leaves(id) && block_is_solid(id);
 }
 
 /* Emit one textured face quad with AO (4 verts, 6 indices).
@@ -501,7 +501,15 @@ MeshData *mesher_build_lit_mesh(const Chunk *c, const World *w, const VoxelLight
     m->index_cap = 36864;
     VisualTintGrid tints;
     visual_build_tints(w, c->cx, c->cz, &tints);
-    for (int y = 0; y < CHUNK_Y; ++y) {
+    /* Rows above the highest non-air block hold nothing to mesh (the column is 384 high). */
+    int y_end = 0;
+    for (size_t i = CHUNK_VOLUME; i > 0; --i) {
+        if (c->blocks[i - 1] != BLOCK_AIR) {
+            y_end = (int)((i - 1) / CHUNK_XZ_AREA) + 1;
+            break;
+        }
+    }
+    for (int y = 0; y < y_end; ++y) {
         for (int z = 0; z < CHUNK_Z; ++z) {
             for (int x = 0; x < CHUNK_X; ++x) {
                 uint16_t id = chunk_get_block(c, x, y, z);

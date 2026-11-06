@@ -17,10 +17,10 @@ int test_chunk_index(void)
     TEST_ASSERT(chunk_index(0, 0, 1) == 16);
     TEST_ASSERT(chunk_index(0, 1, 0) == 256);
     TEST_ASSERT(chunk_index(15, 0, 0) == 15);
-    TEST_ASSERT(chunk_index(15, 255, 15) == (size_t)(CHUNK_VOLUME - 1));
+    TEST_ASSERT(chunk_index(15, CHUNK_Y - 1, 15) == (size_t)(CHUNK_VOLUME - 1));
     { /* Avoid MSVC C4127 (constant conditional) under /W4. */
         int vol = CHUNK_VOLUME;
-        TEST_ASSERT(vol == 16 * 256 * 16);
+        TEST_ASSERT(vol == 16 * CHUNK_Y * 16);
     }
     /* Distinct neighbors map to distinct indices. */
     TEST_ASSERT(chunk_index(1, 64, 1) != chunk_index(2, 64, 1));

@@ -4,6 +4,7 @@
 #include "world/biome.h"
 #include "world/block.h"
 #include "world/chunk.h"
+#include "world/vgen.h"
 #include "world/world.h"
 #include "world/world_save.h"
 #include "world/worldgen_v4.h"
@@ -462,6 +463,21 @@ int world_generate_chunk(World *w, int cx, int cz)
     if (world_get_chunk(w, cx, cz) != NULL) {
         return -2;
     }
+    if (w->terrain_version >= 6) {
+        struct VGen *g = world_vgen(w);
+        if (g == NULL) {
+            return -5;
+        }
+        Chunk *vc = chunk_create(cx, cz);
+        if (vc == NULL) {
+            return -3;
+        }
+        if (!vgen_build_chunk(g, vc, cx, cz)) {
+            chunk_destroy(vc);
+            return -6;
+        }
+        return world_adopt_vanilla_chunk(w, vc);
+    }
     Chunk *c = chunk_create(cx, cz);
     if (c == NULL) {
         LOG_ERROR("world_generate_chunk: OOM chunk (%d,%d)", cx, cz);
@@ -564,4 +580,127 @@ int world_generate_chunk(World *w, int cx, int cz)
         return -4;
     }
     return 0;
+}
+
+/* ---- vanilla-exact worlds (terrain_version >= 6) --------------------------------------------------- */
+
+struct VGen *world_vgen(World *w)
+{
+    if (w == NULL || w->terrain_version < 6) {
+        return NULL;
+    }
+    const int64_t seed = w->seed64 != 0 ? w->seed64 : (int64_t)w->seed;
+    if (w->vgen != NULL && vgen_seed(w->vgen) != seed) {
+        vgen_destroy(w->vgen);
+        w->vgen = NULL;
+    }
+    if (w->vgen == NULL && !w->vgen_failed) {
+        char root[1024];
+        if (vgen_find_datapack(root, (int)sizeof(root))) {
+            w->vgen = vgen_create(root, seed);
+        } else {
+            LOG_ERROR("world: this world needs the vanilla worldgen data pack, which was not found");
+        }
+        if (w->vgen == NULL) {
+            w->vgen_failed = true;
+        }
+    }
+    return w->vgen;
+}
+
+int world_adopt_vanilla_chunk(World *w, Chunk *c)
+{
+    if (w == NULL || c == NULL) {
+        chunk_destroy(c);
+        return -1;
+    }
+    if (world_get_chunk(w, c->cx, c->cz) != NULL) {
+        chunk_destroy(c);
+        return -2;
+    }
+    /* A saved chunk holds the player's edits and wins; reading it leaves the biome columns alone. */
+    if (w->save_dir[0] != '\0' && world_save_read_chunk(w->save_dir, c) == 0) {
+        LOG_DEBUG("world: loaded saved chunk (%d,%d)", c->cx, c->cz);
+    }
+    c->dirty = true;
+    if (world_add_chunk(w, c) != 0) {
+        LOG_ERROR("world: world full, dropping chunk (%d,%d)", c->cx, c->cz);
+        chunk_destroy(c);
+        return -4;
+    }
+    return 0;
+}
+
+/* Feet-level ground that is fine to spawn on: dry, not under a canopy. */
+static bool vanilla_footing(uint16_t id)
+{
+    return id == BLOCK_GRASS || id == BLOCK_DIRT || id == BLOCK_SAND || id == BLOCK_SNOW || id == BLOCK_GRAVEL ||
+           id == BLOCK_SANDSTONE;
+}
+
+static int vanilla_top(const World *w, int x, int z)
+{
+    for (int y = CHUNK_Y - 1; y >= 0; --y) {
+        if (world_get_block(w, x, y, z) != BLOCK_AIR) {
+            return y;
+        }
+    }
+    return -1;
+}
+
+int world_find_spawn_vanilla(World *w, Vec3 *out)
+{
+    if (w == NULL || out == NULL || world_vgen(w) == NULL) {
+        return -1;
+    }
+    const int sea_surface = 127; /* Minecraft y 63 */
+    for (int ring = 0; ring <= 24; ++ring) {
+        for (int dz = -ring; dz <= ring; ++dz) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                if ((dx < 0 ? -dx : dx) != ring && (dz < 0 ? -dz : dz) != ring) {
+                    continue;
+                }
+                int cx = dx, cz = dz;
+                bool added = false;
+                if (world_get_chunk(w, cx, cz) == NULL && !vgen_chunk_may_be_land(world_vgen(w), cx, cz)) {
+                    continue; /* open water: no need to build the terrain to know it is no place to spawn */
+                }
+                if (world_get_chunk(w, cx, cz) == NULL) {
+                    if (world_generate_chunk(w, cx, cz) != 0) {
+                        return -2;
+                    }
+                    added = true;
+                }
+                /* Probe a few columns of the chunk; take the first with open, dry, solid ground. */
+                for (int pz = 4; pz <= 12; pz += 4) {
+                    for (int px = 4; px <= 12; px += 4) {
+                        int x = cx * 16 + px, z = cz * 16 + pz;
+                        int top = vanilla_top(w, x, z);
+                        if (top < sea_surface + 1 || top + 3 >= CHUNK_Y) {
+                            continue;
+                        }
+                        if (!vanilla_footing(world_get_block(w, x, top, z))) {
+                            continue;
+                        }
+                        bool flat = true;
+                        for (int oz = -1; oz <= 1 && flat; ++oz) {
+                            for (int ox = -1; ox <= 1 && flat; ++ox) {
+                                int t = vanilla_top(w, x + ox, z + oz);
+                                flat = t >= top - 1 && t <= top + 1 &&
+                                       vanilla_footing(world_get_block(w, x + ox, t, z + oz));
+                            }
+                        }
+                        if (flat) {
+                            *out = mmath_vec3((float)x + 0.5f, (float)top + 1.0f, (float)z + 0.5f);
+                            return 0;
+                        }
+                    }
+                }
+                if (added) {
+                    world_remove_chunk(w, cx, cz);
+                }
+            }
+        }
+    }
+    return -3;
 }

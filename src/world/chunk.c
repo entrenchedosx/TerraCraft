@@ -47,6 +47,7 @@ void chunk_init(Chunk *c, int cx, int cz)
     for (size_t i = 0; i < CHUNK_VOLUME; ++i) {
         c->blocks[i] = BLOCK_AIR;
     }
+    memset(c->biome, 0, sizeof(c->biome));
     memset(c->water_queued, 0, sizeof(c->water_queued));
     memset(c->water_deferred, 0, sizeof(c->water_deferred));
     c->water_deferred_count = 0;
@@ -64,7 +65,7 @@ void chunk_init(Chunk *c, int cx, int cz)
     c->aabb_max[2] = (float)cz * (float)CHUNK_Z + (float)CHUNK_Z;
 }
 
-/* Linear index (unchecked): (y * 256) + (z * 16) + x.
+/* Linear index (unchecked): (y * 256) + (z * 16) + x (256 = one layer of 16 x 16 cells).
  *
  * Args:
  *   x, y, z: local coords.

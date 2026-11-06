@@ -226,10 +226,26 @@ SOUNDS["splash"] = "random/splash.ogg"
 # (User pack BMPs bypass conversion and carry their own colors.)
 TILES["grass_side_overlay"] = "block/grass_block_side_overlay.png"
 
+# Terrain blocks of the vanilla-exact generator (stem -> block texture of the same name unless listed).
+for _stem in ("podzol_top", "podzol_side", "coarse_dirt", "mycelium_top", "mycelium_side", "mud", "clay", "red_sand",
+              "red_sandstone", "terracotta", "orange_terracotta", "white_terracotta", "yellow_terracotta",
+              "brown_terracotta", "red_terracotta", "light_gray_terracotta", "ice", "packed_ice", "andesite",
+              "diorite", "calcite", "birch_log", "birch_log_top", "spruce_log", "spruce_log_top", "jungle_log",
+              "jungle_log_top", "acacia_log", "acacia_log_top", "dark_oak_log", "dark_oak_log_top", "birch_leaves",
+              "spruce_leaves", "jungle_leaves", "acacia_leaves", "dark_oak_leaves"):
+    TILES[_stem] = "block/%s.png" % _stem
+
 TINTS = {
     "grass_top": (145, 189, 89),
     "plant": (145, 189, 89),
     "leaves": (119, 171, 47),
+    # Leaf textures are grey: bake the biome colour that does not vary (birch, spruce) or the plains foliage colour
+    # that the renderer then adjusts per biome (the others), exactly like the oak leaves above.
+    "jungle_leaves": (119, 171, 47),
+    "acacia_leaves": (119, 171, 47),
+    "dark_oak_leaves": (119, 171, 47),
+    "birch_leaves": (128, 167, 85),
+    "spruce_leaves": (97, 153, 97),
 }
 
 
@@ -665,6 +681,52 @@ def convert_visual_assets():
     print("visuals: native sky/HUD, isometric item icons, fluid timelines converted locally")
 
 
+# Vanilla-exact world generation reads the 1.21.11 data pack (the data generator's output) at run time. Only
+# the parts the generator opens are exported, beside the other generated assets, so a build folder or a release
+# zip carries everything it needs. Like the textures this is the owner's local copy and is never committed.
+DATAPACK_SRC = os.environ.get("TERRACRAFT_DATAPACK_SRC") or os.path.join(REPO, "reference", "1.21.11", "run", "out")
+GEN_DATAPACK = os.path.join(REPO, "mcassets", "generated", "datapack")
+DATAPACK_DIRS = [
+    "data/minecraft/worldgen/noise_settings", "data/minecraft/worldgen/density_function",
+    "data/minecraft/worldgen/noise", "data/minecraft/worldgen/biome",
+    "data/minecraft/worldgen/configured_carver", "data/minecraft/worldgen/configured_feature",
+    "data/minecraft/worldgen/placed_feature", "data/minecraft/tags/block",
+]
+DATAPACK_FILES = ["reports/biome_parameters/minecraft/overworld.json"]
+
+
+def export_datapack():
+    """Copy the world generator's data pack subset to mcassets/generated/datapack. Returns (files, missing)."""
+    import shutil
+    copied, missing = 0, []
+    if not os.path.isdir(DATAPACK_SRC):
+        return 0, ["data pack source folder %s" % DATAPACK_SRC]
+    shutil.rmtree(GEN_DATAPACK, ignore_errors=True)
+    for rel in DATAPACK_DIRS:
+        src = os.path.join(DATAPACK_SRC, rel)
+        if not os.path.isdir(src):
+            missing.append(rel)
+            continue
+        for root, _dirs, files in os.walk(src):
+            for name in files:
+                if not name.endswith(".json"):
+                    continue
+                dst = os.path.join(GEN_DATAPACK, os.path.relpath(os.path.join(root, name), DATAPACK_SRC))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(os.path.join(root, name), dst)
+                copied += 1
+    for rel in DATAPACK_FILES:
+        src = os.path.join(DATAPACK_SRC, rel)
+        if not os.path.isfile(src):
+            missing.append(rel)
+            continue
+        dst = os.path.join(GEN_DATAPACK, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src, dst)
+        copied += 1
+    return copied, missing
+
+
 def main():
     os.makedirs(GEN_TILES, exist_ok=True)
     os.makedirs(GEN_SOUNDS, exist_ok=True)
@@ -672,6 +734,9 @@ def main():
     os.makedirs(GEN_MENU, exist_ok=True)
     tiles_ok, tiles_missing = convert_tiles()
     convert_visual_assets()
+    pack_files, pack_missing = export_datapack()
+    print("world generator data pack: %d files exported%s" %
+          (pack_files, "" if not pack_missing else " (missing: %s)" % ", ".join(pack_missing)))
     if "--visuals-only" in sys.argv:
         print("tiles: %d converted, %d missing" % (tiles_ok, len(tiles_missing)))
         return 0 if not tiles_missing else 1

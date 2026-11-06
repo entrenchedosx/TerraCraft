@@ -2,6 +2,7 @@
 #include "core/log.h"
 #include "world/block.h"
 #include "world/chunk.h"
+#include "world/vgen.h"
 #include "world/water.h"
 #include "world/world_save.h"
 
@@ -109,6 +110,8 @@ void world_destroy(World *w)
         chunk_destroy(w->chunks[i]);
         w->chunks[i] = NULL;
     }
+    vgen_destroy(w->vgen);
+    w->vgen = NULL;
     hashmap_free(&w->chunk_map);
     free(w->water_updates);
     w->water_updates = NULL;

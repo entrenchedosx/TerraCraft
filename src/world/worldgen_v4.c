@@ -582,6 +582,8 @@ int worldgen_find_spawn_with_budget(World *w, Vec3 *out, int rings)
 {
     if (!w || !out)
         return -1;
+    if (w->terrain_version >= 6)
+        return world_find_spawn_vanilla(w, out);
     /* Seed-dependent origin, then deterministic rings. Screening estimates
      * avoids generating entire oceans. Acceptance always uses real blocks. */
     uint32_t h = noise_hash2(0, 0, (uint32_t)w->seed ^ 0x5FA1u);

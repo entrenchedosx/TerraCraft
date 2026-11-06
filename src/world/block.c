@@ -59,6 +59,42 @@ static const BlockInfo BLOCK_TABLE[BLOCK_COUNT] = {
     [BLOCK_GRANITE] = {.name = "granite", .solid = true, .transparent = false, .color_r = 0.62f, .color_g = 0.43f, .color_b = 0.36f, .hardness = 3.0f, .tool = 1, .min_tier = 1, .drop = BLOCK_GRANITE, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
     [BLOCK_RAW_IRON] = {.name = "raw_iron", .solid = true, .transparent = false, .color_r = 0.65f, .color_g = 0.52f, .color_b = 0.4f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = BLOCK_RAW_IRON, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
     [BLOCK_RAW_COPPER] = {.name = "raw_copper", .solid = true, .transparent = false, .color_r = 0.65f, .color_g = 0.42f, .color_b = 0.28f, .hardness = 3.0f, .tool = 1, .min_tier = 2, .drop = BLOCK_RAW_COPPER, .drop_count = 1, .unbreakable = false, .gravity_affected = false},
+#define TERRAIN_CUBE(nm, r, g, b, hard, tool_kind, tier, drop_id, falls)                                              \
+    {.name = nm, .solid = true, .transparent = false, .color_r = r, .color_g = g, .color_b = b, .hardness = hard,        \
+     .tool = tool_kind, .min_tier = tier, .drop = drop_id, .drop_count = 1, .unbreakable = false,                      \
+     .gravity_affected = falls}
+#define TERRAIN_LEAVES(nm, r, g, b)                                                                                   \
+    {.name = nm, .solid = true, .transparent = true, .color_r = r, .color_g = g, .color_b = b, .hardness = 0.2f,      \
+     .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = false, .gravity_affected = false}
+    [BLOCK_PODZOL] = TERRAIN_CUBE("podzol", 0.35f, 0.24f, 0.1f, 0.5f, 3, 1, BLOCK_DIRT, false),
+    [BLOCK_COARSE_DIRT] = TERRAIN_CUBE("coarse_dirt", 0.47f, 0.33f, 0.22f, 0.5f, 3, 1, BLOCK_DIRT, false),
+    [BLOCK_MYCELIUM] = TERRAIN_CUBE("mycelium", 0.45f, 0.38f, 0.45f, 0.6f, 3, 1, BLOCK_DIRT, false),
+    [BLOCK_MUD] = TERRAIN_CUBE("mud", 0.24f, 0.22f, 0.25f, 0.5f, 3, 1, BLOCK_DIRT, false),
+    [BLOCK_CLAY] = TERRAIN_CUBE("clay", 0.62f, 0.65f, 0.7f, 0.6f, 3, 1, BLOCK_DIRT, false),
+    [BLOCK_RED_SAND] = TERRAIN_CUBE("red_sand", 0.75f, 0.4f, 0.17f, 0.5f, 3, 1, BLOCK_SAND, true),
+    [BLOCK_RED_SANDSTONE] = TERRAIN_CUBE("red_sandstone", 0.7f, 0.37f, 0.15f, 0.8f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_TERRACOTTA] = TERRAIN_CUBE("terracotta", 0.6f, 0.38f, 0.28f, 1.25f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_ORANGE_TERRACOTTA] = TERRAIN_CUBE("orange_terracotta", 0.64f, 0.33f, 0.15f, 1.25f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_WHITE_TERRACOTTA] = TERRAIN_CUBE("white_terracotta", 0.82f, 0.7f, 0.63f, 1.25f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_YELLOW_TERRACOTTA] = TERRAIN_CUBE("yellow_terracotta", 0.73f, 0.52f, 0.14f, 1.25f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_BROWN_TERRACOTTA] = TERRAIN_CUBE("brown_terracotta", 0.45f, 0.29f, 0.2f, 1.25f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_RED_TERRACOTTA] = TERRAIN_CUBE("red_terracotta", 0.56f, 0.24f, 0.18f, 1.25f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_LIGHT_GRAY_TERRACOTTA] = TERRAIN_CUBE("light_gray_terracotta", 0.53f, 0.42f, 0.38f, 1.25f, 1, 1, BLOCK_SANDSTONE, false),
+    [BLOCK_ICE] = {.name = "ice", .solid = true, .transparent = true, .color_r = 0.55f, .color_g = 0.7f, .color_b = 0.95f, .hardness = 0.5f, .tool = 1, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = false, .gravity_affected = false},
+    [BLOCK_PACKED_ICE] = TERRAIN_CUBE("packed_ice", 0.55f, 0.68f, 0.9f, 0.5f, 1, 0, 0, false),
+    [BLOCK_ANDESITE] = TERRAIN_CUBE("andesite", 0.53f, 0.53f, 0.54f, 1.5f, 1, 1, BLOCK_STONE, false),
+    [BLOCK_DIORITE] = TERRAIN_CUBE("diorite", 0.75f, 0.75f, 0.76f, 1.5f, 1, 1, BLOCK_STONE, false),
+    [BLOCK_CALCITE] = TERRAIN_CUBE("calcite", 0.88f, 0.88f, 0.86f, 0.75f, 1, 1, BLOCK_TUFF, false),
+    [BLOCK_BIRCH_LOG] = TERRAIN_CUBE("birch_log", 0.8f, 0.77f, 0.68f, 2.0f, 2, 1, BLOCK_WOOD, false),
+    [BLOCK_SPRUCE_LOG] = TERRAIN_CUBE("spruce_log", 0.32f, 0.23f, 0.12f, 2.0f, 2, 1, BLOCK_WOOD, false),
+    [BLOCK_JUNGLE_LOG] = TERRAIN_CUBE("jungle_log", 0.35f, 0.28f, 0.12f, 2.0f, 2, 1, BLOCK_WOOD, false),
+    [BLOCK_ACACIA_LOG] = TERRAIN_CUBE("acacia_log", 0.42f, 0.38f, 0.34f, 2.0f, 2, 1, BLOCK_WOOD, false),
+    [BLOCK_DARK_OAK_LOG] = TERRAIN_CUBE("dark_oak_log", 0.24f, 0.17f, 0.08f, 2.0f, 2, 1, BLOCK_WOOD, false),
+    [BLOCK_BIRCH_LEAVES] = TERRAIN_LEAVES("birch_leaves", 0.5f, 0.65f, 0.33f),
+    [BLOCK_SPRUCE_LEAVES] = TERRAIN_LEAVES("spruce_leaves", 0.38f, 0.6f, 0.38f),
+    [BLOCK_JUNGLE_LEAVES] = TERRAIN_LEAVES("jungle_leaves", 0.2f, 0.6f, 0.1f),
+    [BLOCK_ACACIA_LEAVES] = TERRAIN_LEAVES("acacia_leaves", 0.45f, 0.6f, 0.15f),
+    [BLOCK_DARK_OAK_LEAVES] = TERRAIN_LEAVES("dark_oak_leaves", 0.15f, 0.45f, 0.12f),
     [BLOCK_LAVA] = {.name = "lava", .solid = false, .transparent = true, .color_r = 1.0f, .color_g = 0.35f, .color_b = 0.03f, .hardness = 3.0f, .tool = 0, .min_tier = 0, .drop = 0, .drop_count = 0, .unbreakable = true, .gravity_affected = false},
 };
 
@@ -115,7 +151,17 @@ bool block_is_transparent(uint16_t type)
  */
 bool block_is_blended(uint16_t type)
 {
-    return block_is_water(type) || type == BLOCK_GLASS;
+    return block_is_water(type) || type == BLOCK_GLASS || type == BLOCK_ICE;
+}
+
+bool block_is_log(uint16_t type)
+{
+    return type == BLOCK_WOOD || (type >= BLOCK_BIRCH_LOG && type <= BLOCK_DARK_OAK_LOG);
+}
+
+bool block_is_leaves(uint16_t type)
+{
+    return type == BLOCK_LEAVES || (type >= BLOCK_BIRCH_LEAVES && type <= BLOCK_DARK_OAK_LEAVES);
 }
 
 bool block_is_water(uint16_t type)
@@ -168,7 +214,8 @@ bool block_has_gravity(uint16_t type)
 
 int block_light_opacity(uint16_t type)
 {
-    if (type == BLOCK_LEAVES || block_is_water(type)) return 2;
+    if (block_is_leaves(type) || block_is_water(type)) return 2;
+    if (type == BLOCK_ICE) return 1;
     if (type == BLOCK_GLASS || !block_is_solid(type)) return 0;
     return 15;
 }
@@ -206,7 +253,7 @@ bool block_is_face_visible(uint16_t current, uint16_t neighbor)
     /* Fancy cutout leaves keep the interior surfaces. They fill holes in
      * the front leaf texture instead of
      * exposing the sky through a canopy. */
-    if (current == BLOCK_LEAVES && neighbor == BLOCK_LEAVES)
+    if (block_is_leaves(current) && block_is_leaves(neighbor))
         return true;
     /* Opaque current vs transparent neighbor: visible (e.g. stone next to
      * water/leaves). Transparent current vs opaque neighbor: handled from the

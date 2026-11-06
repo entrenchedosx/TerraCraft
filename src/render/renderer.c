@@ -1957,7 +1957,9 @@ static void renderer_draw_sky(Renderer *r, const Camera *cam, float aspect, cons
     shader_set_uniform_float(r->sky_tan_half_fov_loc, tan_half_fov);
     shader_set_uniform_float(r->sky_time_loc, shader_time);
     shader_set_uniform_float(r->sky_light_intensity_loc, intensity);
-    shader_set_uniform_float(r->sky_cloud_altitude_loc, 192.0f);
+    /* Vanilla clouds float at y 192; vanilla worlds are shifted up by 64 (see world/vgen.h). */
+    shader_set_uniform_float(r->sky_cloud_altitude_loc,
+                             r->light_world != NULL && r->light_world->terrain_version >= 6 ? 256.0f : 192.0f);
     shader_set_uniform_float(r->sky_underwater_loc, r->underwater ? 1.0f : 0.0f);
 
     GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);

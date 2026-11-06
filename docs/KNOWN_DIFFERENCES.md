@@ -59,10 +59,23 @@ Walking, swimming and falling run the vanilla 20 TPS model (see
   items, 157 entity types (from the 1.21.11 data generator); TerraCraft has
   tens of each.
 
-## World generation core (not wired into the game yet)
+## World generation, terrain version 6 (vanilla-exact)
 
-- The vanilla-exact generator (`jrandom` ... `jfeature`, `jstructure`) runs only in the differential harness and in
-  `worldgen_diff`; the game still uses its own terrain profiles.
+- Used by new worlds when the data pack is installed; see [WORLDGEN_PARITY.md](WORLDGEN_PARITY.md). Older terrain
+  versions never changed. A version-6 world cannot be opened without the data pack, and a LAN guest needs it too.
+- Features of neighbouring chunks are applied in a fixed order against the base terrain instead of vanilla's
+  generation order, so tree canopies and ores that overlap a chunk border can differ from the Java game there.
+- Only features the port implements run: ores, vegetation patches, flowers and trees (without cherry, mangrove, pale
+  oak and fallen trees). Missing: lakes, geodes, mushrooms, sugar cane, cacti, kelp and seagrass, dripstone, vines,
+  fossils and every structure. Terrain, caves, aquifers, biomes and ore placement are exact.
+- Block states do not exist: snow is a full block, tall plants are one block, leaves never decay, logs have no axis.
+- Grass, foliage and water tint use TerraCraft's seven classes, not the per-biome colour of the Java game.
+- The Nether and End are not generated.
+- Chunk files grew to 384 layers (about 196 KB each), and loaded chunks take about 300 KB, so memory use per chunk
+  is 1.5 times what it was.
+- The runtime reads only generator JSON; nothing from the data pack is compiled into the executable.
+
+## World generation core
 - The core tracks block *names*, not block states (no `axis`, `half`, `distance`, `waterlogged`, ...) and caps the registry at
   255 names; leaf decay distances, double-plant halves and similar properties are therefore absent.
 - Features implemented and verified: ores, 22 vegetation patch features, 32 of 39 tree configurations (all except cherry, mangrove, pale oak), structure-set placement. Fallen trees, the other feature types, structure piece generation,

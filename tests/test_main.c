@@ -74,6 +74,13 @@ int main(void)
     RUN_TEST(test_mesher_hidden_faces);
     RUN_TEST(test_mesher_cross_sprite);
     RUN_TEST(test_mesher_torch_model);
+    RUN_TEST(test_vgen_block_map);
+    RUN_TEST(test_vgen_order_independent);
+    RUN_TEST(test_vgen_async_matches_sync);
+    RUN_TEST(test_vgen_streamer);
+    RUN_TEST(test_vgen_water_settles);
+    RUN_TEST(test_vgen_spawn);
+    RUN_TEST(test_vgen_session_roundtrip);
     RUN_TEST(test_ao_diagonal_chunk_lifecycle);
     RUN_TEST(test_atlas_layout);
     RUN_TEST(test_atlas_tile_mapping);

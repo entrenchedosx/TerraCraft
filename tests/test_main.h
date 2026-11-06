@@ -120,6 +120,13 @@ int test_mesher_two_adjacent(void);
 int test_mesher_hidden_faces(void);
 int test_mesher_cross_sprite(void);
 int test_mesher_torch_model(void);
+int test_vgen_block_map(void);
+int test_vgen_order_independent(void);
+int test_vgen_async_matches_sync(void);
+int test_vgen_streamer(void);
+int test_vgen_water_settles(void);
+int test_vgen_spawn(void);
+int test_vgen_session_roundtrip(void);
 
 /* Atlas tests (defined in test_texture.c). */
 int test_atlas_layout(void);

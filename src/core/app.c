@@ -33,6 +33,7 @@
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/streamer.h"
+#include "world/vgen.h"
 #include "world/world.h"
 #include "world/world_gen.h"
 #include "world/world_meta.h"
@@ -988,7 +989,8 @@ static bool app_lan_send_welcome(AppContext *app, uint32_t peer_id)
     payload[at++] = LAN_MSG_WELCOME;
     payload[at++] = LAN_PROTOCOL_VERSION;
     app_net_write_u32(payload + at, peer_id); at += 4;
-    app_net_write_u64(payload + at, (uint64_t)(int64_t)app->world->seed); at += 8;
+    app_net_write_u64(payload + at, (uint64_t)(app->world->seed64 != 0 ? app->world->seed64 : (int64_t)app->world->seed));
+    at += 8;
     payload[at++] = (uint8_t)app->world->terrain_version;
     payload[at++] = (uint8_t)app->world->mode;
     app_net_write_f32(payload + at, app->player.pos.x); at += 4;
@@ -1220,9 +1222,10 @@ static bool app_lan_open_client_world(AppContext *app, const LanEvent *event)
     float day = app_net_read_f32(p + 32);
     size_t name_len = p[36];
     if (local_id == 0 || terrain_version < 1 || terrain_version > WORLD_TERRAIN_VERSION_CURRENT ||
+        (terrain_version >= 6 && !vgen_available()) ||
         (mode != WORLD_MODE_SURVIVAL && mode != WORLD_MODE_CREATIVE) || !isfinite(host_pos.x) ||
         !isfinite(host_pos.y) || !isfinite(host_pos.z) || !isfinite(host_yaw) || !isfinite(day) ||
-        host_pos.y < 0.0f || host_pos.y > 255.0f || name_len < PROFILE_NAME_MIN_LEN ||
+        host_pos.y < 0.0f || host_pos.y > (float)CHUNK_Y || name_len < PROFILE_NAME_MIN_LEN ||
         name_len > PROFILE_NAME_MAX_LEN || event->size != 37u + name_len) {
         return false;
     }
@@ -3157,7 +3160,21 @@ static uint16_t app_footstep_block(AppContext *app)
  */
 static AudioEvent app_footstep_event(uint16_t below)
 {
+    if (block_is_log(below)) {
+        return AUDIO_STEP_WOOD;
+    }
+    if (block_is_leaves(below)) {
+        return AUDIO_STEP_DIRT;
+    }
     switch (below) {
+    case BLOCK_RED_SAND:
+        return AUDIO_STEP_SAND;
+    case BLOCK_PODZOL:
+    case BLOCK_COARSE_DIRT:
+    case BLOCK_MYCELIUM:
+    case BLOCK_MUD:
+    case BLOCK_CLAY:
+        return AUDIO_STEP_DIRT;
     case BLOCK_WOOD:
     case BLOCK_WORKBENCH:
     case BLOCK_PLANKS:

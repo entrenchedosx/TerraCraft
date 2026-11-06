@@ -106,6 +106,42 @@ int block_tile_for_face(uint16_t block, int face)
     case BLOCK_RAW_IRON: return TILE_RAW_IRON;
     case BLOCK_RAW_COPPER: return TILE_RAW_COPPER;
     case BLOCK_LAVA: return TILE_LAVA;
+    case BLOCK_PODZOL:
+        return face == ATLAS_FACE_POS_Y ? TILE_PODZOL_TOP : (face == ATLAS_FACE_NEG_Y ? TILE_DIRT : TILE_PODZOL_SIDE);
+    case BLOCK_COARSE_DIRT: return TILE_COARSE_DIRT;
+    case BLOCK_MYCELIUM:
+        return face == ATLAS_FACE_POS_Y ? TILE_MYCELIUM_TOP : (face == ATLAS_FACE_NEG_Y ? TILE_DIRT : TILE_MYCELIUM_SIDE);
+    case BLOCK_MUD: return TILE_MUD;
+    case BLOCK_CLAY: return TILE_CLAY;
+    case BLOCK_RED_SAND: return TILE_RED_SAND;
+    case BLOCK_RED_SANDSTONE: return TILE_RED_SANDSTONE;
+    case BLOCK_TERRACOTTA: return TILE_TERRACOTTA;
+    case BLOCK_ORANGE_TERRACOTTA: return TILE_ORANGE_TERRACOTTA;
+    case BLOCK_WHITE_TERRACOTTA: return TILE_WHITE_TERRACOTTA;
+    case BLOCK_YELLOW_TERRACOTTA: return TILE_YELLOW_TERRACOTTA;
+    case BLOCK_BROWN_TERRACOTTA: return TILE_BROWN_TERRACOTTA;
+    case BLOCK_RED_TERRACOTTA: return TILE_RED_TERRACOTTA;
+    case BLOCK_LIGHT_GRAY_TERRACOTTA: return TILE_LIGHT_GRAY_TERRACOTTA;
+    case BLOCK_ICE: return TILE_ICE;
+    case BLOCK_PACKED_ICE: return TILE_PACKED_ICE;
+    case BLOCK_ANDESITE: return TILE_ANDESITE;
+    case BLOCK_DIORITE: return TILE_DIORITE;
+    case BLOCK_CALCITE: return TILE_CALCITE;
+    case BLOCK_BIRCH_LOG:
+        return face == ATLAS_FACE_POS_Y || face == ATLAS_FACE_NEG_Y ? TILE_BIRCH_LOG_TOP : TILE_BIRCH_LOG;
+    case BLOCK_SPRUCE_LOG:
+        return face == ATLAS_FACE_POS_Y || face == ATLAS_FACE_NEG_Y ? TILE_SPRUCE_LOG_TOP : TILE_SPRUCE_LOG;
+    case BLOCK_JUNGLE_LOG:
+        return face == ATLAS_FACE_POS_Y || face == ATLAS_FACE_NEG_Y ? TILE_JUNGLE_LOG_TOP : TILE_JUNGLE_LOG;
+    case BLOCK_ACACIA_LOG:
+        return face == ATLAS_FACE_POS_Y || face == ATLAS_FACE_NEG_Y ? TILE_ACACIA_LOG_TOP : TILE_ACACIA_LOG;
+    case BLOCK_DARK_OAK_LOG:
+        return face == ATLAS_FACE_POS_Y || face == ATLAS_FACE_NEG_Y ? TILE_DARK_OAK_LOG_TOP : TILE_DARK_OAK_LOG;
+    case BLOCK_BIRCH_LEAVES: return TILE_BIRCH_LEAVES;
+    case BLOCK_SPRUCE_LEAVES: return TILE_SPRUCE_LEAVES;
+    case BLOCK_JUNGLE_LEAVES: return TILE_JUNGLE_LEAVES;
+    case BLOCK_ACACIA_LEAVES: return TILE_ACACIA_LEAVES;
+    case BLOCK_DARK_OAK_LEAVES: return TILE_DARK_OAK_LEAVES;
     case BLOCK_GRASS:
         if (face == ATLAS_FACE_POS_Y) {
             return TILE_GRASS_TOP;
@@ -246,6 +282,42 @@ static const char *TILE_FILES[] = {
     "grass_side_overlay",
     "wheat_seeds",
     "shears",
+    "podzol_top",
+    "podzol_side",
+    "coarse_dirt",
+    "mycelium_top",
+    "mycelium_side",
+    "mud",
+    "clay",
+    "red_sand",
+    "red_sandstone",
+    "terracotta",
+    "orange_terracotta",
+    "white_terracotta",
+    "yellow_terracotta",
+    "brown_terracotta",
+    "red_terracotta",
+    "light_gray_terracotta",
+    "ice",
+    "packed_ice",
+    "andesite",
+    "diorite",
+    "calcite",
+    "birch_log",
+    "birch_log_top",
+    "spruce_log",
+    "spruce_log_top",
+    "jungle_log",
+    "jungle_log_top",
+    "acacia_log",
+    "acacia_log_top",
+    "dark_oak_log",
+    "dark_oak_log_top",
+    "birch_leaves",
+    "spruce_leaves",
+    "jungle_leaves",
+    "acacia_leaves",
+    "dark_oak_leaves",
 };
 /* Derived from the array so adding a tile can never desync the bound. */
 #define TILE_FILE_COUNT (sizeof(TILE_FILES) / sizeof(TILE_FILES[0]))
@@ -503,6 +575,36 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
     tile_speckle(out_px, TILE_RAW_COPPER, 110u, .22f, .12f);
     tile_fill(out_px, TILE_LAVA, 255, 89, 8, 255);
     tile_speckle(out_px, TILE_LAVA, 111u, .22f, .12f);
+    /* Terrain tiles of the vanilla generator: flat colours with speckle when no converted art is present. */
+    {
+        static const struct {
+            int tile;
+            unsigned char r, g, b, a;
+        } FILLS[] = {
+            {TILE_PODZOL_TOP, 92, 63, 28, 255},       {TILE_PODZOL_SIDE, 110, 80, 45, 255},
+            {TILE_COARSE_DIRT, 119, 85, 58, 255},     {TILE_MYCELIUM_TOP, 113, 98, 117, 255},
+            {TILE_MYCELIUM_SIDE, 110, 90, 90, 255},   {TILE_MUD, 60, 56, 62, 255},
+            {TILE_CLAY, 160, 166, 178, 255},          {TILE_RED_SAND, 190, 102, 33, 255},
+            {TILE_RED_SANDSTONE, 181, 98, 34, 255},   {TILE_TERRACOTTA, 152, 94, 67, 255},
+            {TILE_ORANGE_TERRACOTTA, 161, 83, 37, 255}, {TILE_WHITE_TERRACOTTA, 209, 178, 161, 255},
+            {TILE_YELLOW_TERRACOTTA, 186, 133, 35, 255}, {TILE_BROWN_TERRACOTTA, 77, 51, 36, 255},
+            {TILE_RED_TERRACOTTA, 143, 61, 46, 255},  {TILE_LIGHT_GRAY_TERRACOTTA, 135, 107, 98, 255},
+            {TILE_ICE, 145, 183, 253, 170},           {TILE_PACKED_ICE, 141, 180, 250, 255},
+            {TILE_ANDESITE, 136, 136, 136, 255},      {TILE_DIORITE, 188, 188, 188, 255},
+            {TILE_CALCITE, 223, 224, 220, 255},       {TILE_BIRCH_LOG, 216, 215, 210, 255},
+            {TILE_BIRCH_LOG_TOP, 195, 179, 123, 255}, {TILE_SPRUCE_LOG, 58, 37, 16, 255},
+            {TILE_SPRUCE_LOG_TOP, 108, 80, 46, 255},  {TILE_JUNGLE_LOG, 85, 67, 25, 255},
+            {TILE_JUNGLE_LOG_TOP, 149, 109, 70, 255}, {TILE_ACACIA_LOG, 103, 96, 86, 255},
+            {TILE_ACACIA_LOG_TOP, 168, 90, 50, 255},  {TILE_DARK_OAK_LOG, 60, 46, 26, 255},
+            {TILE_DARK_OAK_LOG_TOP, 65, 43, 20, 255}, {TILE_BIRCH_LEAVES, 128, 167, 85, 255},
+            {TILE_SPRUCE_LEAVES, 97, 153, 97, 255},   {TILE_JUNGLE_LEAVES, 48, 140, 20, 255},
+            {TILE_ACACIA_LEAVES, 119, 171, 47, 255},  {TILE_DARK_OAK_LEAVES, 119, 171, 47, 255},
+        };
+        for (size_t i = 0; i < sizeof(FILLS) / sizeof(FILLS[0]); ++i) {
+            tile_fill(out_px, FILLS[i].tile, FILLS[i].r, FILLS[i].g, FILLS[i].b, FILLS[i].a);
+            tile_speckle(out_px, FILLS[i].tile, 120u + (uint32_t)i, .22f, .12f);
+        }
+    }
     /* Snow: subtle cool speckle. */
     tile_speckle(out_px, TILE_SNOW, 40u, 0.04f, 0.03f);
 

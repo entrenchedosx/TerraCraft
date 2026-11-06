@@ -2,6 +2,7 @@
 #include "core/log.h"
 #include "core/time.h"
 #include "world/chunk.h"
+#include "world/vgen.h"
 #include "world/world.h"
 #include "world/world_gen.h"
 
@@ -40,6 +41,74 @@ static void mark_neighbours_dirty(World *w, int cx, int cz)
             n->dirty = true;
         }
     }
+}
+
+/* Vanilla worlds (terrain_version >= 6): chunks are built on the generator thread. Ask it for the nearest
+ * missing chunks, then adopt the finished ones (at most max_new per call). max_new <= 0 builds everything
+ * missing right here instead, which is what the initial fill and the tests expect.
+ *
+ * Returns: number of chunks added to the world.
+ */
+static int stream_vanilla(Streamer *s, struct VGen *g, int ccx, int ccz, int max_new)
+{
+    World *w = s->world;
+    int r = s->render_distance;
+    int generated = 0;
+    bool async = max_new > 0 && vgen_async_start(g);
+    if (!async) {
+        for (int ring = 0; ring <= r; ++ring) {
+            for (int dx = -ring; dx <= ring; ++dx) {
+                for (int dz = -ring; dz <= ring; ++dz) {
+                    if (dx != ring && dx != -ring && dz != ring && dz != -ring) {
+                        continue;
+                    }
+                    int cx = ccx + dx, cz = ccz + dz;
+                    if (world_get_chunk(w, cx, cz) != NULL) {
+                        continue;
+                    }
+                    if (max_new > 0 && generated >= max_new) {
+                        return generated;
+                    }
+                    if (world_generate_chunk(w, cx, cz) == 0) {
+                        generated++;
+                        s->generated_total++;
+                        mark_neighbours_dirty(w, cx, cz);
+                    }
+                }
+            }
+        }
+        return generated;
+    }
+    vgen_async_set_center(g, ccx, ccz, r);
+    bool full = false;
+    for (int ring = 0; ring <= r && !full; ++ring) {
+        for (int dx = -ring; dx <= ring && !full; ++dx) {
+            for (int dz = -ring; dz <= ring && !full; ++dz) {
+                if (dx != ring && dx != -ring && dz != ring && dz != -ring) {
+                    continue;
+                }
+                int cx = ccx + dx, cz = ccz + dz;
+                if (world_get_chunk(w, cx, cz) != NULL || vgen_async_has(g, cx, cz)) {
+                    continue;
+                }
+                full = !vgen_async_request(g, cx, cz);
+            }
+        }
+    }
+    Chunk *c;
+    while (generated < max_new && (c = vgen_async_poll(g)) != NULL) {
+        int cx = c->cx, cz = c->cz;
+        if (chebyshev(cx, cz, ccx, ccz) > r) {
+            chunk_destroy(c); /* The player moved on before it was ready. */
+            continue;
+        }
+        if (world_adopt_vanilla_chunk(w, c) == 0) {
+            generated++;
+            s->generated_total++;
+            mark_neighbours_dirty(w, cx, cz);
+        }
+    }
+    return generated;
 }
 
 /* Initialise a streamer.
@@ -117,6 +186,10 @@ void streamer_update(Streamer *s, Vec3 player_pos, int max_new)
      * Iterate rings from the center outward; stop at the budget. */
     int generated = 0;
     double t0 = time_now_seconds();
+    if (w->terrain_version >= 6 && world_vgen(w) != NULL) {
+        generated = stream_vanilla(s, world_vgen(w), ccx, ccz, max_new);
+        goto unload_pass;
+    }
     for (int ring = 0; ring <= r; ++ring) {
         for (int dx = -ring; dx <= ring; ++dx) {
             for (int dz = -ring; dz <= ring; ++dz) {

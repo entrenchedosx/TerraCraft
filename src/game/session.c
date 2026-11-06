@@ -15,6 +15,7 @@
 #include "render/renderer.h"
 #include "world/block.h"
 #include "world/streamer.h"
+#include "world/vgen.h"
 #include "world/world.h"
 #include "world/world_gen.h"
 #include "world/worldgen_v4.h"
@@ -94,6 +95,11 @@ int session_create_world_ex(const char *saves_root, const char *name, const char
     }
     bool blank = false;
     long seed = seed_parse(seed_field, &blank);
+    /* Vanilla-exact worlds take the full 64-bit seed with Java's text rules. */
+    WorldMeta m;
+    world_meta_defaults(&m);
+    const bool vanilla = m.terrain_version >= 6;
+    int64_t seed64 = vanilla ? seed_parse_vanilla(seed_field, &blank) : (int64_t)seed;
     if (blank) {
         /* Wall-clock-derived seed (mixed for same-second uniqueness). */
         long t = (long)time(NULL);
@@ -105,6 +111,14 @@ int session_create_world_ex(const char *saves_root, const char *name, const char
         seed = (long)((unsigned long)t ^ ((unsigned long)existing * 0x85ebca6bu) ^ 0x9e3779b9ul);
         if (seed == 0L) {
             seed = 1L;
+        }
+        seed64 = (int64_t)seed;
+        if (vanilla) {
+            /* Spread the clock over all 64 bits (splitmix64) so vanilla seeds look like Java's random ones. */
+            uint64_t z = (uint64_t)t * 0x9E3779B97F4A7C15ull + (uint64_t)existing * 0xBF58476D1CE4E5B9ull + 0x94D049BB133111EBull;
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+            seed64 = (int64_t)(z ^ (z >> 31));
         }
     }
     /* Uniquify: "Name", "Name (2)", "Name (3)", ... */
@@ -126,15 +140,13 @@ int session_create_world_ex(const char *saves_root, const char *name, const char
     if (path_is_dir(dir) || path_is_file(dir)) {
         return -3;
     }
-    WorldMeta m;
-    world_meta_defaults(&m);
     size_t nl = strlen(safe);
     if (nl > 63) {
         nl = 63;
     }
     memcpy(m.name, safe, nl);
     m.name[nl] = '\0';
-    m.seed = (int64_t)seed;
+    m.seed = seed64;
     m.mode = mode;
     if (rules != NULL) {
         m.rules = *rules;
@@ -202,11 +214,17 @@ int session_open_world(AppContext *app, const char *world_dir)
         LOG_ERROR("session_open_world: unreadable metadata (%s)", world_dir);
         return -3;
     }
+    if (m.terrain_version >= 6 && !vgen_available()) {
+        LOG_ERROR("session_open_world: '%s' uses the vanilla-exact generator but its data pack is not installed",
+                  world_dir);
+        return -8;
+    }
     World *w = world_create();
     if (w == NULL) {
         return -4;
     }
     w->seed = (long)m.seed;
+    w->seed64 = m.seed; /* Vanilla worlds use all 64 bits (long is 32 bits on Windows). */
     w->terrain_version = m.terrain_version;
     size_t nl = strlen(m.name);
     if (nl >= sizeof(w->name)) {
@@ -322,6 +340,11 @@ int session_open_world(AppContext *app, const char *world_dir)
 
     /* Staged loader target: full square around the spawn column. */
     app->load_total = (2 * rd + 1) * (2 * rd + 1);
+    if (w->terrain_version >= 6 && app->load_total > 49) {
+        /* Vanilla chunks take ~35 ms each on the generator thread; start playing once the 7 x 7 around the
+         * spawn is ready and let the rest stream in. */
+        app->load_total = 49;
+    }
     app->load_done = 0;
     app->world_open = true;
     session_apply_settings(app);

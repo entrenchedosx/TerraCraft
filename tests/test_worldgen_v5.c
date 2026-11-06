@@ -24,7 +24,7 @@
 static uint64_t block_hash(const Chunk *chunk)
 {
     uint64_t hash = UINT64_C(14695981039346656037);
-    for (int i = 0; i < CHUNK_VOLUME; ++i) {
+    for (int i = 0; i < 16 * 256 * 16; ++i) { /* y 0..255: the frozen profiles never reach above it */
         hash = (hash ^ (chunk->blocks[i] & 255u)) * UINT64_C(1099511628211);
         hash = (hash ^ (chunk->blocks[i] >> 8)) * UINT64_C(1099511628211);
     }

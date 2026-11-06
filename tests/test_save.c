@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Scratch root for save tests (created + removed by the tests). */
@@ -169,7 +170,7 @@ int test_meta_corrupt(void)
     TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Profile Two\nseed=8\nterrain_version=2\n",
                                  &m) == 0);
     TEST_ASSERT(m.terrain_version == 2); /* Existing profile is kept exactly. */
-    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=6\n",
+    TEST_ASSERT(world_meta_parse("format_version=1\nworld_name=Future Terrain\nseed=4\nterrain_version=7\n",
                                  &m) != 0);
     /* Missing directory fails. */
     TEST_ASSERT(world_meta_read("test_tmp_m5_no_such_dir_xyz", &m) != 0);
@@ -266,17 +267,27 @@ int test_chunk_water_version_compat(void)
     TEST_ASSERT(chunk_get_block(dst, 1, 10, 1) == BLOCK_WATER);
     TEST_ASSERT(chunk_get_block(dst, 2, 10, 1) == BLOCK_WATER_FLOW_1);
 
-    FILE *f = fopen(file, "r+b");
-    TEST_ASSERT(f != NULL);
-    if (f != NULL) {
-        TEST_ASSERT(fseek(f, 4, SEEK_SET) == 0);
-        TEST_ASSERT(fputc(1, f) != EOF && fputc(0, f) != EOF);
-        long flow_offset = 16L + (long)chunk_index(2, 10, 1) * 2L;
-        TEST_ASSERT(fseek(f, flow_offset, SEEK_SET) == 0);
-        TEST_ASSERT(fputc((int)(BLOCK_WATER_FLOW_1 & 0xffu), f) != EOF);
-        TEST_ASSERT(fputc((int)(BLOCK_WATER_FLOW_1 >> 8), f) != EOF);
+    /* Rewrite it as a genuine legacy file: version 1 and only the 256-high prefix (65536 entries). */
+    const size_t legacy_size = 16u + 65536u * 2u;
+    unsigned char *legacy = (unsigned char *)malloc(legacy_size);
+    FILE *f = fopen(file, "rb");
+    TEST_ASSERT(f != NULL && legacy != NULL);
+    if (f != NULL && legacy != NULL) {
+        TEST_ASSERT(fread(legacy, 1, legacy_size, f) == legacy_size);
         TEST_ASSERT(fclose(f) == 0);
+        legacy[4] = 1;
+        legacy[5] = 0;
+        size_t flow_offset = 16u + chunk_index(2, 10, 1) * 2u;
+        legacy[flow_offset] = (unsigned char)(BLOCK_WATER_FLOW_1 & 0xffu);
+        legacy[flow_offset + 1] = (unsigned char)(BLOCK_WATER_FLOW_1 >> 8);
+        f = fopen(file, "wb");
+        TEST_ASSERT(f != NULL);
+        if (f != NULL) {
+            TEST_ASSERT(fwrite(legacy, 1, legacy_size, f) == legacy_size);
+            TEST_ASSERT(fclose(f) == 0);
+        }
     }
+    free(legacy);
     chunk_fill(dst, BLOCK_AIR);
     TEST_ASSERT(world_save_read_chunk(dir, dst) == 0);
     TEST_ASSERT(chunk_get_block(dst, 1, 10, 1) == BLOCK_WATER);

@@ -1,9 +1,10 @@
 #pragma once
 
-/* Chunk storage (M1): fixed 16 x 256 x 16 column of block IDs.
+/* Chunk storage (M1): fixed 16 x 384 x 16 column of block IDs (world y 0..383;
+ * the vanilla-exact generator maps Minecraft y -64..319 onto it with +64).
  * Flat array, index = (y * 16 * 16) + (z * 16) + x  (y-major).
  * Storage is uint16_t to allow future block IDs beyond 255.
- * Chunks are heap-allocated (128 KiB each); use chunk_create/destroy.
+ * Chunks are heap-allocated (192 KiB each); use chunk_create/destroy.
  * Bounds-checked accessors. Meshing lives in render/mesher.h.
  */
 
@@ -12,14 +13,14 @@
 #include <stdint.h>
 
 #define CHUNK_X 16
-#define CHUNK_Y 256
+#define CHUNK_Y 384
 #define CHUNK_Z 16
 #define CHUNK_VOLUME (CHUNK_X * CHUNK_Y * CHUNK_Z)
 #define CHUNK_XZ_AREA (CHUNK_X * CHUNK_Z)
 
 /* Single chunk: origin in chunk coords (cx, cz) + block data.
  * The cached AABB (world-space) is used for frustum culling; it spans the
- * full column: min=(cx*16,0,cz*16), max=(cx*16+16,256,cz*16+16).
+ * full column: min=(cx*16,0,cz*16), max=(cx*16+16,CHUNK_Y,cz*16+16).
  * `dirty` flags GPU remesh; `save_dirty` flags disk persistence (set only
  * by player edits, never by generation, so untouched chunks cost no I/O).
  */
@@ -33,6 +34,8 @@ typedef struct Chunk {
     uint8_t gravity_queued[(CHUNK_VOLUME + 7) / 8]; /* Bounded-gravity queue dedupe bits. */
     uint8_t gravity_deferred[(CHUNK_VOLUME + 7) / 8]; /* Queue overflow recovery bits. */
     size_t gravity_deferred_count;
+    uint8_t biome[CHUNK_XZ_AREA]; /* Tint biome class (BiomeType) per column, index z * 16 + x; only filled by
+                                   * the vanilla generator (terrain_version >= 6), zero otherwise. */
     bool dirty; /* True when blocks changed since last mesh. */
     bool save_dirty; /* True when edited since last disk save. */
     float aabb_min[3]; /* Cached world-space AABB minimum. */
@@ -68,7 +71,7 @@ void chunk_init(Chunk *c, int cx, int cz);
  * Formula: (y * 16 * 16) + (z * 16) + x.
  *
  * Args:
- *   x: 0..15, y: 0..255, z: 0..15.
+ *   x: 0..15, y: 0..CHUNK_Y-1, z: 0..15.
  *
  * Returns: index into blocks[].
  */

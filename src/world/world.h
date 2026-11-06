@@ -29,8 +29,9 @@
 /* Sea level for water fill (M2 terrain fills water up to this height). */
 #define WORLD_SEA_LEVEL 64
 
-/* Forward declaration (full type in chunk.h). */
+/* Forward declarations (full types in chunk.h and vgen.h). */
 typedef struct Chunk Chunk;
+struct VGen;
 typedef struct WorldWaterUpdate WorldWaterUpdate;
 typedef void (*WorldBlockChangeCallback)(void *context, int wx, int wy, int wz, uint16_t block_id);
 /* Return false to defer the transition (for example, when a reliable LAN
@@ -46,8 +47,12 @@ typedef bool (*WorldGravityEventCallback)(void *context, bool landed, int wx, in
 typedef struct World {
     Chunk *chunks[WORLD_MAX_CHUNKS]; /* Owned pointers in [0,count); remainder is NULL. */
     size_t count;                    /* Number of live chunks. */
-    long seed;                       /* Generation seed. */
-    int terrain_version;             /* 1..4 = frozen profiles; 5 = revised climate/density pipeline. */
+    long seed;                       /* Generation seed (32 bits on Windows: older terrain versions only use this). */
+    int64_t seed64;                  /* Full 64-bit seed for the vanilla generator; 0 = fall back to seed. */
+    int terrain_version;             /* 1..4 = frozen profiles; 5 = revised climate/density pipeline;
+                                      * 6 = vanilla-exact generator (needs the data pack, see vgen.h). */
+    struct VGen *vgen;               /* Vanilla generator, created on demand for terrain_version >= 6. */
+    bool vgen_failed;                /* Creating it failed once; do not retry every chunk. */
     WorldWaterUpdate *water_updates;  /* Bounded coordinate queue; no chunk pointers. */
     size_t water_head;
     size_t water_count;

@@ -26,6 +26,14 @@ open.
 
 ## Features
 
+- **Vanilla-exact worlds (terrain version 6).** When the Java 1.21.11 world-generation data pack is installed
+  (`mcassets/generated/datapack/`, produced by `tools/convert_mcassets.py`), new worlds run ports of vanilla's
+  noise router, biome source, aquifers, carvers, surface rules, ore, vegetation and tree features, bit-exact
+  against the real server in the differential harness. Seeds work like Java: a decimal long is used as is and any
+  other text goes through `String.hashCode`. Minecraft's y -64..319 is stored as 0..383. See
+  [World generation parity](docs/WORLDGEN_PARITY.md) and [Known differences](docs/KNOWN_DIFFERENCES.md) for what
+  is still approximated (blocks and plants without a counterpart, structures, Nether/End). Without the data pack,
+  new worlds fall back to profile 5 and version-6 saves refuse to open.
 - Seeded terrain with seven biomes, caves, ores, trees, and vegetation.
 - New-world density generation with coherent continents, climate regions,
   three cave scales, local aquifers, eight ore types, mineral veins and
@@ -69,7 +77,7 @@ open.
 - Direct LAN play: one player opens a world to LAN, and up to eight other
   players can join by the host computer's local IPv4 address. Player movement,
   chat, and block changes made during the session are shared.
-- 292 registered headless test functions in the custom test runner.
+- 299 registered headless test functions in the custom test runner.
 
 ## Controls
 

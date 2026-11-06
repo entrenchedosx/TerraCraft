@@ -56,6 +56,37 @@ typedef enum BlockType {
     BLOCK_RAW_IRON = 37,
     BLOCK_RAW_COPPER = 38,
     BLOCK_LAVA = 39,
+    /* Terrain blocks that come from the vanilla-exact generator (terrain_version 6). Decorative: they drop a
+     * related item (dirt, sand, ...) and have no item of their own yet. */
+    BLOCK_PODZOL = 40,
+    BLOCK_COARSE_DIRT = 41,
+    BLOCK_MYCELIUM = 42,
+    BLOCK_MUD = 43,
+    BLOCK_CLAY = 44,
+    BLOCK_RED_SAND = 45,
+    BLOCK_RED_SANDSTONE = 46,
+    BLOCK_TERRACOTTA = 47,
+    BLOCK_ORANGE_TERRACOTTA = 48,
+    BLOCK_WHITE_TERRACOTTA = 49,
+    BLOCK_YELLOW_TERRACOTTA = 50,
+    BLOCK_BROWN_TERRACOTTA = 51,
+    BLOCK_RED_TERRACOTTA = 52,
+    BLOCK_LIGHT_GRAY_TERRACOTTA = 53,
+    BLOCK_ICE = 54,
+    BLOCK_PACKED_ICE = 55,
+    BLOCK_ANDESITE = 56,
+    BLOCK_DIORITE = 57,
+    BLOCK_CALCITE = 58,
+    BLOCK_BIRCH_LOG = 59,
+    BLOCK_SPRUCE_LOG = 60,
+    BLOCK_JUNGLE_LOG = 61,
+    BLOCK_ACACIA_LOG = 62,
+    BLOCK_DARK_OAK_LOG = 63,
+    BLOCK_BIRCH_LEAVES = 64,
+    BLOCK_SPRUCE_LEAVES = 65,
+    BLOCK_JUNGLE_LEAVES = 66,
+    BLOCK_ACACIA_LEAVES = 67,
+    BLOCK_DARK_OAK_LEAVES = 68,
     BLOCK_COUNT /* Sentinel: number of block types. */
 } BlockType;
 
@@ -115,6 +146,10 @@ bool block_is_transparent(uint16_t type);
  * Returns: true for blended-pass blocks.
  */
 bool block_is_blended(uint16_t type);
+
+/* Oak wood and every other log (all drop the oak log item), and every leaf variant. */
+bool block_is_log(uint16_t type);
+bool block_is_leaves(uint16_t type);
 
 /* Fluid-state helpers. BLOCK_WATER is a source; horizontal flow is level
  * 1..7 and falling water keeps full height while fed from above. */

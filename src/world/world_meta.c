@@ -1,5 +1,6 @@
 #include "world/world_meta.h"
 #include "core/path.h"
+#include "world/vgen.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -18,7 +19,8 @@ void world_meta_defaults(WorldMeta *m)
     memcpy(m->name, "World", 6);
     m->seed = 0;
     m->mode = WORLD_MODE_SURVIVAL;
-    m->terrain_version = WORLD_TERRAIN_VERSION_CURRENT;
+    /* New worlds use the vanilla-exact generator whenever its data pack is installed. */
+    m->terrain_version = vgen_available() ? WORLD_TERRAIN_VERSION_CURRENT : WORLD_TERRAIN_VERSION_FALLBACK;
     m->px = 8.5f;
     m->py = 80.0f;
     m->pz = 8.5f;

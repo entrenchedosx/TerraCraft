@@ -192,6 +192,7 @@ struct JFeatures {
     TagSet *tags;
     int tag_count, tag_cap;
     int changed;
+    bool quiet;            /* skip the stderr note for unsupported placed features */
     JTreeTags tree_tags;
     struct ConfiguredCache {
         char name[NAME_LEN];
@@ -1807,6 +1808,13 @@ static bool type_allowed(const char *type, const char *const *types, int count)
     return false;
 }
 
+void jfeatures_set_quiet(JFeatures *f, bool quiet)
+{
+    if (f != NULL) {
+        f->quiet = quiet;
+    }
+}
+
 bool jfeatures_decorate(JFeatures *f, JSurface *surface, int64_t seed, JRegion *region, const char *const *types,
                         int type_count, const char *const *names, int name_count)
 {
@@ -1878,7 +1886,9 @@ bool jfeatures_decorate(JFeatures *f, JSurface *surface, int64_t seed, JRegion *
                 continue;
             }
             if (!pf_all_supported(pf)) {
-                fprintf(stderr, "jfeature: placed feature %s uses an unsupported modifier, feature or predicate\n", pf->name);
+                if (!f->quiet) {
+                    fprintf(stderr, "jfeature: placed feature %s uses an unsupported modifier, feature or predicate\n", pf->name);
+                }
                 ok = false;
                 continue;
             }

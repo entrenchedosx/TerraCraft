@@ -6,6 +6,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* FNV-1a 64-bit hash of a byte string (deterministic across platforms).
  *
@@ -31,3 +32,9 @@ unsigned long long seed_hash_text(const char *text, size_t len);
  * 32-bit-long platforms — documented, deterministic per platform).
  */
 long seed_parse(const char *field, bool *is_blank);
+
+/* Seed field of a vanilla-exact world, parsed like Minecraft Java (WorldOptions.parseSeed): a decimal long
+ * (optional sign) is used as is, anything else becomes Java's String.hashCode of the text (UTF-16 code units),
+ * so the same text gives the same world as in the Java game. Blank sets *is_blank (the caller picks a random
+ * seed). Full 64 bits, unlike seed_parse on platforms where long is 32 bits. */
+int64_t seed_parse_vanilla(const char *field, bool *is_blank);

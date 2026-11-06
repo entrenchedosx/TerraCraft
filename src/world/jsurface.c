@@ -357,6 +357,8 @@ struct JSurface {
     BiomeChunk **stored;
     int stored_count, stored_cap;
     BiomeChunk *last_stored;
+    int *stored_hash;                /* open addressing over stored[]: index + 1, 0 = empty */
+    int stored_hash_cap;
     int64_t epoch_xz, epoch_y;       /* SurfaceRules.Context.lastUpdateXZ / lastUpdateY */
     char root[1024];
 };
@@ -674,16 +676,64 @@ float jsurface_biome_temperature(JSurface *s, const char *biome, int x, int y, i
     return biome_temperature(s, biome_info(s, biome), x, y, z);
 }
 
+/* A long-running game keeps generating new chunks, so the stored biomes are a bounded cache: when it is
+ * full the older half is dropped (and recomputed from the same noise if it is asked for again). */
+#define BIOME_STORE_MAX 1536
+
+static unsigned biome_hash_pos(int cx, int cz, int cap)
+{
+    uint32_t h = (uint32_t)cx * 0x9E3779B1u ^ ((uint32_t)cz + 0x7F4A7C15u) * 0x85EBCA6Bu;
+    h ^= h >> 15;
+    return (unsigned)(h % (uint32_t)cap);
+}
+
+static void biome_hash_rebuild(JSurface *s)
+{
+    int cap = 4096;
+    int *tab = (int *)calloc((size_t)cap, sizeof(int));
+    if (tab == NULL) {
+        free(s->stored_hash);
+        s->stored_hash = NULL;
+        s->stored_hash_cap = 0;
+        return;
+    }
+    for (int i = 0; i < s->stored_count; ++i) {
+        unsigned p = biome_hash_pos(s->stored[i]->cx, s->stored[i]->cz, cap);
+        while (tab[p] != 0) {
+            p = (p + 1u) % (unsigned)cap;
+        }
+        tab[p] = i + 1;
+    }
+    free(s->stored_hash);
+    s->stored_hash = tab;
+    s->stored_hash_cap = cap;
+}
+
 static BiomeChunk *biome_chunk(JSurface *s, int cx, int cz)
 {
     if (s->last_stored != NULL && s->last_stored->cx == cx && s->last_stored->cz == cz) {
         return s->last_stored;
     }
-    for (int i = 0; i < s->stored_count; ++i) {
-        if (s->stored[i]->cx == cx && s->stored[i]->cz == cz) {
-            s->last_stored = s->stored[i];
-            return s->stored[i];
+    if (s->stored_hash != NULL) {
+        unsigned p = biome_hash_pos(cx, cz, s->stored_hash_cap);
+        while (s->stored_hash[p] != 0) {
+            BiomeChunk *e = s->stored[s->stored_hash[p] - 1];
+            if (e->cx == cx && e->cz == cz) {
+                s->last_stored = e;
+                return e;
+            }
+            p = (p + 1u) % (unsigned)s->stored_hash_cap;
         }
+    }
+    if (s->stored_count >= BIOME_STORE_MAX) {
+        int drop = s->stored_count / 2;
+        for (int i = 0; i < drop; ++i) {
+            free(s->stored[i]);
+        }
+        memmove(s->stored, s->stored + drop, (size_t)(s->stored_count - drop) * sizeof(BiomeChunk *));
+        s->stored_count -= drop;
+        s->last_stored = NULL;
+        biome_hash_rebuild(s);
     }
     BiomeChunk *bc = (BiomeChunk *)calloc(1, sizeof(BiomeChunk));
     if (bc == NULL) {
@@ -709,6 +759,15 @@ static BiomeChunk *biome_chunk(JSurface *s, int cx, int cz)
     }
     s->stored[s->stored_count++] = bc;
     s->last_stored = bc;
+    if (s->stored_hash == NULL) {
+        biome_hash_rebuild(s);
+    } else {
+        unsigned p = biome_hash_pos(cx, cz, s->stored_hash_cap);
+        while (s->stored_hash[p] != 0) {
+            p = (p + 1u) % (unsigned)s->stored_hash_cap;
+        }
+        s->stored_hash[p] = s->stored_count;
+    }
     return bc;
 }
 
@@ -1306,6 +1365,7 @@ void jsurface_free(JSurface *s)
         free(s->stored[i]);
     }
     free(s->stored);
+    free(s->stored_hash);
     jbiome_free(s->biomes);
     free(s);
 }

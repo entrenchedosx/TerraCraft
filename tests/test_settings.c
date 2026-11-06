@@ -154,6 +154,13 @@ int test_seed_parse(void)
     TEST_ASSERT(seed_parse("123456", &blank) == 123456L && blank == false);
     TEST_ASSERT(seed_parse("  -5  ", &blank) == -5L && blank == false);
     TEST_ASSERT(seed_parse("0x10", &blank) == 16L && blank == false);
+    /* Vanilla seeds: a full 64-bit decimal as is, any other text through Java's String.hashCode. */
+    TEST_ASSERT(seed_parse_vanilla("-4172144997902289642", &blank) == INT64_C(-4172144997902289642) && !blank);
+    TEST_ASSERT(seed_parse_vanilla("+77", &blank) == 77 && !blank);
+    TEST_ASSERT(seed_parse_vanilla("9223372036854775807", &blank) == INT64_MAX);
+    TEST_ASSERT(seed_parse_vanilla("hello", &blank) == 99162322 && !blank);
+    TEST_ASSERT(seed_parse_vanilla("glacier", &blank) == 108181935 && !blank); /* "glacier".hashCode() */
+    TEST_ASSERT(seed_parse_vanilla("  ", &blank) == 0 && blank);
     long t1 = seed_parse("Test", &blank);
     long t2 = seed_parse("Test", &blank);
     TEST_ASSERT(blank == false && t1 == t2 && t1 != 0L);

@@ -1,6 +1,36 @@
 # World-generation parity
 
-**Status: not vanilla-compatible. No parity is claimed.**
+**Status (terrain version 6): the game can generate vanilla-exact terrain when the data pack is installed.**
+Profiles 1-5 (below) are TerraCraft's own generators, are unrelated to vanilla, and stay for existing saves.
+Version 6 runs the ports listed in the stage table; everything those stages do is checked bit for bit against
+the real 1.21.11 server in the differential harness. What reaches the screen is not the same thing, see
+"Version 6 in the game" for the approximations on top.
+
+## Version 6 in the game
+
+`src/world/vgen.c` turns the ports into game chunks:
+
+- **Height.** Minecraft y -64..319 is stored as chunk y 0..383 (`CHUNK_Y` is 384), so the sea surface is y 127 and
+  bedrock sits at y 0..4. Chunk files are version 3 (384 layers); versions 1 and 2 (256 layers) still load.
+- **Order independence.** Vanilla decorates a chunk against its already generated neighbours, so its result depends
+  on the order the player explores in. The game builds `final(C) = base(C) + decoration of every chunk N in the
+  3 x 3 around C that lands in C`, where `base` is fill + surface + carvers and the decoration of `N` is computed once
+  against the pure base chunks of the 3 x 3 around `N`. A chunk is therefore the same whichever way you arrive, and
+  features of one chunk see each other as in vanilla; only overlaps between features of different chunks (a canopy
+  crossing a chunk border) are resolved in a fixed order instead of vanilla's generation order. Tests check that.
+- **Threading.** One worker thread builds chunks (about 35 ms each at render distance 8, caches included); the
+  streamer asks for the nearest missing chunks and adopts finished ones, so the render thread never waits. The
+  generator is serialised by a mutex, which lets the synchronous callers (spawn search, tests) share it.
+- **Blocks.** Block names are mapped onto TerraCraft's blocks (`vgen_map_block_name`). 29 terrain blocks were added
+  for this (podzol, coarse dirt, mycelium, mud, clay, red sand, red sandstone, seven terracotta colours, ice, packed
+  ice, andesite, diorite, calcite, five more logs and five more leaves). Plants, flowers and rare blocks without a
+  counterpart map to the nearest one or to air.
+- **Snow and ice.** The `freeze_top_layer` feature is not ported, so the converter does it: exposed water in biomes
+  colder than 0.15 becomes ice and exposed ground becomes snow (a full snow block stands in for the layer).
+- **Biome tint.** Each column stores one of TerraCraft's seven tint classes chosen from its vanilla biome.
+- **Data.** The generator reads the data pack at run time (`$TERRACRAFT_DATAPACK`, then
+  `mcassets/generated/datapack`, then `reference/1.21.11/run/out`). `tools/convert_mcassets.py` exports the 858
+  files it needs (6.5 MB) next to the other generated assets, and like them they are never committed.
 
 TerraCraft's generator (profiles 1–5, `src/world/world_gen.c`,
 `worldgen_v4.c`, `worldgen_v5.c`; see [WORLD_GENERATION.md](WORLD_GENERATION.md))

@@ -106,6 +106,7 @@ set(TERRACRAFT_SOURCES
     src/world/jfeature.c
     src/world/jtree.c
     src/world/jstructure.c
+    src/world/vgen.c
   src/world/worldgen_parity.c
   src/world/streamer.c
   src/world/biome.c
@@ -219,6 +220,7 @@ add_executable(terracraft_tests
   tests/test_biome.c
   tests/test_worldgen_v4.c
   tests/test_worldgen_v5.c
+  tests/test_vgen.c
   tests/test_settings.c
   tests/test_profile.c
   tests/test_ui.c
@@ -289,6 +291,9 @@ endif()
 install(TARGETS terracraft RUNTIME DESTINATION bin)
 add_executable(worldgen_diff tools/worldgen_diff.c)
 target_link_libraries(worldgen_diff PRIVATE terracraft_core)
+
+add_executable(vgen_bench tools/vgen_bench.c)
+target_link_libraries(vgen_bench PRIVATE terracraft_core)
 
 add_executable(worldgen_probe tools/worldgen_probe.c)
 target_link_libraries(worldgen_probe PRIVATE terracraft_core)
