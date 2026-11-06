@@ -438,6 +438,7 @@ static void app_poll_cursor_drop(AppContext *app);
 static void app_debug_spawn_mob(AppContext *app, EntityType type);
 static void app_position_camera(AppContext *app);
 static void app_draw_player_third(AppContext *app, float aspect);
+static void app_pop_unsupported_above(AppContext *app, int bx, int by, int bz);
 static void app_poll_discrete_input(AppContext *app)
 {
     /* Creative flight is toggled by double-tapping Space (vphys), as in Java Edition. */
@@ -2518,6 +2519,7 @@ static void app_tick_creative_actions(AppContext *app)
             if (broken >= 0) {
                 audio_play_block(&app->audio, AUDIO_BLOCK_BREAK, (uint16_t)broken);
                 particle_burst_block(&app->particles, (uint16_t)broken, hit.block[0], hit.block[1], hit.block[2], 16);
+                app_pop_unsupported_above(app, hit.block[0], hit.block[1], hit.block[2]);
                 LOG_DEBUG("break ok: id %d", broken);
             }
         }
@@ -3068,7 +3070,7 @@ static void app_tick_mining(AppContext *app, float dt)
     /* Tool wear: one use per successful break with a damageable held tool
      * (swinging air never reaches here). A spent tool breaks loudly. */
     ItemStack *tool_slot = &app->player.inv.slots[app->player.hotbar_sel];
-    if (tool_slot->item == hand && stack_use_tool(tool_slot)) {
+    if (tool_slot->item == hand && block_get_info((uint16_t)broken)->hardness > 0.0f && stack_use_tool(tool_slot)) {
         audio_play(&app->audio, AUDIO_TOOL_BREAK);
         LOG_INFO("tool broke: %s", item_get_info(hand)->name);
     }
@@ -3080,8 +3082,35 @@ static void app_tick_mining(AppContext *app, float dt)
     /* Deterministic bonus drops (e.g. leaves apples) roll even when the
      * block itself drops nothing. */
     ItemStack bonus = {ITEM_NONE, 0, 0};
-    if (survival_bonus_drop(app->world->seed, (uint16_t)broken, done.bx, done.by, done.bz, &bonus)) {
+    if (survival_bonus_drop_held(app->world->seed, (uint16_t)broken, done.bx, done.by, done.bz, hand, &bonus)) {
         app_spawn_drop(app, at, &bonus);
+    }
+    app_pop_unsupported_above(app, done.bx, done.by, done.bz);
+}
+
+/* Short grass, flowers and torches break (and drop their loot) when the block below them goes away,
+ * like the neighbour update of Java Edition. Walks up the column so a stack of decor never survives. */
+static void app_pop_unsupported_above(AppContext *app, int bx, int by, int bz)
+{
+    for (int y = by + 1; y < CHUNK_Y; ++y) {
+        uint16_t above = world_get_block(app->world, bx, y, bz);
+        if (!block_is_cross(above) || interaction_cross_supported(app->world, bx, y, bz, above)) {
+            return;
+        }
+        if (!world_set_block(app->world, bx, y, bz, BLOCK_AIR)) {
+            return;
+        }
+        audio_play_block(&app->audio, AUDIO_BLOCK_BREAK, above);
+        particle_burst_block(&app->particles, above, bx, y, bz, 12);
+        Vec3 at = mmath_vec3((float)bx + 0.5f, (float)y + 0.5f, (float)bz + 0.5f);
+        ItemStack drop = survival_block_drop(above, ITEM_NONE);
+        if (!stack_is_empty(&drop)) {
+            app_spawn_drop(app, at, &drop);
+        }
+        ItemStack bonus = {ITEM_NONE, 0, 0};
+        if (survival_bonus_drop_held(app->world->seed, above, bx, y, bz, ITEM_NONE, &bonus)) {
+            app_spawn_drop(app, at, &bonus);
+        }
     }
 }
 
@@ -3287,18 +3316,7 @@ static void app_tick_place(AppContext *app)
         if (!inv_consume(&app->player.inv, sel, 1)) {
             LOG_WARN("place: consume failed after successful placement");
         }
-        if (replaced != BLOCK_AIR) {
-            audio_play_block(&app->audio, AUDIO_BLOCK_BREAK, replaced);
-            ItemStack drop = survival_block_drop(replaced, held);
-            if (!stack_is_empty(&drop)) {
-                /* The replacement occupies the original cell; start the
-                 * drop above it so collision resolution keeps it visible. */
-                Vec3 at = mmath_vec3((float)(hit.block[0] + hit.normal[0]) + 0.5f,
-                                     (float)(hit.block[1] + hit.normal[1]) + 1.05f,
-                                     (float)(hit.block[2] + hit.normal[2]) + 0.5f);
-                app_spawn_drop(app, at, &drop);
-            }
-        }
+        /* Replacing short grass or water just removes it: placing never drops loot. */
     }
 }
 
@@ -4032,7 +4050,8 @@ static void app_render_playing(AppContext *app)
     {
         const ItemStack *held = &app->player.inv.slots[app->player.hotbar_sel];
         int held_tile = stack_is_empty(held) ? -1 : item_get_info(held->item)->tile;
-        uint16_t held_block = stack_is_empty(held) ? 0 : item_to_block(held->item);
+        /* Decor blocks (short grass, flowers, torches) are held as flat sprites, not cubes. */
+        uint16_t held_block = stack_is_empty(held) || item_is_flat(held->item) ? 0 : item_to_block(held->item);
         /* No floating arm in third-person: the real body is visible. */
         if (!app->third_person) {
             /* The drawn item lags the held one while the hand is lowered for a

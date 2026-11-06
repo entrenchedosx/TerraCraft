@@ -244,6 +244,8 @@ static const char *TILE_FILES[] = {
     "raw_copper",
     "lava",
     "grass_side_overlay",
+    "wheat_seeds",
+    "shears",
 };
 /* Derived from the array so adding a tile can never desync the bound. */
 #define TILE_FILE_COUNT (sizeof(TILE_FILES) / sizeof(TILE_FILES[0]))
@@ -820,6 +822,32 @@ void texture_atlas_fill_rgba(unsigned char *out_px)
         for (int x = 3; x <= 12; ++x) {
             put_px(out_px, col, row, x, 5, 200, 140, 130, 255);
             put_px(out_px, col, row, x, 11, 120, 45, 40, 255);
+        }
+    }
+
+    /* Wheat seeds: a few small olive seeds, on transparency. */
+    {
+        int col = TILE_WHEAT_SEEDS % ATLAS_TILES;
+        int row = TILE_WHEAT_SEEDS / ATLAS_TILES;
+        static const int seeds[6][2] = {{5, 5}, {9, 4}, {7, 8}, {11, 9}, {4, 11}, {8, 12}};
+        for (int i = 0; i < 6; ++i) {
+            put_px(out_px, col, row, seeds[i][0], seeds[i][1], 112, 118, 52, 255);
+            put_px(out_px, col, row, seeds[i][0] + 1, seeds[i][1], 86, 92, 38, 255);
+            put_px(out_px, col, row, seeds[i][0], seeds[i][1] + 1, 86, 92, 38, 255);
+        }
+    }
+
+    /* Shears: two crossed iron blades with red-brown handles, on transparency. */
+    {
+        int col = TILE_SHEARS % ATLAS_TILES;
+        int row = TILE_SHEARS / ATLAS_TILES;
+        for (int i = 0; i < 9; ++i) {
+            put_px(out_px, col, row, 4 + i, 3 + i, 205, 205, 210, 255);
+            put_px(out_px, col, row, 12 - i, 3 + i, 168, 168, 175, 255);
+        }
+        for (int i = 0; i < 3; ++i) {
+            put_px(out_px, col, row, 2 + i, 12 + i, 120, 52, 44, 255);
+            put_px(out_px, col, row, 13 - i, 12 + i, 120, 52, 44, 255);
         }
     }
 

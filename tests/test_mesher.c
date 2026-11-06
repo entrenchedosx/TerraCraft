@@ -33,7 +33,7 @@ int test_mesher_cross_sprite(void)
     TEST_ASSERT(block_is_cross(BLOCK_TORCH) == true);
     TEST_ASSERT(block_is_cross(BLOCK_STONE) == false);
     TEST_ASSERT(block_is_cross(BLOCK_LEAVES) == false);
-    Chunk *c = make_single_block(8, 64, 8, BLOCK_TORCH);
+    Chunk *c = make_single_block(8, 64, 8, BLOCK_FLOWER);
     TEST_ASSERT(c != NULL);
     if (c == NULL) {
         return failures + 1;
@@ -43,12 +43,13 @@ int test_mesher_cross_sprite(void)
     if (m != NULL) {
         TEST_ASSERT(m->vertex_count == 16);
         TEST_ASSERT(m->index_count == 24);
-        /* All verts inside the cell, normals unit length. */
+        /* Verts stay within the cell plus vanilla's horizontal plant offset (up to 0.25 each way, quads scaled
+         * to 0.9); normals unit length. */
         int sane = 1;
         for (size_t i = 0; i < m->vertex_count && sane; ++i) {
             const float *v = m->vertices + i * MESHER_FLOATS_PER_VERTEX;
-            if (!(v[0] >= 8.0f && v[0] <= 9.0f && v[1] >= 64.0f && v[1] <= 65.0f && v[2] >= 8.0f &&
-                  v[2] <= 9.0f)) {
+            if (!(v[0] >= 7.79f && v[0] <= 9.21f && v[1] >= 64.0f && v[1] <= 65.0f && v[2] >= 7.79f &&
+                  v[2] <= 9.21f)) {
                 sane = 0;
             }
             float len2 = v[3] * v[3] + v[4] * v[4] + v[5] * v[5];
@@ -57,7 +58,7 @@ int test_mesher_cross_sprite(void)
             }
             /* V spans the full tile (v1 top corners, v0 bottom corners). */
             float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
-            texture_atlas_tile_uv(TILE_TORCH, &u0, &v0, &u1, &v1);
+            texture_atlas_tile_uv(TILE_FLOWER, &u0, &v0, &u1, &v1);
             int is_top = (v[1] == 65.0f);
             int is_bottom = (v[1] == 64.0f);
             if (!((is_top && v[7] == v1) || (is_bottom && v[7] == v0))) {
@@ -80,6 +81,47 @@ int test_mesher_cross_sprite(void)
             }
         }
         TEST_ASSERT(diag_a == 1 && diag_b == 1);
+        mesher_free(m);
+    }
+    chunk_destroy(c);
+    return failures;
+}
+
+/* Test: a torch meshes as the vanilla template_torch model: a 2x10x2 pixel pole centred in its cell (x/z 7..9 of
+ * 16, y 0..10 of 16) with four side faces and a top face, 20 vertices and 30 indices, unit normals. */
+int test_mesher_torch_model(void)
+{
+    int failures = 0;
+    Chunk *c = make_single_block(8, 64, 8, BLOCK_TORCH);
+    TEST_ASSERT(c != NULL);
+    if (c == NULL) {
+        return failures + 1;
+    }
+    MeshData *m = mesher_build_chunk_mesh(c, NULL);
+    TEST_ASSERT(m != NULL);
+    if (m != NULL) {
+        TEST_ASSERT(m->vertex_count == 20);
+        TEST_ASSERT(m->index_count == 30);
+        int inside = 1;
+        int top = 0;
+        const float lo = 7.0f / 16.0f, hi = 9.0f / 16.0f, h = 10.0f / 16.0f;
+        for (size_t i = 0; i < m->vertex_count; ++i) {
+            const float *v = m->vertices + i * MESHER_FLOATS_PER_VERTEX;
+            float lx = v[0] - 8.0f, ly = v[1] - 64.0f, lz = v[2] - 8.0f;
+            if (lx < lo - 1e-4f || lx > hi + 1e-4f || lz < lo - 1e-4f || lz > hi + 1e-4f || ly < -1e-4f ||
+                ly > h + 1e-4f) {
+                inside = 0;
+            }
+            float len2 = v[3] * v[3] + v[4] * v[4] + v[5] * v[5];
+            if (len2 < 0.999f || len2 > 1.001f) {
+                inside = 0;
+            }
+            if (v[4] > 0.5f) {
+                ++top;
+            }
+        }
+        TEST_ASSERT(inside == 1);
+        TEST_ASSERT(top == 4);
         mesher_free(m);
     }
     chunk_destroy(c);

@@ -70,10 +70,14 @@ typedef enum SurvivalEatResult {
     SURVIVAL_EAT_DONE      /* An item was fully eaten this tick. */
 } SurvivalEatResult;
 
-/* Leaf apple bonus: deterministic 1-in-8 per leaves cell (no RNG stream,
- * so drops are stable across reloads and testable).
+/* Bonus drops follow the 1.21.11 loot tables with deterministic per-cell rolls (no RNG stream,
+ * so drops are stable across reloads and testable): leaves give an apple 0.5% of the time and
+ * 1-2 sticks 2% of the time; short grass gives wheat seeds 12.5% of the time. Shears skip the
+ * rolls and take the block itself instead.
  */
-#define SURVIVAL_LEAF_BONUS_ONE_IN 8
+#define SURVIVAL_LEAF_APPLE_ONE_IN 200
+#define SURVIVAL_LEAF_STICK_ONE_IN 50
+#define SURVIVAL_GRASS_SEEDS_ONE_IN 8
 
 /* Mining completion event (returned, never allocated). */
 typedef struct MineResult {
@@ -286,6 +290,9 @@ void survival_bow_reset(Player *p);
  * Returns: true when a bonus dropped (out filled), false otherwise.
  */
 bool survival_bonus_drop(long seed, uint16_t block, int x, int y, int z, ItemStack *out);
+
+/* Same as survival_bonus_drop for a given held item (shears suppress the bonus rolls). */
+bool survival_bonus_drop_held(long seed, uint16_t block, int x, int y, int z, ItemId held, ItemStack *out);
 
 /* Hold-to-eat state machine (pure CPU: `holding` is the caller's input
  * edge/level, so this is fully unit-testable). Uses the selected hotbar

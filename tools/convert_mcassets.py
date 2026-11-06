@@ -146,6 +146,8 @@ TILES = {
     "raw_iron": "block/raw_iron_block.png",
     "raw_copper": "block/raw_copper_block.png",
     "lava": "block/lava_still.png",
+    "wheat_seeds": "item/wheat_seeds.png",
+    "shears": "item/shears.png",
 }
 
 # Mob skins: generated name -> (source, keep-native-size). Skins keep
@@ -603,6 +605,12 @@ def convert_visual_assets():
         hud.paste(image,(x,y))
     if available:
         _write_rgba_bmp(hud, os.path.join(GEN_MENU,"hud.bmp"))
+    # Vanilla container backgrounds (256x256 sheets whose 176x166 panel holds the slot art).
+    for name, source in (("inventory", "inventory"), ("crafting_table", "crafting_table"),
+                         ("creative_items", "creative_inventory/tab_items")):
+        image = _visual_image("gui/container/" + source + ".png")
+        if image is not None and image.size == (256, 256):
+            _write_rgba_bmp(image, os.path.join(GEN_MENU, name + ".bmp"))
 
     def tile(stem):
         path = os.path.join(GEN_TILES,stem+".bmp")

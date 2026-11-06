@@ -598,26 +598,48 @@ int test_leaf_bonus(void)
     TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_STONE, 0, 64, 0, &out) == false);
     TEST_ASSERT(stack_is_empty(&out));
     TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, 0, 64, 0, NULL) == false);
-    /* Find one hitting and one missing cell (deterministic search). */
-    int hx = -1, mx = -1;
-    for (int x = 0; x < 64 && (hx < 0 || mx < 0); ++x) {
+    /* Leaves follow the loot table: apple 1 in 200, else 1-2 sticks 1 in 50 (deterministic per cell). Find one cell
+     * of each outcome and one miss. */
+    int apple_x = -1, stick_x = -1, miss_x = -1;
+    for (int x = 0; x < 20000 && (apple_x < 0 || stick_x < 0 || miss_x < 0); ++x) {
         ItemStack probe;
         if (survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, x, 64, 0, &probe)) {
-            if (hx < 0) {
-                hx = x;
+            if (probe.item == ITEM_APPLE && apple_x < 0) {
+                apple_x = x;
+            } else if (probe.item == ITEM_STICK && stick_x < 0) {
+                stick_x = x;
             }
-        } else if (mx < 0) {
-            mx = x;
+        } else if (miss_x < 0) {
+            miss_x = x;
         }
     }
-    TEST_ASSERT(hx >= 0 && mx >= 0);
-    /* Hit is stable across calls and yields exactly one apple. */
+    TEST_ASSERT(apple_x >= 0 && stick_x >= 0 && miss_x >= 0);
+    /* Hits are stable across calls: exactly one apple, or one to two sticks. */
     ItemStack a;
     ItemStack b;
-    TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, hx, 64, 0, &a) == true);
-    TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, hx, 64, 0, &b) == true);
+    TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, apple_x, 64, 0, &a) == true);
+    TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, apple_x, 64, 0, &b) == true);
     TEST_ASSERT(a.item == ITEM_APPLE && a.count == 1);
     TEST_ASSERT(b.item == ITEM_APPLE && b.count == 1);
-    TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, mx, 64, 0, &a) == false);
+    TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, stick_x, 64, 0, &a) == true);
+    TEST_ASSERT(a.item == ITEM_STICK && a.count >= 1 && a.count <= 2);
+    TEST_ASSERT(survival_bonus_drop(42L, (uint16_t)BLOCK_LEAVES, miss_x, 64, 0, &a) == false);
+    /* Shears replace the chance rolls (the leaves themselves drop instead). */
+    TEST_ASSERT(survival_bonus_drop_held(42L, (uint16_t)BLOCK_LEAVES, apple_x, 64, 0, ITEM_SHEARS, &a) == false);
+    /* Short grass: 1 in 8 wheat seeds by hand, never with shears; the shears drop the plant itself. */
+    int seed_x = -1;
+    for (int x = 0; x < 256 && seed_x < 0; ++x) {
+        ItemStack probe;
+        if (survival_bonus_drop(42L, (uint16_t)BLOCK_GRASS_PLANT, x, 64, 0, &probe)) {
+            seed_x = x;
+            TEST_ASSERT(probe.item == ITEM_WHEAT_SEEDS && probe.count == 1);
+        }
+    }
+    TEST_ASSERT(seed_x >= 0);
+    TEST_ASSERT(survival_bonus_drop_held(42L, (uint16_t)BLOCK_GRASS_PLANT, seed_x, 64, 0, ITEM_SHEARS, &a) == false);
+    a = survival_block_drop((uint16_t)BLOCK_GRASS_PLANT, ITEM_SHEARS);
+    TEST_ASSERT(a.item == BLOCK_GRASS_PLANT && a.count == 1);
+    a = survival_block_drop((uint16_t)BLOCK_LEAVES, ITEM_SHEARS);
+    TEST_ASSERT(a.item == BLOCK_LEAVES && a.count == 1);
     return failures;
 }

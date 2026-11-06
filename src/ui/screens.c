@@ -1454,48 +1454,178 @@ static void screen_paused(AppContext *app, const UiFrame *ui)
     }
 }
 
-/* Inventory slot metrics (shared by survival + creative screens). */
-#define SINV_SLOT 44.0f
-#define SINV_GAP 4.0f
-#define SINV_PITCH (SINV_SLOT + SINV_GAP)
-#define SINV_COLS 9
-#define SINV_GRID_W ((float)SINV_COLS * SINV_SLOT + (float)(SINV_COLS - 1) * SINV_GAP)
-#define SINV_PAD 16.0f
-
-/* Draw one slot cell background and report hover. The item sprite (if
- * any) goes into the screen's icon batch (one pass after the grids);
- * the stack count goes on top via sslot_count after the icons.
- * Interaction is owned by the caller (survival vs creative differ).
+/* ---- Vanilla container screens ----------------------------------------------------------------------------
+ * The UI canvas is the 2x-baseline canvas, so one Minecraft GUI pixel is SG canvas units and every slot, label
+ * and scrollbar below sits at its exact vanilla pixel coordinate inside the container sheet (176x166 for the
+ * player inventory and crafting table, 195x136 for the creative item tab). A slot is a 16x16 item area inside
+ * an 18x18 cell; the cell art is part of the converted sheet (a flat fallback is drawn without it).
  */
-static bool sslot_draw(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y,
-                       const ItemStack *slot, IconBatch *icons)
+#define SG 2.0f
+#define SG_ITEM (16.0f * SG)
+#define SINV_COLS 9
+#define SG_MAX_COUNTS 64
+#define SG_LABEL 0.251f /* 0x404040, the vanilla container label colour. */
+
+typedef struct SgScreen {
+    float rects[SCR_MAX_RECT_VERTS * 6];
+    size_t rn;
+    IconBatch icons;
+    float px, py;  /* Panel top-left in canvas units (even, so GUI pixels land on device pixels). */
+    bool textured; /* The vanilla sheet drew the panel and the slot cells. */
+    int ncounts;
+    float count_x[SG_MAX_COUNTS], count_y[SG_MAX_COUNTS];
+    uint16_t count_n[SG_MAX_COUNTS];
+    bool hov; /* A slot is under the cursor. */
+    float hov_x, hov_y;
+    ItemStack hov_stack;
+} SgScreen;
+
+/* Flat stand-in for the vanilla panel when the converted sheet is absent (CI, no owner assets). */
+static void sg_fallback_panel(SgScreen *sg, float w, float h)
 {
-    bool hov = ui_hit(ui->mouse_x, ui->mouse_y, x, y, SINV_SLOT, SINV_SLOT);
-    float b = hov ? 0.30f : 0.16f;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x, y, SINV_SLOT, SINV_SLOT, b, b, b + 0.02f, 0.92f);
-    if (!stack_is_empty(slot) && icons != NULL) {
-        const ItemInfo *info = item_get_info(slot->item);
-        icons_push(icons, x + 8.0f, y + 8.0f, SINV_SLOT - 16.0f, info->tile);
+    float *r = sg->rects;
+    size_t *n = &sg->rn;
+    srect(r, n, SCR_MAX_RECT_VERTS, sg->px, sg->py, w, h, 0.0f, 0.0f, 0.0f, 1.0f);
+    srect(r, n, SCR_MAX_RECT_VERTS, sg->px + 2.0f, sg->py + 2.0f, w - 4.0f, h - 4.0f, 0.776f, 0.776f, 0.776f, 1.0f);
+    srect(r, n, SCR_MAX_RECT_VERTS, sg->px + 2.0f, sg->py + 2.0f, w - 4.0f, 4.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+    srect(r, n, SCR_MAX_RECT_VERTS, sg->px + 2.0f, sg->py + 2.0f, 4.0f, h - 4.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+    srect(r, n, SCR_MAX_RECT_VERTS, sg->px + 2.0f, sg->py + h - 6.0f, w - 4.0f, 4.0f, 0.545f, 0.545f, 0.545f, 1.0f);
+    srect(r, n, SCR_MAX_RECT_VERTS, sg->px + w - 6.0f, sg->py + 2.0f, 4.0f, h - 4.0f, 0.545f, 0.545f, 0.545f, 1.0f);
+}
+
+/* Dim the world, centre the panel and draw its background. kind: 0 inventory, 1 crafting table, 2 creative. */
+static void sg_begin(AppContext *app, SgScreen *sg, int kind, float gui_w, float gui_h)
+{
+    sg->rn = 0;
+    icons_clear(&sg->icons);
+    sg->ncounts = 0;
+    sg->hov = false;
+    sg->hov_x = sg->hov_y = 0.0f;
+    stack_clear(&sg->hov_stack);
+    float w = gui_w * SG, h = gui_h * SG;
+    sg->px = 2.0f * floorf(((float)screen_width(app) - w) * 0.25f);
+    sg->py = 2.0f * floorf(((float)screen_height(app) - h) * 0.25f);
+    srect(sg->rects, &sg->rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f,
+          0.0f, 0.0f, 0.55f);
+    sflush(app, sg->rects, &sg->rn);
+    sg->textured = renderer_draw_container_panel(app->renderer, screen_width(app), screen_height(app), kind, sg->px,
+                                                 sg->py, SG);
+    if (!sg->textured) {
+        sg_fallback_panel(sg, w, h);
+        sflush(app, sg->rects, &sg->rn);
     }
-    sflush(app, rects, rn);
+}
+
+/* Container label at a GUI-pixel position inside the panel (no shadow, vanilla dark grey). */
+static void sg_label(AppContext *app, const SgScreen *sg, float gx, float gy, const char *text)
+{
+    renderer_draw_text(app->renderer, sg->px + gx * SG, sg->py + gy * SG, SCR_TEXT_SCALE, SG_LABEL, SG_LABEL, SG_LABEL,
+                       1.0f, text);
+}
+
+/* Slot cell for the fallback panel: dark top/left edge, light bottom/right edge, mid-grey fill. */
+static void sg_fallback_cell(SgScreen *sg, float x, float y)
+{
+    srect(sg->rects, &sg->rn, SCR_MAX_RECT_VERTS, x - 2.0f, y - 2.0f, SG_ITEM + 4.0f, SG_ITEM + 4.0f, 0.216f, 0.216f,
+          0.216f, 1.0f);
+    srect(sg->rects, &sg->rn, SCR_MAX_RECT_VERTS, x, y, SG_ITEM + 2.0f, SG_ITEM + 2.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+    srect(sg->rects, &sg->rn, SCR_MAX_RECT_VERTS, x, y, SG_ITEM, SG_ITEM, 0.545f, 0.545f, 0.545f, 1.0f);
+}
+
+/* Queue one slot at the canvas position of its 16x16 item area: cell (fallback only), hover highlight behind the
+ * item, the item sprite and its count. Returns true while the cursor is over the slot. Interaction stays with the
+ * caller (survival vs creative differ).
+ */
+static bool sg_slot(const UiFrame *ui, SgScreen *sg, float x, float y, const ItemStack *slot)
+{
+    bool hov = ui_hit(ui->mouse_x, ui->mouse_y, x, y, SG_ITEM, SG_ITEM);
+    if (!sg->textured) {
+        sg_fallback_cell(sg, x, y);
+    }
+    if (hov) {
+        /* slot_highlight_back: translucent white behind the item. */
+        srect(sg->rects, &sg->rn, SCR_MAX_RECT_VERTS, x, y, SG_ITEM, SG_ITEM, 1.0f, 1.0f, 1.0f, 0.376f);
+        sg->hov = true;
+        sg->hov_x = x;
+        sg->hov_y = y;
+        sg->hov_stack = *slot;
+    }
+    if (!stack_is_empty(slot)) {
+        icons_push(&sg->icons, x, y, SG_ITEM, item_get_info(slot->item)->tile);
+        if (slot->count > 1 && sg->ncounts < SG_MAX_COUNTS) {
+            sg->count_x[sg->ncounts] = x;
+            sg->count_y[sg->ncounts] = y;
+            sg->count_n[sg->ncounts] = slot->count;
+            sg->ncounts++;
+        }
+    }
     return hov;
 }
 
-/* Draw a stack count label (bottom-right of the slot). Called after the
- * icon pass so counts always read over sprites (Minecraft convention).
- */
-static void sslot_count(AppContext *app, float x, float y, const ItemStack *slot)
+/* Stack count at the bottom-right of a slot, white over a dark drop shadow (vanilla font rendering). */
+static void sg_count_text(AppContext *app, float x, float y, unsigned count)
 {
-    if (stack_is_empty(slot) || slot->count <= 1) {
-        return;
-    }
     char cb[8];
-    snprintf(cb, sizeof(cb), "%u", (unsigned)slot->count);
+    snprintf(cb, sizeof(cb), "%u", count);
     float tw = 0.0f;
     float th = 0.0f;
-    renderer_measure_text(app->renderer, cb, SCR_SMALL_SCALE + 1.0f, &tw, &th);
-    renderer_draw_text(app->renderer, x + SINV_SLOT - tw - 3.0f, y + SINV_SLOT - th - 2.0f, SCR_SMALL_SCALE + 1.0f,
-                       1.0f, 1.0f, 1.0f, 1.0f, cb);
+    renderer_measure_text(app->renderer, cb, SCR_TEXT_SCALE, &tw, &th);
+    float tx = x + 34.0f - tw;
+    float ty = y + 18.0f;
+    renderer_draw_text(app->renderer, tx + 2.0f, ty + 2.0f, SCR_TEXT_SCALE, 0.247f, 0.247f, 0.247f, 1.0f, cb);
+    renderer_draw_text(app->renderer, tx, ty, SCR_TEXT_SCALE, 1.0f, 1.0f, 1.0f, 1.0f, cb);
+}
+
+/* Item-name tooltip next to the cursor: dark purple box with the vanilla two-tone border, white shadowed text. */
+static void sg_tooltip(AppContext *app, int mx, int my, const char *text)
+{
+    float tw = 0.0f;
+    float th = 0.0f;
+    renderer_measure_text(app->renderer, text, SCR_TEXT_SCALE, &tw, &th);
+    float tx = (float)mx + 12.0f * SG;
+    float ty = (float)my - 12.0f * SG;
+    float maxx = (float)screen_width(app) - tw - 10.0f;
+    float maxy = (float)screen_height(app) - th - 10.0f;
+    tx = tx > maxx ? maxx : tx;
+    ty = ty > maxy ? maxy : (ty < 10.0f ? 10.0f : ty);
+    float rects[24 * 6];
+    size_t rn = 0;
+    const float bw = tw + 16.0f, bh = th + 16.0f;
+    srect(rects, &rn, 24, tx - 8.0f, ty - 8.0f, bw, bh * 0.5f, 0.16f, 0.0f, 0.36f, 0.96f);
+    srect(rects, &rn, 24, tx - 8.0f, ty - 8.0f + bh * 0.5f, bw, bh * 0.5f, 0.10f, 0.0f, 0.22f, 0.96f);
+    srect(rects, &rn, 24, tx - 6.0f, ty - 6.0f, bw - 4.0f, bh - 4.0f, 0.0627f, 0.0f, 0.0627f, 0.94f);
+    renderer_draw_rects(app->renderer, screen_width(app), screen_height(app), rects, rn);
+    renderer_draw_text(app->renderer, tx + 2.0f, ty + 2.0f, SCR_TEXT_SCALE, 0.247f, 0.247f, 0.247f, 1.0f, text);
+    renderer_draw_text(app->renderer, tx, ty, SCR_TEXT_SCALE, 1.0f, 1.0f, 1.0f, 1.0f, text);
+}
+
+/* Flush the queued rects, draw item sprites, counts, the front highlight, then the held stack at the cursor (or
+ * the hovered item's tooltip when the cursor is empty). */
+static void sg_finish(AppContext *app, const UiFrame *ui, SgScreen *sg)
+{
+    sflush(app, sg->rects, &sg->rn);
+    renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &sg->icons);
+    for (int i = 0; i < sg->ncounts; ++i) {
+        sg_count_text(app, sg->count_x[i], sg->count_y[i], (unsigned)sg->count_n[i]);
+    }
+    if (sg->hov) {
+        /* slot_highlight_front: a faint white veil over the item. */
+        srect(sg->rects, &sg->rn, SCR_MAX_RECT_VERTS, sg->hov_x, sg->hov_y, SG_ITEM, SG_ITEM, 1.0f, 1.0f, 1.0f, 0.125f);
+        sflush(app, sg->rects, &sg->rn);
+    }
+    if (!stack_is_empty(&app->cursor)) {
+        IconBatch cur;
+        icons_clear(&cur);
+        float x = (float)ui->mouse_x - SG_ITEM * 0.5f;
+        float y = (float)ui->mouse_y - SG_ITEM * 0.5f;
+        icons_push(&cur, x, y, SG_ITEM, item_get_info(app->cursor.item)->tile);
+        renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &cur);
+        if (app->cursor.count > 1) {
+            sg_count_text(app, x, y, (unsigned)app->cursor.count);
+        }
+    } else if (sg->hov && !stack_is_empty(&sg->hov_stack)) {
+        sg_tooltip(app, ui->mouse_x, ui->mouse_y, item_get_info(sg->hov_stack.item)->name);
+    }
 }
 
 /* Survival click handling for one storage slot (pick up / place / merge /
@@ -1504,7 +1634,7 @@ static void sslot_count(AppContext *app, float x, float y, const ItemStack *slot
  */
 static void sslot_survival(AppContext *app, const UiFrame *ui, float x, float y, ItemStack *slot, ItemStack *cursor)
 {
-    if (!ui_hit(ui->mouse_x, ui->mouse_y, x, y, SINV_SLOT, SINV_SLOT)) {
+    if (!ui_hit(ui->mouse_x, ui->mouse_y, x, y, SG_ITEM, SG_ITEM)) {
         return;
     }
     bool acted = false;
@@ -1556,26 +1686,27 @@ static void sslot_survival(AppContext *app, const UiFrame *ui, float x, float y,
     }
 }
 
-/* Draw the held cursor stack at the mouse pointer (backdrop box + count).
- * The item sprite goes into the screen's icon batch (drawn in one pass).
- */
-static void scursor_draw(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, IconBatch *icons)
+/* One interactive storage slot: queue its art, then handle the click. */
+static void sg_storage_slot(AppContext *app, const UiFrame *ui, SgScreen *sg, float gx, float gy, ItemStack *slot)
 {
-    if (stack_is_empty(&app->cursor)) {
-        return;
+    float x = sg->px + gx * SG;
+    float y = sg->py + gy * SG;
+    (void)sg_slot(ui, sg, x, y, slot);
+    sslot_survival(app, ui, x, y, slot, &app->cursor);
+}
+
+/* The 27 storage slots + hotbar of the player inventory at their vanilla GUI-pixel coordinates (shared by the
+ * inventory and crafting-table screens). gx0 is the left edge of the slot grid; main_y / hotbar_y its rows. */
+static void sg_player_slots(AppContext *app, const UiFrame *ui, SgScreen *sg, float main_y, float hotbar_y)
+{
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < SINV_COLS; ++col) {
+            sg_storage_slot(app, ui, sg, 8.0f + 18.0f * (float)col, main_y + 18.0f * (float)row,
+                            &app->player.inv.slots[INV_MAIN_START + row * SINV_COLS + col]);
+        }
     }
-    const ItemInfo *info = item_get_info(app->cursor.item);
-    float x = (float)ui->mouse_x - 14.0f;
-    float y = (float)ui->mouse_y - 14.0f;
-    srect(rects, rn, SCR_MAX_RECT_VERTS, x - 2.0f, y - 2.0f, 32.0f, 32.0f, 0.0f, 0.0f, 0.0f, 0.55f);
-    if (icons != NULL) {
-        icons_push(icons, x, y, 28.0f, info->tile);
-    }
-    sflush(app, rects, rn);
-    if (app->cursor.count > 1) {
-        char cb[8];
-        snprintf(cb, sizeof(cb), "%u", (unsigned)app->cursor.count);
-        renderer_draw_text(app->renderer, x + 30.0f, y + 16.0f, SCR_SMALL_SCALE + 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, cb);
+    for (int col = 0; col < SINV_COLS; ++col) {
+        sg_storage_slot(app, ui, sg, 8.0f + 18.0f * (float)col, hotbar_y, &app->player.inv.slots[col]);
     }
 }
 
@@ -1616,11 +1747,13 @@ static void scraft_recompute(AppContext *app, ItemStack *grid, int gw, int gh, u
  * is denied without consuming ingredients). Ingredients are consumed
  * only after the take is fully accepted — never partial, never lost.
  */
-static void scraft_take(AppContext *app, const UiFrame *ui, float *rects, size_t *rn, float x, float y, ItemStack *grid,
-                        int gw, int gh, uint32_t *hashslot, IconBatch *icons)
+static void scraft_take(AppContext *app, const UiFrame *ui, SgScreen *sg, float gx, float gy, ItemStack *grid, int gw,
+                        int gh, uint32_t *hashslot)
 {
-    sslot_draw(app, ui, rects, rn, x, y, &app->craft_out, icons);
-    if (!ui_hit(ui->mouse_x, ui->mouse_y, x, y, SINV_SLOT, SINV_SLOT) || !ui->mouse_clicked) {
+    float x = sg->px + gx * SG;
+    float y = sg->py + gy * SG;
+    (void)sg_slot(ui, sg, x, y, &app->craft_out);
+    if (!ui_hit(ui->mouse_x, ui->mouse_y, x, y, SG_ITEM, SG_ITEM) || !ui->mouse_clicked) {
         return;
     }
     if (stack_is_empty(&app->craft_out)) {
@@ -1654,131 +1787,42 @@ static void scraft_take(AppContext *app, const UiFrame *ui, float *rects, size_t
     *hashslot = 0; /* Force output recompute next frame. */
 }
 
-/* Survival inventory: 27 storage slots + hotbar row, drag-free click
- * model (LMB move/merge/swap, RMB split/place-one). E/ESC closes via the
- * app run loop, which resolves the cursor first.
+/* Survival inventory (vanilla InventoryScreen layout): live player preview, 2x2 crafting grid with its output,
+ * 27 storage slots + hotbar; drag-free click model (LMB move/merge/swap, RMB split/place-one). The armour and
+ * off-hand cells are part of the vanilla sheet and stay empty. E/ESC closes via the app run loop, which resolves
+ * the cursor first.
  */
 static void screen_inventory(AppContext *app, const UiFrame *ui)
 {
-    float rects[SCR_MAX_RECT_VERTS * 6];
-    size_t rn = 0;
-    float cx = (float)screen_width(app) * 0.5f;
-    float grid_h = 3.0f * SINV_PITCH + 12.0f + SINV_SLOT;
-    float craft_h = 2.0f * SINV_PITCH + 12.0f;
-    float panel_w = SINV_GRID_W + SINV_PAD * 2.0f;
-    /* +28 bottom pad: the hint line must sit below the hotbar row, not on it. */
-    float panel_h = grid_h + craft_h + 88.0f + 28.0f;
-    float px = cx - panel_w * 0.5f;
-    float py = ((float)screen_height(app) - panel_h) * 0.5f;
-    if (py < 8.0f) {
-        py = 8.0f;
+    SgScreen sg;
+    sg_begin(app, &sg, 0, 176.0f, 166.0f);
+    if (!sg.textured) {
+        srect(sg.rects, &sg.rn, SCR_MAX_RECT_VERTS, sg.px + 26.0f * SG, sg.py + 8.0f * SG, 49.0f * SG, 70.0f * SG, 0.0f,
+              0.0f, 0.0f, 1.0f);
+        sflush(app, sg.rects, &sg.rn);
     }
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
-          0.0f, 0.55f);
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, px, py, panel_w, panel_h, 0.10f, 0.10f, 0.12f, 0.96f);
-    sflush(app, rects, &rn);
+    /* The preview turns toward the cursor (vanilla: offsets from the box centre, 1 GUI pixel = SG units). */
+    float look_x = (sg.px + 50.5f * SG - (float)ui->mouse_x) / SG;
+    float look_y = (sg.py + 43.0f * SG - (float)ui->mouse_y) / SG;
+    renderer_draw_player_preview(app->renderer, sg.px + 26.0f * SG, sg.py + 8.0f * SG, 49.0f * SG, 70.0f * SG,
+                                 &app->player, look_x, look_y);
+    sg_label(app, &sg, 97.0f, 8.0f, "Crafting");
 
-    stext_c(app, "Inventory", cx, py + 10.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
-    char vit[96];
-    snprintf(vit, sizeof(vit), "Health %.0f/%.0f  Hunger %.0f/%.0f", (double)app->player.health,
-             (double)app->player.max_health, (double)app->player.hunger, (double)app->player.max_hunger);
-    stext_c(app, vit, cx, py + 10.0f + 8.0f * SCR_TEXT_SCALE + 6.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G,
-            SCR_DIM_B);
-
-    float gx = cx - SINV_GRID_W * 0.5f;
-    float gy = py + 88.0f;
-    IconBatch icons;
-    icons_clear(&icons);
-    /* Player 2x2 crafting (output derived, take-only). */
-    stext_c(app, "Crafting", gx + SINV_PITCH, gy - 20.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
     scraft_recompute(app, app->craft2, 2, 2, &app->craft_hash);
     for (int row = 0; row < 2; ++row) {
         for (int col = 0; col < 2; ++col) {
-            float x = gx + (float)col * SINV_PITCH;
-            float y = gy + (float)row * SINV_PITCH;
-            ItemStack *slot = &app->craft2[row * 2 + col];
-            sslot_draw(app, ui, rects, &rn, x, y, slot, &icons);
-            sslot_survival(app, ui, x, y, slot, &app->cursor);
+            sg_storage_slot(app, ui, &sg, 98.0f + 18.0f * (float)col, 18.0f + 18.0f * (float)row,
+                            &app->craft2[row * 2 + col]);
         }
     }
-    scraft_take(app, ui, rects, &rn, gx + 2.0f * SINV_PITCH + 24.0f, gy + SINV_PITCH * 0.5f, app->craft2, 2, 2,
-                &app->craft_hash, &icons);
-    gy += craft_h;
-    const char *hov_name = NULL;
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < SINV_COLS; ++col) {
-            int slot_idx = INV_MAIN_START + row * SINV_COLS + col;
-            float x = gx + (float)col * SINV_PITCH;
-            float y = gy + (float)row * SINV_PITCH;
-            ItemStack *slot = &app->player.inv.slots[slot_idx];
-            if (sslot_draw(app, ui, rects, &rn, x, y, slot, &icons)) {
-                const ItemInfo *info = item_get_info(slot->item);
-                if (!stack_is_empty(slot)) {
-                    hov_name = info->name;
-                }
-            }
-            sslot_survival(app, ui, x, y, slot, &app->cursor);
-        }
-    }
-    float hy = gy + 3.0f * SINV_PITCH + 12.0f;
-    for (int col = 0; col < SINV_COLS; ++col) {
-        float x = gx + (float)col * SINV_PITCH;
-        ItemStack *slot = &app->player.inv.slots[col];
-        if (sslot_draw(app, ui, rects, &rn, x, hy, slot, &icons)) {
-            const ItemInfo *info = item_get_info(slot->item);
-            if (!stack_is_empty(slot)) {
-                hov_name = info->name;
-            }
-        }
-        if (col == app->player.hotbar_sel) {
-            /* Selection outline (4 bars; srect has no outline primitive). */
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy - 2.0f, SINV_SLOT + 4.0f, 2.0f, 1.0f, 1.0f, 1.0f, 1.0f);
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy + SINV_SLOT, SINV_SLOT + 4.0f, 2.0f, 1.0f, 1.0f, 1.0f,
-                  1.0f);
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x - 2.0f, hy - 2.0f, 2.0f, SINV_SLOT + 4.0f, 1.0f, 1.0f, 1.0f, 1.0f);
-            srect(rects, &rn, SCR_MAX_RECT_VERTS, x + SINV_SLOT, hy - 2.0f, 2.0f, SINV_SLOT + 4.0f, 1.0f, 1.0f, 1.0f,
-                  1.0f);
-            sflush(app, rects, &rn);
-        }
-        sslot_survival(app, ui, x, hy, slot, &app->cursor);
-    }
-    sflush(app, rects, &rn);
-    scursor_draw(app, ui, rects, &rn, &icons);
-    /* Icons first, counts over them (Minecraft convention). */
-    renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &icons);
-    for (int i = 0; i < 4; ++i) {
-        int cx2 = i % 2;
-        int cy2 = i / 2;
-        sslot_count(app, gx + (float)cx2 * SINV_PITCH, gy - craft_h + (float)cy2 * SINV_PITCH, &app->craft2[i]);
-    }
-    sslot_count(app, gx + 2.0f * SINV_PITCH + 24.0f, gy - craft_h + SINV_PITCH * 0.5f, &app->craft_out);
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < SINV_COLS; ++col) {
-            sslot_count(app, gx + (float)col * SINV_PITCH, gy + (float)row * SINV_PITCH,
-                        &app->player.inv.slots[INV_MAIN_START + row * SINV_COLS + col]);
-        }
-    }
-    for (int col = 0; col < SINV_COLS; ++col) {
-        sslot_count(app, gx + (float)col * SINV_PITCH, hy, &app->player.inv.slots[col]);
-    }
-
-    if (!stack_is_empty(&app->cursor)) {
-        const ItemInfo *info = item_get_info(app->cursor.item);
-        char held[96];
-        snprintf(held, sizeof(held), "Holding: %s x%u  (LMB place, RMB place one)", info->name,
-                 (unsigned)app->cursor.count);
-        stext_c(app, held, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B);
-    } else if (hov_name != NULL) {
-        stext_c(app, hov_name, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
-    } else {
-        stext_c(app, "LMB move / RMB split  -  E or ESC to close", cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f,
-                SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
-    }
+    scraft_take(app, ui, &sg, 154.0f, 28.0f, app->craft2, 2, 2, &app->craft_hash);
+    sg_player_slots(app, ui, &sg, 84.0f, 142.0f);
+    sg_finish(app, ui, &sg);
 }
 
-/* Creative catalogue: every registered item as a free full-stack source
- * (LMB grabs to cursor), plus an editable hotbar row (LMB assigns a copy,
- * empty cursor clears). Closing discards the cursor (infinite sources).
+/* Creative item tab (vanilla CreativeModeInventoryScreen layout): five rows of the scrollable catalogue (LMB grabs
+ * a full stack to the cursor) over the editable hotbar row (LMB assigns the held stack, empty cursor clears).
+ * Wheel or the scrollbar scrolls. Closing discards the cursor (infinite sources).
  */
 static void screen_creative(AppContext *app, const UiFrame *ui)
 {
@@ -1793,75 +1837,71 @@ static void screen_creative(AppContext *app, const UiFrame *ui)
     }
     const uint16_t extra[] = {ITEM_COAL,          ITEM_APPLE,        ITEM_STICK,           ITEM_BOW,
                               ITEM_ARROW,         ITEM_BONE,         ITEM_RAW_BEEF,        ITEM_LEATHER,
-                              ITEM_ROTTEN_FLESH,  ITEM_IRON_INGOT,   ITEM_DIAMOND,         ITEM_WOOD_PICKAXE,
-                              ITEM_STONE_PICKAXE, ITEM_IRON_PICKAXE, ITEM_DIAMOND_PICKAXE, ITEM_WOOD_AXE,
-                              ITEM_STONE_AXE,     ITEM_IRON_AXE,     ITEM_DIAMOND_AXE,     ITEM_WOOD_SHOVEL,
-                              ITEM_STONE_SHOVEL,  ITEM_IRON_SHOVEL,  ITEM_DIAMOND_SHOVEL,  ITEM_WOOD_SWORD,
-                              ITEM_STONE_SWORD,   ITEM_IRON_SWORD,   ITEM_DIAMOND_SWORD};
+                              ITEM_ROTTEN_FLESH,  ITEM_IRON_INGOT,   ITEM_DIAMOND,         ITEM_WHEAT_SEEDS,
+                              ITEM_SHEARS,        ITEM_WOOD_PICKAXE, ITEM_STONE_PICKAXE,   ITEM_IRON_PICKAXE,
+                              ITEM_DIAMOND_PICKAXE, ITEM_WOOD_AXE,   ITEM_STONE_AXE,       ITEM_IRON_AXE,
+                              ITEM_DIAMOND_AXE,   ITEM_WOOD_SHOVEL,  ITEM_STONE_SHOVEL,    ITEM_IRON_SHOVEL,
+                              ITEM_DIAMOND_SHOVEL, ITEM_WOOD_SWORD,  ITEM_STONE_SWORD,     ITEM_IRON_SWORD,
+                              ITEM_DIAMOND_SWORD};
     for (size_t i = 0; i < sizeof(extra) / sizeof(extra[0]) && ncata < (int)(sizeof(cata) / sizeof(cata[0])); ++i) {
         if (item_is_valid(extra[i])) {
             cata[ncata++] = extra[i];
         }
     }
+    const int visible_rows = 5;
     int rows = (ncata + SINV_COLS - 1) / SINV_COLS;
-    if (rows < 1) {
-        rows = 1;
-    }
+    int max_scroll = rows > visible_rows ? rows - visible_rows : 0;
 
-    float rects[SCR_MAX_RECT_VERTS * 6];
-    size_t rn = 0;
-    float cx = (float)screen_width(app) * 0.5f;
-    float grid_h = (float)rows * SINV_PITCH + 12.0f + SINV_SLOT;
-    float panel_w = SINV_GRID_W + SINV_PAD * 2.0f;
-    float panel_h = grid_h + 88.0f + 28.0f; /* Bottom pad: hint below hotbar. */
-    float px = cx - panel_w * 0.5f;
-    float py = ((float)screen_height(app) - panel_h) * 0.5f;
-    if (py < 8.0f) {
-        py = 8.0f;
-    }
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
-          0.0f, 0.55f);
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, px, py, panel_w, panel_h, 0.10f, 0.10f, 0.12f, 0.96f);
-    sflush(app, rects, &rn);
+    SgScreen sg;
+    sg_begin(app, &sg, 2, 195.0f, 136.0f);
 
-    stext_c(app, "Creative Inventory", cx, py + 10.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
-    stext_c(app, "Click an item for a full stack, then click a hotbar slot", cx,
-            py + 10.0f + 8.0f * SCR_TEXT_SCALE + 6.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G, SCR_DIM_B);
-
-    float gx = cx - SINV_GRID_W * 0.5f;
-    float gy = py + 88.0f;
-    IconBatch icons;
-    icons_clear(&icons);
-    const char *hov_name = NULL;
-    for (int i = 0; i < ncata; ++i) {
-        int col = i % SINV_COLS;
-        int row = i / SINV_COLS;
-        float x = gx + (float)col * SINV_PITCH;
-        float y = gy + (float)row * SINV_PITCH;
-        const ItemInfo *info = item_get_info(cata[i]);
-        uint16_t full = info->max_stack > 0 ? info->max_stack : 1;
-        ItemStack cell = {cata[i], full, 0};
-        if (sslot_draw(app, ui, rects, &rn, x, y, &cell, &icons)) {
-            hov_name = info->name;
-        }
-        if (ui_hit(ui->mouse_x, ui->mouse_y, x, y, SINV_SLOT, SINV_SLOT) && ui->mouse_clicked) {
-            app->cursor.item = cata[i];
-            app->cursor.count = full;
-            app->cursor.durability = 0;
-            audio_play(&app->audio, AUDIO_UI_CLICK);
-        }
+    /* Scrolling: wheel ticks and dragging inside the scrollbar column. */
+    if (ui->wheel != 0) {
+        app->menu.creative_scroll -= ui->wheel;
     }
-    float hy = gy + (float)rows * SINV_PITCH + 12.0f;
-    for (int col = 0; col < SINV_COLS; ++col) {
-        float x = gx + (float)col * SINV_PITCH;
-        ItemStack *slot = &app->player.inv.slots[col];
-        if (sslot_draw(app, ui, rects, &rn, x, hy, slot, &icons)) {
-            const ItemInfo *info = item_get_info(slot->item);
-            if (!stack_is_empty(slot)) {
-                hov_name = info->name;
+    const float track_x = sg.px + 174.0f * SG, track_y = sg.py + 17.0f * SG;
+    if (max_scroll > 0 && ui->mouse_down && ui_hit(ui->mouse_x, ui->mouse_y, track_x, track_y, 16.0f * SG, 114.0f * SG)) {
+        float frac = ((float)ui->mouse_y - (sg.py + 25.5f * SG)) / (97.0f * SG);
+        frac = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
+        app->menu.creative_scroll = (int)floorf(frac * (float)max_scroll + 0.5f);
+    }
+    if (app->menu.creative_scroll > max_scroll) {
+        app->menu.creative_scroll = max_scroll;
+    }
+    if (app->menu.creative_scroll < 0) {
+        app->menu.creative_scroll = 0;
+    }
+    int scroll = app->menu.creative_scroll;
+
+    sg_label(app, &sg, 8.0f, 6.0f, "Items");
+    for (int row = 0; row < visible_rows; ++row) {
+        for (int col = 0; col < SINV_COLS; ++col) {
+            int i = (scroll + row) * SINV_COLS + col;
+            float x = sg.px + (9.0f + 18.0f * (float)col) * SG;
+            float y = sg.py + (18.0f + 18.0f * (float)row) * SG;
+            if (i >= ncata) {
+                ItemStack none;
+                stack_clear(&none);
+                (void)sg_slot(ui, &sg, x, y, &none);
+                continue;
+            }
+            const ItemInfo *info = item_get_info(cata[i]);
+            ItemStack cell = {cata[i], 1, 0}; /* The catalogue shows single items; the grab is a full stack. */
+            bool hov = sg_slot(ui, &sg, x, y, &cell);
+            if (hov && ui->mouse_clicked) {
+                app->cursor.item = cata[i];
+                app->cursor.count = info->max_stack > 0 ? info->max_stack : 1;
+                app->cursor.durability = 0;
+                audio_play(&app->audio, AUDIO_UI_CLICK);
             }
         }
-        if (ui_hit(ui->mouse_x, ui->mouse_y, x, hy, SINV_SLOT, SINV_SLOT) && ui->mouse_clicked) {
+    }
+    for (int col = 0; col < SINV_COLS; ++col) {
+        float x = sg.px + (9.0f + 18.0f * (float)col) * SG;
+        float y = sg.py + 112.0f * SG;
+        ItemStack *slot = &app->player.inv.slots[col];
+        bool hov = sg_slot(ui, &sg, x, y, slot);
+        if (hov && ui->mouse_clicked) {
             if (!stack_is_empty(&app->cursor)) {
                 const ItemInfo *info = item_get_info(app->cursor.item);
                 slot->item = app->cursor.item;
@@ -1874,134 +1914,40 @@ static void screen_creative(AppContext *app, const UiFrame *ui)
             audio_play(&app->audio, AUDIO_UI_CLICK);
         }
     }
-    sflush(app, rects, &rn);
-    scursor_draw(app, ui, rects, &rn, &icons);
-    /* Icons first, counts over them. */
-    renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &icons);
-    for (int i = 0; i < ncata; ++i) {
-        int col = i % SINV_COLS;
-        int row = i / SINV_COLS;
-        const ItemInfo *info = item_get_info(cata[i]);
-        uint16_t full = info->max_stack > 0 ? info->max_stack : 1;
-        ItemStack cell = {cata[i], full, 0};
-        sslot_count(app, gx + (float)col * SINV_PITCH, gy + (float)row * SINV_PITCH, &cell);
+    /* Scroller thumb (12x15 GUI px at x=175, travelling 97 px over the 112 px track); grey when nothing scrolls. */
+    {
+        float frac = max_scroll > 0 ? (float)scroll / (float)max_scroll : 0.0f;
+        float tx = sg.px + 175.0f * SG;
+        float ty = sg.py + (18.0f + floorf(97.0f * frac)) * SG;
+        float c = max_scroll > 0 ? 0.776f : 0.545f;
+        srect(sg.rects, &sg.rn, SCR_MAX_RECT_VERTS, tx, ty, 12.0f * SG, 15.0f * SG, 0.216f, 0.216f, 0.216f, 1.0f);
+        srect(sg.rects, &sg.rn, SCR_MAX_RECT_VERTS, tx, ty, 12.0f * SG - 2.0f, 15.0f * SG - 2.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        srect(sg.rects, &sg.rn, SCR_MAX_RECT_VERTS, tx + 2.0f, ty + 2.0f, 12.0f * SG - 4.0f, 15.0f * SG - 4.0f, c, c, c,
+              1.0f);
     }
-    for (int col = 0; col < SINV_COLS; ++col) {
-        sslot_count(app, gx + (float)col * SINV_PITCH, hy, &app->player.inv.slots[col]);
-    }
-
-    if (!stack_is_empty(&app->cursor)) {
-        const ItemInfo *info = item_get_info(app->cursor.item);
-        char held[96];
-        snprintf(held, sizeof(held), "Holding: %s x%u  (click a hotbar slot)", info->name, (unsigned)app->cursor.count);
-        stext_c(app, held, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B);
-    } else if (hov_name != NULL) {
-        stext_c(app, hov_name, cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
-    } else {
-        stext_c(app, "E or ESC to close", cx, py + panel_h - 24.0f, SCR_SMALL_SCALE + 1.0f, SCR_DIM_R, SCR_DIM_G,
-                SCR_DIM_B);
-    }
+    sg_finish(app, ui, &sg);
 }
 
-/* Workbench crafting overlay (survival): 3x3 ingredient grid + derived
- * output, then the full inventory (27 storage + hotbar) below. Same click
- * model as the inventory (grids are plain ItemStacks); closing returns
+/* Crafting-table screen (vanilla CraftingScreen layout): 3x3 ingredient grid + derived output, then the full
+ * inventory (27 storage + hotbar). Same click model as the inventory (grids are plain ItemStacks); closing returns
  * ingredients via app_resolve_crafting.
  */
 static void screen_crafting(AppContext *app, const UiFrame *ui)
 {
-    float rects[SCR_MAX_RECT_VERTS * 6];
-    size_t rn = 0;
-    float cx = (float)screen_width(app) * 0.5f;
-    float bench_h = 3.0f * SINV_PITCH;                    /* 3x3 grid block. */
-    float stor_h = 3.0f * SINV_PITCH + 12.0f + SINV_SLOT; /* 27 slots + hotbar. */
-    float panel_w = SINV_GRID_W + SINV_PAD * 2.0f;
-    float panel_h = bench_h + 12.0f + stor_h + 88.0f + 28.0f; /* Bottom line below hotbar. */
-    float px = cx - panel_w * 0.5f;
-    float py = ((float)screen_height(app) - panel_h) * 0.5f;
-    if (py < 8.0f) {
-        py = 8.0f;
-    }
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, 0.0f, 0.0f, (float)screen_width(app), (float)screen_height(app), 0.0f, 0.0f,
-          0.0f, 0.55f);
-    srect(rects, &rn, SCR_MAX_RECT_VERTS, px, py, panel_w, panel_h, 0.10f, 0.10f, 0.12f, 0.96f);
-    sflush(app, rects, &rn);
-
-    stext_c(app, "Crafting Table", cx, py + 10.0f, SCR_TEXT_SCALE, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
-
-    float gx = cx - SINV_GRID_W * 0.5f;
-    float gy = py + 88.0f;
-    IconBatch icons;
-    icons_clear(&icons);
+    SgScreen sg;
+    sg_begin(app, &sg, 1, 176.0f, 166.0f);
+    sg_label(app, &sg, 28.0f, 6.0f, "Crafting");
+    sg_label(app, &sg, 8.0f, 72.0f, "Inventory");
     scraft_recompute(app, app->craft3, 3, 3, &app->craft_hash3);
     for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 3; ++col) {
-            float x = gx + (float)col * SINV_PITCH;
-            float y = gy + (float)row * SINV_PITCH;
-            ItemStack *slot = &app->craft3[row * 3 + col];
-            sslot_draw(app, ui, rects, &rn, x, y, slot, &icons);
-            sslot_survival(app, ui, x, y, slot, &app->cursor);
+            sg_storage_slot(app, ui, &sg, 30.0f + 18.0f * (float)col, 17.0f + 18.0f * (float)row,
+                            &app->craft3[row * 3 + col]);
         }
     }
-    scraft_take(app, ui, rects, &rn, gx + 3.0f * SINV_PITCH + 24.0f, gy + SINV_PITCH, app->craft3, 3, 3,
-                &app->craft_hash3, &icons);
-
-    float sy = gy + bench_h + 12.0f;
-    const char *hov_name = NULL;
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < SINV_COLS; ++col) {
-            int slot_idx = INV_MAIN_START + row * SINV_COLS + col;
-            float x = gx + (float)col * SINV_PITCH;
-            float y = sy + (float)row * SINV_PITCH;
-            ItemStack *slot = &app->player.inv.slots[slot_idx];
-            if (sslot_draw(app, ui, rects, &rn, x, y, slot, &icons)) {
-                const ItemInfo *info = item_get_info(slot->item);
-                if (!stack_is_empty(slot)) {
-                    hov_name = info->name;
-                }
-            }
-            sslot_survival(app, ui, x, y, slot, &app->cursor);
-        }
-    }
-    float hy = sy + 3.0f * SINV_PITCH + 12.0f;
-    for (int col = 0; col < SINV_COLS; ++col) {
-        float x = gx + (float)col * SINV_PITCH;
-        ItemStack *slot = &app->player.inv.slots[col];
-        if (sslot_draw(app, ui, rects, &rn, x, hy, slot, &icons)) {
-            const ItemInfo *info = item_get_info(slot->item);
-            if (!stack_is_empty(slot)) {
-                hov_name = info->name;
-            }
-        }
-        sslot_survival(app, ui, x, hy, slot, &app->cursor);
-    }
-    sflush(app, rects, &rn);
-    scursor_draw(app, ui, rects, &rn, &icons);
-    /* Icons first, counts over them. */
-    renderer_draw_item_icons(app->renderer, screen_width(app), screen_height(app), &icons);
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < 3; ++col) {
-            sslot_count(app, gx + (float)col * SINV_PITCH, gy + (float)row * SINV_PITCH, &app->craft3[row * 3 + col]);
-        }
-    }
-    sslot_count(app, gx + 3.0f * SINV_PITCH + 24.0f, gy + SINV_PITCH, &app->craft_out);
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < SINV_COLS; ++col) {
-            sslot_count(app, gx + (float)col * SINV_PITCH, sy + (float)row * SINV_PITCH,
-                        &app->player.inv.slots[INV_MAIN_START + row * SINV_COLS + col]);
-        }
-    }
-    for (int col = 0; col < SINV_COLS; ++col) {
-        sslot_count(app, gx + (float)col * SINV_PITCH, hy, &app->player.inv.slots[col]);
-    }
-    if (!stack_is_empty(&app->cursor)) {
-        const ItemInfo *info = item_get_info(app->cursor.item);
-        char held[96];
-        snprintf(held, sizeof(held), "Holding: %s x%u", info->name, (unsigned)app->cursor.count);
-        stext_c(app, held, cx, py + panel_h - 22.0f, SCR_SMALL_SCALE + 1.0f, SCR_ACC_R, SCR_ACC_G, SCR_ACC_B);
-    } else if (hov_name != NULL) {
-        stext_c(app, hov_name, cx, py + panel_h - 22.0f, SCR_SMALL_SCALE + 1.0f, SCR_TXT_R, SCR_TXT_G, SCR_TXT_B);
-    }
+    scraft_take(app, ui, &sg, 124.0f, 35.0f, app->craft3, 3, 3, &app->craft_hash3);
+    sg_player_slots(app, ui, &sg, 84.0f, 142.0f);
+    sg_finish(app, ui, &sg);
 }
 
 /* Death screen over the frozen world: respawn at the stable spawn or

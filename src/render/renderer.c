@@ -105,6 +105,8 @@ struct Renderer {
     int sky_textures_loc[3], sky_has_textures_loc;
     unsigned int sky_textures[3];
     unsigned int hud_tex, item_icons_tex;
+    unsigned int gui_container_tex[3]; /* Vanilla inventory / crafting-table / creative panels (0 = not converted). */
+    Camera *preview_cam;               /* Lazily created camera for the inventory player preview. */
     unsigned int underwater_overlay_tex;
     Shader *ui_shader; /* Owned flat UI program (NULL when GL limited). */
     unsigned int ui_vao; /* UI quad array (0 when unavailable). */
@@ -780,7 +782,7 @@ void renderer_draw_player(Renderer *r, const Camera *cam, float aspect, const Ti
         if (!stack_is_empty(held)) {
             const ItemInfo *info = item_get_info(held->item);
             if (info != NULL && info->tile >= 0) {
-                uint16_t block = item_to_block(held->item);
+                uint16_t block = item_is_flat(held->item) ? 0 : item_to_block(held->item);
                 float s = block != 0 ? 0.17f : 0.16f;
                 float depth = block != 0 ? 0.17f : 0.02f;
                 MobModelPart item = {{-0.375f - s * 0.5f, 0.62f - s * 0.5f, 0.06f - depth * 0.5f},
@@ -965,8 +967,8 @@ static bool renderer_draw_player_arm_batch(Renderer *r, const Camera *cam, float
         v[10] = sample[10];
         int tile = (int)floorf(v[7] * 16) * 16 + (int)floorf(v[6] * 16);
         if (tile != last_tile) {
-            tint = texture == r->atlas ? visual_world_tint(r->light_world, (int)floorf(eye.x), (int)floorf(eye.z), tile)
-                                       : mmath_vec3(1, 1, 1);
+            /* Held items use the default grass/foliage colours, like the item tint sources of Java Edition. */
+            tint = texture == r->atlas ? visual_tile_tint(NULL, 0, 0, tile) : mmath_vec3(1, 1, 1);
             last_tile = tile;
         }
         v[11] = tint.x;
@@ -1362,6 +1364,9 @@ Renderer *renderer_create(GlContext *gl)
     r->hud_tex = renderer_load_visual_bitmap("generated/menu/hud.bmp", 512, 128, false, false);
     r->underwater_overlay_tex = renderer_load_visual_bitmap("generated/environment/underwater.bmp", 0, 0, false, true);
     r->item_icons_tex = renderer_load_visual_bitmap("generated/menu/item_icons.bmp", 512, 512, true, false);
+    r->gui_container_tex[0] = renderer_load_visual_bitmap("generated/menu/inventory.bmp", 256, 256, false, false);
+    r->gui_container_tex[1] = renderer_load_visual_bitmap("generated/menu/crafting_table.bmp", 256, 256, false, false);
+    r->gui_container_tex[2] = renderer_load_visual_bitmap("generated/menu/creative_items.bmp", 256, 256, false, false);
     if (r->atlas == 0) {
         LOG_ERROR("renderer_create: atlas unavailable; textured draws will be wrong");
     }
@@ -1601,6 +1606,11 @@ void renderer_destroy(Renderer *r)
     texture_atlas_delete(r->hud_tex);
     texture_atlas_delete(r->underwater_overlay_tex);
     texture_atlas_delete(r->item_icons_tex);
+    texture_atlas_delete(r->gui_container_tex[0]);
+    texture_atlas_delete(r->gui_container_tex[1]);
+    texture_atlas_delete(r->gui_container_tex[2]);
+    camera_destroy(r->preview_cam);
+    r->preview_cam = NULL;
     for (int i = 0; i < 3; ++i)
         texture_atlas_delete(r->sky_textures[i]);
     for (int i = 0; i < 3; ++i) {
@@ -2128,11 +2138,20 @@ static const float CUBE_V[4] = {0.0f, 0.0f, 1.0f, 1.0f};
  *   ao: brightness multiplier.
  *   yaw: radians around Y about the cube center (0 = axis-aligned).
  */
+static void entity_emit_cube_tiles(float *dst, float minx, float miny, float minz, float size, const int tiles[6],
+                                   float ao, float yaw);
+
 static void entity_emit_cube(float *dst, float minx, float miny, float minz, float size, int tile, float ao,
                              float yaw)
 {
-    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
-    texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
+    const int tiles[6] = {tile, tile, tile, tile, tile, tile};
+    entity_emit_cube_tiles(dst, minx, miny, minz, size, tiles, ao, yaw);
+}
+
+/* A cube with one atlas tile per face (-X,+X,-Y,+Y,-Z,+Z, the block face order). */
+static void entity_emit_cube_tiles(float *dst, float minx, float miny, float minz, float size, const int tiles[6],
+                                   float ao, float yaw)
+{
     /* Two triangles per face: (0,1,2) + (2,1,3). */
     static const int TRIS[6] = {0, 1, 2, 2, 1, 3};
     float c = cosf(yaw);
@@ -2141,6 +2160,8 @@ static void entity_emit_cube(float *dst, float minx, float miny, float minz, flo
     float cz = minz + size * 0.5f;
     size_t n = 0;
     for (int f = 0; f < 6; ++f) {
+        float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+        texture_atlas_tile_uv(tiles[f], &u0, &v0, &u1, &v1);
         for (int k = 0; k < 6; ++k) {
             int i = TRIS[k];
             float *v = dst + n * MESHER_FLOATS_PER_VERTEX;
@@ -2162,10 +2183,114 @@ static void entity_emit_cube(float *dst, float minx, float miny, float minz, flo
     }
 }
 
+/* One vertex of a spinning flat item: local (lx, ly, lz) about the item centre, rotated by yaw. */
+static float *entity_item_vert(float *v, float cx, float miny, float cz, float c, float s, float lx, float ly,
+                               float lz, float nx, float ny, float nz, float u, float vv)
+{
+    v[0] = cx + lx * c + lz * s;
+    v[1] = miny + ly;
+    v[2] = cz - lx * s + lz * c;
+    v[3] = nx * c + nz * s;
+    v[4] = ny;
+    v[5] = -nx * s + nz * c;
+    v[6] = u;
+    v[7] = vv;
+    v[8] = 1.0f;
+    v[9] = 1.0f;
+    v[10] = 0.0f;
+    return v + MESHER_FLOATS_PER_VERTEX;
+}
+
+/* A quad (corners CCW from outside) as two triangles. uv holds one (u, v) pair per corner. */
+static float *entity_item_quad(float *v, float cx, float miny, float cz, float c, float s, const float p[4][3],
+                               const float n[3], const float uv[4][2])
+{
+    static const int ORDER[6] = {0, 1, 2, 0, 2, 3};
+    for (int k = 0; k < 6; ++k) {
+        int i = ORDER[k];
+        v = entity_item_vert(v, cx, miny, cz, c, s, p[i][0], p[i][1], p[i][2], n[0], n[1], n[2], uv[i][0], uv[i][1]);
+    }
+    return v;
+}
+
+/* A dropped flat item (item/generated): two faces plus a thin rim sampled from the edge texels, 36 vertices. */
+static void entity_emit_flat_item(float *dst, float cx, float miny, float cz, float size, int tile, float yaw)
+{
+    float u0, v0, u1, v1;
+    texture_atlas_tile_uv(tile, &u0, &v0, &u1, &v1);
+    const float hw = size * 0.5f, top = size, ht = 0.02f;
+    const float ex = (u1 - u0) / 16.0f * 0.5f, ey = (v1 - v0) / 16.0f * 0.5f;
+    float c = cosf(yaw), s = sinf(yaw);
+    float *v = dst;
+    {
+        const float p[4][3] = {{-hw, 0, ht}, {hw, 0, ht}, {hw, top, ht}, {-hw, top, ht}};
+        const float n[3] = {0, 0, 1};
+        const float uv[4][2] = {{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
+        v = entity_item_quad(v, cx, miny, cz, c, s, p, n, uv);
+    }
+    {
+        const float p[4][3] = {{hw, 0, -ht}, {-hw, 0, -ht}, {-hw, top, -ht}, {hw, top, -ht}};
+        const float n[3] = {0, 0, -1};
+        const float uv[4][2] = {{u1, v0}, {u0, v0}, {u0, v1}, {u1, v1}};
+        v = entity_item_quad(v, cx, miny, cz, c, s, p, n, uv);
+    }
+    {
+        const float p[4][3] = {{-hw, top, ht}, {hw, top, ht}, {hw, top, -ht}, {-hw, top, -ht}};
+        const float n[3] = {0, 1, 0};
+        const float uv[4][2] = {{u0, v1 - ey}, {u1, v1 - ey}, {u1, v1 - ey}, {u0, v1 - ey}};
+        v = entity_item_quad(v, cx, miny, cz, c, s, p, n, uv);
+    }
+    {
+        const float p[4][3] = {{-hw, 0, -ht}, {hw, 0, -ht}, {hw, 0, ht}, {-hw, 0, ht}};
+        const float n[3] = {0, -1, 0};
+        const float uv[4][2] = {{u0, v0 + ey}, {u1, v0 + ey}, {u1, v0 + ey}, {u0, v0 + ey}};
+        v = entity_item_quad(v, cx, miny, cz, c, s, p, n, uv);
+    }
+    {
+        const float p[4][3] = {{-hw, 0, -ht}, {-hw, 0, ht}, {-hw, top, ht}, {-hw, top, -ht}};
+        const float n[3] = {-1, 0, 0};
+        const float uv[4][2] = {{u0 + ex, v0}, {u0 + ex, v0}, {u0 + ex, v1}, {u0 + ex, v1}};
+        v = entity_item_quad(v, cx, miny, cz, c, s, p, n, uv);
+    }
+    {
+        const float p[4][3] = {{hw, 0, ht}, {hw, 0, -ht}, {hw, top, -ht}, {hw, top, ht}};
+        const float n[3] = {1, 0, 0};
+        const float uv[4][2] = {{u1 - ex, v0}, {u1 - ex, v0}, {u1 - ex, v1}, {u1 - ex, v1}};
+        entity_item_quad(v, cx, miny, cz, c, s, p, n, uv);
+    }
+}
+
+/* Re-tint vertices by the atlas tile they sample (short grass is biome green). `at` selects the biome column. */
+static void renderer_tint_tiles(Renderer *r, float *verts, size_t count, Vec3 at)
+{
+    (void)r;
+    int last_tile = -1;
+    Vec3 tint = mmath_vec3(1, 1, 1);
+    for (size_t i = 0; i < count; ++i) {
+        float *v = verts + i * MESHER_FLOATS_PER_VERTEX;
+        int tile = (int)floorf(v[7] * 16) * 16 + (int)floorf(v[6] * 16);
+        if (tile != last_tile) {
+            tint = visual_tile_tint(NULL, 0, 0, tile);
+            (void)at;
+            last_tile = tile;
+        }
+        v[11] = tint.x;
+        v[12] = tint.y;
+        v[13] = tint.z;
+    }
+}
+
 /* Upload raw VoxelVertex verts (non-indexed count) into the scratch
  * buffer and draw it. No-op on bad args or missing pipe.
  */
+static void renderer_draw_transient_tinted(Renderer *r, float *verts, size_t vcount, bool tile_tint, Vec3 at);
+
 static void renderer_draw_transient(Renderer *r, float *verts, size_t vcount)
+{
+    renderer_draw_transient_tinted(r, verts, vcount, false, mmath_vec3(0, 0, 0));
+}
+
+static void renderer_draw_transient_tinted(Renderer *r, float *verts, size_t vcount, bool tile_tint, Vec3 at)
 {
     if (vcount == 0) {
         gpu_chunk_destroy(&r->ent_buf);
@@ -2187,6 +2312,9 @@ static void renderer_draw_transient(Renderer *r, float *verts, size_t vcount)
     mesh.vertex_cap = vcount;
     mesh.index_cap = icount;
     renderer_light_vertices(r, mesh.vertices, mesh.vertex_count);
+    if (tile_tint) {
+        renderer_tint_tiles(r, mesh.vertices, mesh.vertex_count, at);
+    }
     if (gpu_chunk_upload(&r->ent_buf, &mesh, 0, 0) == 0) {
         gpu_chunk_draw(&r->ent_buf);
     }
@@ -2234,16 +2362,26 @@ void renderer_draw_entities(Renderer *r, const EntityPool *pool, const Camera *c
             continue;
         }
         float bob = 0.10f + 0.05f * sinf(e->age * 3.0f);
-        float size = 0.30f;
-        int tile = item_get_info(e->stack.item)->tile;
-        /* Cube base floats above the settled base (never sinks); slow
-         * Y spin so the art reads from all sides. */
+        const ItemInfo *info = item_get_info(e->stack.item);
+        /* Slow Y spin so the art reads from all sides; the item floats above the settled base. */
         float yaw = e->age * 1.5f;
-        entity_emit_cube(verts + o * MESHER_FLOATS_PER_VERTEX, e->pos.x - size * 0.5f,
-                         e->pos.y + bob, e->pos.z - size * 0.5f, size, tile, 1.0f, yaw);
+        if (item_is_flat(e->stack.item)) {
+            /* Tools, materials and decor are flat sprites (item/generated), half a block wide. */
+            entity_emit_flat_item(verts + o * MESHER_FLOATS_PER_VERTEX, e->pos.x, e->pos.y + bob, e->pos.z, 0.5f,
+                                  info->tile, yaw);
+        } else {
+            /* Full blocks are small cubes with their real per-face art (grass: top, side, dirt bottom). */
+            float size = 0.25f;
+            int tiles[6];
+            for (int f = 0; f < 6; ++f) {
+                tiles[f] = block_tile_for_face(info->place_block, f);
+            }
+            entity_emit_cube_tiles(verts + o * MESHER_FLOATS_PER_VERTEX, e->pos.x - size * 0.5f, e->pos.y + bob,
+                                   e->pos.z - size * 0.5f, size, tiles, 1.0f, yaw);
+        }
         o += 36;
     }
-    renderer_draw_transient(r, verts, vcount);
+    renderer_draw_transient_tinted(r, verts, o, true, camera_get_position(cam));
     free(verts);
     renderer_end_voxel(r);
 }
@@ -2598,6 +2736,91 @@ void renderer_draw_item_icons(Renderer *r, int width, int height, const IconBatc
     bool native_icons = r->item_icons_tex && (!r->atlas_pack[0] || strcmp(r->atlas_pack, "Default") == 0);
     (void)renderer_draw_ui_texture_verts(r, width, height, native_icons ? r->item_icons_tex : r->atlas, b->verts, verts,
                                          1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+/* Draw one vanilla container background (the top-left panel of its 256x256 sheet) with its top-left corner at
+ * (x, y) in canvas units, `scale` canvas units per GUI pixel. Returns false when the sheet was not converted
+ * (callers then draw their own flat panel). kind: 0 = player inventory (176x166), 1 = crafting table (176x166),
+ * 2 = creative item tab (195x136). */
+bool renderer_draw_container_panel(Renderer *r, int width, int height, int kind, float x, float y, float scale)
+{
+    static const float PANEL_SIZE[3][2] = {{176.0f, 166.0f}, {176.0f, 166.0f}, {195.0f, 136.0f}};
+    if (r == NULL || kind < 0 || kind > 2 || r->gui_container_tex[kind] == 0 || !(scale > 0.0f)) {
+        return false;
+    }
+    const float u1 = PANEL_SIZE[kind][0] / 256.0f, v1 = PANEL_SIZE[kind][1] / 256.0f;
+    const float x1 = x + PANEL_SIZE[kind][0] * scale, y1 = y + PANEL_SIZE[kind][1] * scale;
+    const float quad[24] = {x, y, 0, 0, x1, y, u1, 0, x, y1, 0, v1, x, y1, 0, v1, x1, y, u1, 0, x1, y1, u1, v1};
+    return renderer_draw_ui_texture_verts(r, width, height, r->gui_container_tex[kind], quad, 6, 1, 1, 1, 1);
+}
+
+/* Draw the player model into a UI rectangle (the inventory preview): the player stands in the sky at full light
+ * under a noon clock, seen from the front, turning its body and head toward (look_x, look_y) (cursor offsets from
+ * the preview centre in GUI pixels, vanilla's atan(offset / 40) rule). The rectangle is given in canvas units of
+ * the current UI scale; the voxel pipeline renders into a scissored viewport and the UI state is restored. */
+void renderer_draw_player_preview(Renderer *r, float x, float y, float w, float h, const Player *p, float look_x,
+                                  float look_y)
+{
+    if (r == NULL || p == NULL || r->mob_verts == NULL || !(w > 0.0f) || !(h > 0.0f) || r->vp_width <= 0 ||
+        r->vp_height <= 0) {
+        return;
+    }
+    if (r->preview_cam == NULL) {
+        r->preview_cam = camera_create();
+        if (r->preview_cam == NULL) {
+            return;
+        }
+    }
+    UiScale metrics = ui_scale_for_drawable(r->vp_width, r->vp_height);
+    const float k = metrics.canvas_ratio;
+    int vx = (int)floorf(x * k + 0.5f), vw = (int)floorf(w * k + 0.5f);
+    int vh = (int)floorf(h * k + 0.5f), vy = r->vp_height - (int)floorf(y * k + 0.5f) - vh;
+    if (vw <= 0 || vh <= 0) {
+        return;
+    }
+    const float pi_f = 3.14159265358979f;
+    float face = atanf(isfinite(look_x) ? look_x / 40.0f : 0.0f);
+    float tilt = atanf(isfinite(look_y) ? look_y / 40.0f : 0.0f);
+    Player pv = *p;
+    Vec3 at = mmath_vec3(0.0f, (float)CHUNK_Y + 8.0f, 0.0f);
+    pv.pos = at;
+    pv.render_pos = at;
+    pv.vel = mmath_vec3(0.0f, 0.0f, 0.0f);
+    pv.sprinting = false;
+    pv.grounded = true;
+    pv.water_contact = 0.0f;
+    pv.eat_active = false;
+    pv.bow_drawing = false;
+    pv.walk_phase = 0.0f;
+    pv.limb_pos = pv.limb_pos_prev = 0.0f;
+    pv.limb_speed = pv.limb_speed_prev = 0.0f;
+    pv.interp_alpha = 1.0f;
+    /* The body turns 20 degrees per unit of atan(offset), the head another 20 degrees on top of it. Engine yaw
+     * grows to the left of the facing direction, and the camera looks back at the player, so a cursor on the
+     * viewer's left (positive look_x) is a negative engine yaw. */
+    float body = -face * (20.0f * pi_f / 180.0f);
+    pv.body_yaw = pv.body_yaw_prev = body;
+    pv.yaw = body - face * (20.0f * pi_f / 180.0f);
+    pv.pitch = tilt * (20.0f * pi_f / 180.0f);
+    TimeSystem noon;
+    time_system_init(&noon, 0.5f, 0.0f);
+    camera_set_fov_y(r->preview_cam, 40.0f);
+    camera_set_position(r->preview_cam, mmath_vec3(at.x, at.y + 0.9f, at.z - 3.2f));
+    camera_set_yaw_pitch(r->preview_cam, pi_f, 0.0f);
+    GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(vx, vy, vw, vh);
+    glViewport(vx, vy, vw, vh);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    renderer_draw_player(r, r->preview_cam, (float)vw / (float)vh, &noon, &pv, 0.0f, NULL);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    glViewport(0, 0, r->vp_width, r->vp_height);
+    if (!had_scissor) {
+        glDisable(GL_SCISSOR_TEST);
+    }
 }
 
 /* Draw the owner-local Minecraft title panorama with a slow horizontal

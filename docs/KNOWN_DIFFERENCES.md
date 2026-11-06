@@ -48,6 +48,12 @@ Walking, swimming and falling run the vanilla 20 TPS model (see
 - Only ~7 biomes, a small block/item set, 3 mob types, no redstone, fluids
   limited to bounded water, no lava physics, no Nether/End.
 - Saves and LAN protocol are TerraCraft's own formats.
+- Container screens use the exact 1.21.11 panel sheets and slot coordinates, but there is no armour, off-hand,
+  recipe book or creative tab strip: those cells of the sheet stay empty/absent, and the creative item tab
+  is a single scrollable catalogue. The inventory preview shows the player model without a held item.
+- Item drops: short grass yields wheat seeds (1 in 8) or itself with shears; leaves yield saplings in vanilla
+  but TerraCraft has none, so only apples (1 in 200) and sticks (1 in 50) drop. Flowers and torches are
+  not replaceable and pop off when their support is removed; there are no other flower/plant species.
 - Supplied `mcassets/` predates 1.21.11 (0 spear models vs 7 in the 1.21.11
   jar). Content scale: vanilla has 1,166 blocks / 29,671 block states, 1,505
   items, 157 entity types (from the 1.21.11 data generator); TerraCraft has

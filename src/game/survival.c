@@ -64,6 +64,12 @@ ItemStack survival_block_drop(uint16_t block, ItemId held)
 {
     ItemStack out = {ITEM_NONE, 0, 0};
     const BlockInfo *info = block_get_info(block);
+    /* Loot tables: shears take short grass and leaves as blocks; by hand short grass gives nothing. */
+    if (held == ITEM_SHEARS && (block == (uint16_t)BLOCK_GRASS_PLANT || block == (uint16_t)BLOCK_LEAVES)) {
+        out.item = (ItemId)block;
+        out.count = 1;
+        return out;
+    }
     if (info->drop == 0 || info->drop_count == 0) {
         return out;
     }
@@ -265,20 +271,42 @@ static uint32_t survival_cell_hash(long seed, int x, int y, int z)
 /* Bonus drop roll (leaves -> apple 1-in-8 by cell hash). */
 bool survival_bonus_drop(long seed, uint16_t block, int x, int y, int z, ItemStack *out)
 {
+    return survival_bonus_drop_held(seed, block, x, y, z, ITEM_NONE, out);
+}
+
+bool survival_bonus_drop_held(long seed, uint16_t block, int x, int y, int z, ItemId held, ItemStack *out)
+{
     ItemStack none = {ITEM_NONE, 0, 0};
     if (out == NULL) {
         return false;
     }
     *out = none;
+    if (held == ITEM_SHEARS) {
+        return false; /* The shears branch of the loot table replaces the chance rolls. */
+    }
+    if (block == (uint16_t)BLOCK_GRASS_PLANT) {
+        if (survival_cell_hash(seed, x, y, z) % (uint32_t)SURVIVAL_GRASS_SEEDS_ONE_IN != 0u) {
+            return false;
+        }
+        out->item = ITEM_WHEAT_SEEDS;
+        out->count = 1;
+        return true;
+    }
     if (block != (uint16_t)BLOCK_LEAVES) {
         return false;
     }
-    if (survival_cell_hash(seed, x, y, z) % (uint32_t)SURVIVAL_LEAF_BONUS_ONE_IN != 0u) {
-        return false;
+    if (survival_cell_hash(seed, x, y, z) % (uint32_t)SURVIVAL_LEAF_APPLE_ONE_IN == 0u) {
+        out->item = ITEM_APPLE;
+        out->count = 1;
+        return true;
     }
-    out->item = ITEM_APPLE;
-    out->count = 1;
-    return true;
+    uint32_t h = survival_cell_hash(seed + 1, x, y, z);
+    if (h % (uint32_t)SURVIVAL_LEAF_STICK_ONE_IN == 0u) {
+        out->item = ITEM_STICK;
+        out->count = 1 + ((h >> 12) & 1u);
+        return true;
+    }
+    return false;
 }
 
 /* Hold-to-eat state machine (see header for the contract). */

@@ -55,6 +55,7 @@ static const Recipe RECIPES[] = {
     {"diamond_axe", true, 3, 3, {D, D, N, D, S, N, N, S, N}, 0, ITEM_DIAMOND_AXE, 1},
     {"diamond_shovel", true, 3, 3, {N, D, N, N, S, N, N, S, N}, 0, ITEM_DIAMOND_SHOVEL, 1},
     {"diamond_sword", true, 1, 3, {D, D, S, N, N, N, N, N, N}, 0, ITEM_DIAMOND_SWORD, 1},
+    {"shears", true, 2, 2, {N, I, I, N, N, N, N, N, N}, 0, ITEM_SHEARS, 1},
 };
 #define RECIPE_COUNT (sizeof(RECIPES) / sizeof(RECIPES[0]))
 

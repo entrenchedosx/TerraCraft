@@ -778,7 +778,7 @@ int test_interaction_break_place(void)
     /* Ordinary solid block target is rejected. */
     TEST_ASSERT(interaction_place(w, &p, &ph, BLOCK_WOOD, NULL) == false);
 
-    /* Small vegetation gives way to a placed block. */
+    /* Short grass gives way to a placed block (BlockState.canBeReplaced) and drops nothing without shears. */
     {
         Chunk *c = world_get_chunk(w, 0, 0);
         uint16_t replaced = BLOCK_AIR;
@@ -787,20 +787,21 @@ int test_interaction_break_place(void)
         TEST_ASSERT(interaction_place(w, &p, &ph, BLOCK_STONE, &replaced) == true);
         TEST_ASSERT(replaced == BLOCK_GRASS_PLANT);
         drop = survival_block_drop(replaced, ITEM_NONE);
+        TEST_ASSERT(stack_is_empty(&drop));
+        drop = survival_block_drop(replaced, ITEM_SHEARS);
         TEST_ASSERT(drop.item == BLOCK_GRASS_PLANT && drop.count == 1);
         TEST_ASSERT(world_get_block(w, 8, 64, 8) == BLOCK_STONE);
+        /* Flowers and torches are not replaceable: a block is never written over them, and both drop themselves. */
         chunk_set_block(c, 8, 64, 8, BLOCK_FLOWER);
-        TEST_ASSERT(interaction_place(w, &p, &ph, BLOCK_DIRT, &replaced) == true);
-        TEST_ASSERT(replaced == BLOCK_FLOWER);
-        drop = survival_block_drop(replaced, ITEM_NONE);
+        TEST_ASSERT(interaction_place(w, &p, &ph, BLOCK_DIRT, &replaced) == false);
+        TEST_ASSERT(world_get_block(w, 8, 64, 8) == BLOCK_FLOWER);
+        drop = survival_block_drop(BLOCK_FLOWER, ITEM_NONE);
         TEST_ASSERT(drop.item == BLOCK_FLOWER && drop.count == 1);
-        TEST_ASSERT(world_get_block(w, 8, 64, 8) == BLOCK_DIRT);
         chunk_set_block(c, 8, 64, 8, BLOCK_TORCH);
-        TEST_ASSERT(interaction_place(w, &p, &ph, BLOCK_PLANKS, &replaced) == true);
-        TEST_ASSERT(replaced == BLOCK_TORCH);
-        drop = survival_block_drop(replaced, ITEM_NONE);
+        TEST_ASSERT(interaction_place(w, &p, &ph, BLOCK_PLANKS, &replaced) == false);
+        TEST_ASSERT(world_get_block(w, 8, 64, 8) == BLOCK_TORCH);
+        drop = survival_block_drop(BLOCK_TORCH, ITEM_NONE);
         TEST_ASSERT(drop.item == BLOCK_TORCH && drop.count == 1);
-        TEST_ASSERT(world_get_block(w, 8, 64, 8) == BLOCK_PLANKS);
 
         /* A plant can only be planted on soil, and clicking an existing
          * plant replaces that cell instead of stacking another plant above. */

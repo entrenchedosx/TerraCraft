@@ -119,6 +119,7 @@ int test_mesher_single_block(void);
 int test_mesher_two_adjacent(void);
 int test_mesher_hidden_faces(void);
 int test_mesher_cross_sprite(void);
+int test_mesher_torch_model(void);
 
 /* Atlas tests (defined in test_texture.c). */
 int test_atlas_layout(void);

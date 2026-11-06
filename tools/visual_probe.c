@@ -23,6 +23,11 @@
 #include "game/player_animation.h"
 #include "game/time_system.h"
 #include "game/inventory.h"
+#include "game/item.h"
+#include "core/app.h"
+#include "ui/screens.h"
+#include "ui/ui.h"
+#include "ui/ui_style.h"
 #include "world/world.h"
 #include "world/chunk.h"
 #include "world/world_gen.h"
@@ -78,19 +83,76 @@ static int export_frame(const char *path, int width, int height)
     return ok ? 0 : 1;
 }
 
+/* Draw one real container screen (inv, inv-crafting, inv-creative) through screens_update(). The optional
+ * arguments are the cursor position in canvas units and "held" to carry a stack on the cursor. */
+static int probe_container(Window *window, Renderer *renderer, const char *mode, const char *path, int argc,
+                           char **argv)
+{
+    AppContext *app = (AppContext *)calloc(1, sizeof(AppContext));
+    if (!app)
+        return 1;
+    int width, height;
+    window_get_size(window, &width, &height);
+    renderer_set_viewport(renderer, width, height);
+    app->renderer = renderer;
+    app->width = width;
+    app->height = height;
+    player_init(&app->player);
+    bool creative = strcmp(mode, "inv-creative") == 0;
+    app->player.mode = creative ? 1 : 0;
+    app->state = strcmp(mode, "inv-crafting") == 0 ? GAME_STATE_CRAFTING : GAME_STATE_INVENTORY;
+    ItemStack *slots = app->player.inv.slots;
+    const struct {
+        int slot;
+        uint16_t item, count;
+    } fill[] = {{0, BLOCK_DIRT, 2}, {1, ITEM_WOOD_PICKAXE, 1}, {2, BLOCK_TORCH, 24}, {3, BLOCK_FLOWER, 7},
+                {4, BLOCK_GRASS_PLANT, 16}, {5, ITEM_SHEARS, 1}, {6, ITEM_APPLE, 5}, {9, BLOCK_STONE, 64},
+                {10, BLOCK_PLANKS, 31}, {11, ITEM_STICK, 12}, {12, BLOCK_WOOD, 9}, {20, ITEM_DIAMOND, 3}};
+    for (size_t i = 0; i < sizeof(fill) / sizeof(fill[0]); ++i) {
+        slots[fill[i].slot].item = fill[i].item;
+        slots[fill[i].slot].count = fill[i].count;
+    }
+    if (app->state == GAME_STATE_INVENTORY && !creative) {
+        app->craft2[0].item = BLOCK_PLANKS;
+        app->craft2[0].count = 4;
+        app->craft2[2].item = BLOCK_PLANKS;
+        app->craft2[2].count = 4;
+    }
+    UiFrame ui;
+    ui_frame_clear(&ui);
+    UiScale metrics = ui_scale_for_drawable(width, height);
+    ui.mouse_x = argc >= 4 ? atoi(argv[3]) : (int)(metrics.canvas_width * 0.5f);
+    ui.mouse_y = argc >= 5 ? atoi(argv[4]) : (int)(metrics.canvas_height * 0.5f);
+    if (argc >= 6 && strcmp(argv[5], "held") == 0) {
+        app->cursor.item = ITEM_DIAMOND_SWORD;
+        app->cursor.count = 1;
+    }
+    glClearColor(0.25f, 0.45f, 0.65f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    screens_update(app, &ui);
+    glFinish();
+    int result = export_frame(path, width, height);
+    printf("%s: %dx%d; %s\n", mode, width, height, result ? "FAILED" : path);
+    free(app);
+    return result;
+}
+
 int main(int argc, char **argv)
 {
-    if (argc < 3 || argc > 6 ||
+    bool container = argc >= 3 && strncmp(argv[1], "inv", 3) == 0;
+    if (!container && (argc < 3 || argc > 6 ||
         (strcmp(argv[1], "snow") && strcmp(argv[1], "water") && strcmp(argv[1], "forest") &&
          strcmp(argv[1], "underwater") && strcmp(argv[1], "cave") && strcmp(argv[1], "cave-dark") &&
-         strncmp(argv[1], "third-", 6))) {
+         strncmp(argv[1], "third-", 6) && strncmp(argv[1], "hand-", 5) && strcmp(argv[1], "torch-world")))) {
         fprintf(stderr, "Usage: visual_probe snow|water|forest|underwater|cave|cave-dark OUTPUT.bmp [DAY_PROGRESS "
                         "[ANIMATION_SECONDS [PACK]]]\n");
         return 1;
     }
     bool third = strncmp(argv[1], "third-", 6) == 0;
-    bool snow = strcmp(argv[1], "snow") == 0, forest = strcmp(argv[1], "forest") == 0 || third;
-    bool underwater = strcmp(argv[1], "underwater") == 0, cave = strncmp(argv[1], "cave", 4) == 0;
+    bool hand_item = strncmp(argv[1], "hand-", 5) == 0;
+    bool torch_world = strcmp(argv[1], "torch-world") == 0;
+    bool snow = strcmp(argv[1], "snow") == 0, forest = strcmp(argv[1], "forest") == 0 || third || hand_item;
+    bool underwater = strcmp(argv[1], "underwater") == 0, cave = strncmp(argv[1], "cave", 4) == 0 || torch_world;
     SDL_SetMainReady();
     log_set_level(LOG_LEVEL_WARN);
     Window *window = window_create("TerraCraft visual verification", 1280, 720);
@@ -104,6 +166,8 @@ int main(int argc, char **argv)
     }
     (void)SDL_GL_SetSwapInterval(0);
     Renderer *renderer = renderer_create(gl);
+    if (container && renderer)
+        return probe_container(window, renderer, argv[1], argv[2], argc, argv);
     if (renderer && argc >= 6 && renderer_reload_atlas(renderer, argv[5]) != 0)
         return 1;
     World *world = world_create();
@@ -120,6 +184,10 @@ int main(int argc, char **argv)
     if (cave) {
         eye = mmath_vec3(0.5f, 66.62f, 6.5f);
         yaw = 0;
+    }
+    if (torch_world) {
+        eye = mmath_vec3(0.5f, 66.1f, -2.6f);
+        pitch = -0.28f;
     }
     int cx = (int)floorf(eye.x / 16), cz = (int)floorf(eye.z / 16), radius = 5;
     for (int z = cz - radius; z <= cz + radius; ++z)
@@ -142,6 +210,10 @@ int main(int argc, char **argv)
         }
     if (cave && strcmp(argv[1], "cave-dark") != 0)
         (void)world_set_block(world, 0, 65, -5, BLOCK_TORCH);
+    if (torch_world) {
+        (void)world_set_block(world, 1, 65, -5, BLOCK_FLOWER);
+        (void)world_set_block(world, -1, 65, -5, BLOCK_GRASS_PLANT);
+    }
     bool dirty = true;
     while (dirty) {
         renderer_refresh_world(renderer, world);
@@ -219,6 +291,14 @@ int main(int argc, char **argv)
     HandView hand;
     hand_view_init(&hand);
     HandViewSample sample = {0};
+    int held_tile = snow ? TILE_SNOW : -1;
+    uint16_t held_block = snow ? BLOCK_SNOW : 0;
+    HandItemKind held_kind = snow ? HAND_ITEM_BLOCK : HAND_ITEM_NONE;
+    if (hand_item) {
+        held_kind = HAND_ITEM_SPRITE;
+        held_tile = strstr(argv[1], "torch") != NULL ? TILE_TORCH : (strstr(argv[1], "flower") != NULL ? TILE_FLOWER
+                    : (strstr(argv[1], "shears") != NULL ? TILE_SHEARS : TILE_PLANT));
+    }
     sample.held_key = snow ? BLOCK_SNOW : 0;
     sample.yaw_deg = -yaw * 180 / MMATH_PI;
     sample.pitch_deg = -pitch * 180 / MMATH_PI;
@@ -226,9 +306,8 @@ int main(int argc, char **argv)
     sample.attack_delay_ticks = 5;
     hand_view_advance(&hand, 1, &sample);
     HandViewFrame frame;
-    hand_view_frame(&hand, 1, sample.yaw_deg, sample.pitch_deg, snow ? HAND_ITEM_BLOCK : HAND_ITEM_NONE, NULL, &frame);
-    renderer_draw_player_arm(renderer, camera, (float)width / (float)height, &clock, snow ? TILE_SNOW : -1,
-                             snow ? BLOCK_SNOW : 0, &frame);
+    hand_view_frame(&hand, 1, sample.yaw_deg, sample.pitch_deg, held_kind, NULL, &frame);
+    renderer_draw_player_arm(renderer, camera, (float)width / (float)height, &clock, held_tile, held_block, &frame);
     ItemStack hotbar[9] = {{0}};
     hotbar[0].item = snow ? BLOCK_SNOW : BLOCK_GRASS;
     hotbar[0].count = 64;

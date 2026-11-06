@@ -34,8 +34,8 @@ static const ItemInfo ITEM_TABLE[] = {
     {2, "Dirt", 64, 2, TOOL_NONE, TOOL_TIER_NONE, TILE_DIRT, 0.50f, 0.30f, 0.10f, 0, 0, 1, 0.4f},
     {1, "Stone", 64, 1, TOOL_NONE, TOOL_TIER_NONE, TILE_STONE, 0.50f, 0.50f, 0.50f, 0, 0, 1, 0.4f},
     {8, "Sand", 64, 8, TOOL_NONE, TOOL_TIER_NONE, TILE_SAND, 0.85f, 0.75f, 0.50f, 0, 0, 1, 0.4f},
-    {6, "Wood", 64, 6, TOOL_NONE, TOOL_TIER_NONE, TILE_WOOD, 0.45f, 0.30f, 0.15f, 0, 0, 1, 0.4f},
-    {7, "Leaves", 64, 7, TOOL_NONE, TOOL_TIER_NONE, TILE_LEAVES, 0.20f, 0.55f, 0.20f, 0, 0, 1, 0.4f},
+    {6, "Oak Log", 64, 6, TOOL_NONE, TOOL_TIER_NONE, TILE_WOOD, 0.45f, 0.30f, 0.15f, 0, 0, 1, 0.4f},
+    {7, "Oak Leaves", 64, 7, TOOL_NONE, TOOL_TIER_NONE, TILE_LEAVES, 0.20f, 0.55f, 0.20f, 0, 0, 1, 0.4f},
     {9, "Glass", 64, 9, TOOL_NONE, TOOL_TIER_NONE, TILE_GLASS, 0.75f, 0.88f, 0.95f, 0, 0, 1, 0.4f},
     {5, "Bedrock", 64, 5, TOOL_NONE, TOOL_TIER_NONE, TILE_BEDROCK, 0.10f, 0.10f, 0.10f, 0, 0, 1, 0.4f},
     {10, "Coal Ore", 64, 10, TOOL_NONE, TOOL_TIER_NONE, TILE_COAL_ORE, 0.35f, 0.35f, 0.35f, 0, 0, 1, 0.4f},
@@ -43,11 +43,11 @@ static const ItemInfo ITEM_TABLE[] = {
     {12, "Gold Ore", 64, 12, TOOL_NONE, TOOL_TIER_NONE, TILE_GOLD_ORE, 0.70f, 0.62f, 0.40f, 0, 0, 1, 0.4f},
     {13, "Diamond Ore", 64, 13, TOOL_NONE, TOOL_TIER_NONE, TILE_DIAMOND_ORE, 0.50f, 0.68f, 0.68f, 0, 0, 1, 0.4f},
     {14, "Snow", 64, 14, TOOL_NONE, TOOL_TIER_NONE, TILE_SNOW, 0.94f, 0.96f, 0.98f, 0, 0, 1, 0.4f},
-    {15, "Grass Plant", 64, 15, TOOL_NONE, TOOL_TIER_NONE, TILE_PLANT, 0.35f, 0.70f, 0.25f, 0, 0, 1, 0.4f},
-    {16, "Flower", 64, 16, TOOL_NONE, TOOL_TIER_NONE, TILE_FLOWER, 0.90f, 0.25f, 0.30f, 0, 0, 1, 0.4f},
+    {15, "Short Grass", 64, 15, TOOL_NONE, TOOL_TIER_NONE, TILE_PLANT, 0.35f, 0.70f, 0.25f, 0, 0, 1, 0.4f},
+    {16, "Poppy", 64, 16, TOOL_NONE, TOOL_TIER_NONE, TILE_FLOWER, 0.90f, 0.25f, 0.30f, 0, 0, 1, 0.4f},
     {17, "Torch", 64, 17, TOOL_NONE, TOOL_TIER_NONE, TILE_TORCH, 0.95f, 0.75f, 0.30f, 0, 0, 1, 0.4f},
-    {18, "Workbench", 64, 18, TOOL_NONE, TOOL_TIER_NONE, TILE_WORKBENCH, 0.55f, 0.40f, 0.22f, 0, 0, 1, 0.4f},
-    {19, "Planks", 64, 19, TOOL_NONE, TOOL_TIER_NONE, TILE_PLANKS, 0.62f, 0.47f, 0.26f, 0, 0, 1, 0.4f},
+    {18, "Crafting Table", 64, 18, TOOL_NONE, TOOL_TIER_NONE, TILE_WORKBENCH, 0.55f, 0.40f, 0.22f, 0, 0, 1, 0.4f},
+    {19, "Oak Planks", 64, 19, TOOL_NONE, TOOL_TIER_NONE, TILE_PLANKS, 0.62f, 0.47f, 0.26f, 0, 0, 1, 0.4f},
     {ITEM_COAL, "Coal", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_COAL, 0.15f, 0.15f, 0.15f, 0, 0, 1, 0.4f},
     {ITEM_APPLE, "Apple", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_APPLE, 0.85f, 0.15f, 0.15f, 0, 4, 0,
      0.0f},
@@ -68,14 +68,14 @@ static const ItemInfo ITEM_TABLE[] = {
      0, 0, 1, 0.4f},
     {ITEM_DIAMOND, "Diamond", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_DIAMOND, 0.36f, 0.85f, 0.82f,
      0, 0, 1, 0.4f},
-    {ITEM_WOOD_PICKAXE, "Wood Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_WOOD, TILE_WOOD_PICKAXE, 0.55f, 0.42f,
+    {ITEM_WOOD_PICKAXE, "Wooden Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_WOOD, TILE_WOOD_PICKAXE, 0.55f, 0.42f,
      0.25f, 64, 0, 3, 0.5f},
     {ITEM_STONE_PICKAXE, "Stone Pickaxe", 1, 0, TOOL_PICKAXE, TOOL_TIER_STONE, TILE_STONE_PICKAXE, 0.55f, 0.55f,
      0.58f, 160, 0, 3, 0.5f},
-    {ITEM_WOOD_AXE, "Wood Axe", 1, 0, TOOL_AXE, TOOL_TIER_WOOD, TILE_WOOD_AXE, 0.55f, 0.42f, 0.25f, 64, 0, 4, 0.8f},
+    {ITEM_WOOD_AXE, "Wooden Axe", 1, 0, TOOL_AXE, TOOL_TIER_WOOD, TILE_WOOD_AXE, 0.55f, 0.42f, 0.25f, 64, 0, 4, 0.8f},
     {ITEM_STONE_AXE, "Stone Axe", 1, 0, TOOL_AXE, TOOL_TIER_STONE, TILE_STONE_AXE, 0.55f, 0.55f, 0.58f, 160,
      0, 4, 0.8f},
-    {ITEM_WOOD_SHOVEL, "Wood Shovel", 1, 0, TOOL_SHOVEL, TOOL_TIER_WOOD, TILE_WOOD_SHOVEL, 0.55f, 0.42f,
+    {ITEM_WOOD_SHOVEL, "Wooden Shovel", 1, 0, TOOL_SHOVEL, TOOL_TIER_WOOD, TILE_WOOD_SHOVEL, 0.55f, 0.42f,
      0.25f, 64, 0, 2, 0.5f},
     {ITEM_STONE_SHOVEL, "Stone Shovel", 1, 0, TOOL_SHOVEL, TOOL_TIER_STONE, TILE_STONE_SHOVEL, 0.55f, 0.55f,
      0.58f, 160, 0, 2, 0.5f},
@@ -107,6 +107,12 @@ static const ItemInfo ITEM_TABLE[] = {
      0, 6, 0.625f},
     {ITEM_DIAMOND_SWORD, "Diamond Sword", 1, 0, TOOL_SWORD, TOOL_TIER_DIAMOND, TILE_DIAMOND_SWORD, 0.36f, 0.85f,
      0.82f, 1561, 0, 7, 0.625f},
+    /* Wheat seeds: only dropped by tall grass (12.5%); there is no farming yet. */
+    {ITEM_WHEAT_SEEDS, "Wheat Seeds", 64, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_WHEAT_SEEDS, 0.45f, 0.5f, 0.2f, 0, 0, 1,
+     0.4f},
+    /* Shears: harvest short grass and leaves as items. They are not a block tool, so they mine at hand speed and
+     * melee like fists. */
+    {ITEM_SHEARS, "Shears", 1, 0, TOOL_NONE, TOOL_TIER_NONE, TILE_SHEARS, 0.8f, 0.8f, 0.82f, 238, 0, 1, 0.4f},
 };
 #define ITEM_TABLE_COUNT (sizeof(ITEM_TABLE) / sizeof(ITEM_TABLE[0]))
 
@@ -131,6 +137,13 @@ bool item_is_valid(ItemId id)
 bool item_is_block(ItemId id)
 {
     return item_get_info(id)->place_block != 0;
+}
+
+/* Flat sprite items: everything that is not a full block. */
+bool item_is_flat(ItemId id)
+{
+    uint16_t block = item_get_info(id)->place_block;
+    return block == 0 || block_is_cross(block);
 }
 
 /* Block placed by an item (0 when not placeable). */

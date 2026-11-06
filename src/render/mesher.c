@@ -389,6 +389,81 @@ static int mesh_emit_cross(MeshData *m, const VoxelLightBake *light, int x, int 
     return 0;
 }
 
+/* Emit a torch as the vanilla block/template_torch model: a 2 x 10 x 2 pixel pole in the middle of the cell
+ * (from [7,0,7] to [9,10,9]) with the torch texture's pole texels on the sides ([7,6]-[9,16]) and the lit tip
+ * on top ([7,6]-[9,8]); the bottom face is never visible. 5 quads = 20 verts + 30 indices. Fully lit by its own
+ * emission via the per-cell light sample.
+ *
+ * Returns: 0 on success, -1 on OOM.
+ */
+static int mesh_emit_torch(MeshData *m, const VoxelLightBake *light, int x, int y, int z, float wx, float wy, float wz,
+                           const VisualTintGrid *tints)
+{
+    if (mesh_reserve_vertices(m, 20) != 0 || mesh_reserve_indices(m, 30) != 0) {
+        return -1;
+    }
+    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+    texture_atlas_tile_uv(block_tile_for_face(BLOCK_TORCH, 0), &u0, &v0, &u1, &v1);
+    float sky, emitted;
+    voxel_light_sample(light, x, y, z, &sky, &emitted);
+    unsigned int base = (unsigned int)m->vertex_count;
+    const float px = 1.0f / 16.0f;
+    const float xa = wx + 7.0f * px, xb = wx + 9.0f * px;
+    const float za = wz + 7.0f * px, zb = wz + 9.0f * px;
+    const float ya = wy, yb = wy + 10.0f * px;
+    /* Texture pixel coordinates (from the tile's top-left) to atlas UV. */
+#define TORCH_U(pxu) (u0 + (u1 - u0) * ((float)(pxu) / 16.0f))
+#define TORCH_V(pxv) (v1 - (v1 - v0) * ((float)(pxv) / 16.0f))
+    const float su0 = TORCH_U(7), su1 = TORCH_U(9), sv0 = TORCH_V(16), sv1 = TORCH_V(6);
+    /* +Z, -Z, +X, -X: corners in the order bottom-left, bottom-right, top-left, top-right seen from outside. */
+    const float sides[4][4][3] = {
+        {{xa, ya, zb}, {xb, ya, zb}, {xa, yb, zb}, {xb, yb, zb}},
+        {{xb, ya, za}, {xa, ya, za}, {xb, yb, za}, {xa, yb, za}},
+        {{xb, ya, zb}, {xb, ya, za}, {xb, yb, zb}, {xb, yb, za}},
+        {{xa, ya, za}, {xa, ya, zb}, {xa, yb, za}, {xa, yb, zb}},
+    };
+    const float normals[4][3] = {{0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {-1, 0, 0}};
+    for (int f = 0; f < 4; ++f) {
+        mesh_emit_sprite_vert(m, sides[f][0][0], sides[f][0][1], sides[f][0][2], normals[f][0], normals[f][1],
+                              normals[f][2], su0, sv0, 1.0f);
+        mesh_emit_sprite_vert(m, sides[f][1][0], sides[f][1][1], sides[f][1][2], normals[f][0], normals[f][1],
+                              normals[f][2], su1, sv0, 1.0f);
+        mesh_emit_sprite_vert(m, sides[f][2][0], sides[f][2][1], sides[f][2][2], normals[f][0], normals[f][1],
+                              normals[f][2], su0, sv1, 1.0f);
+        mesh_emit_sprite_vert(m, sides[f][3][0], sides[f][3][1], sides[f][3][2], normals[f][0], normals[f][1],
+                              normals[f][2], su1, sv1, 1.0f);
+    }
+    /* Top face: the flame tip texels. */
+    mesh_emit_sprite_vert(m, xa, yb, zb, 0, 1, 0, su0, TORCH_V(8), 1.0f);
+    mesh_emit_sprite_vert(m, xb, yb, zb, 0, 1, 0, su1, TORCH_V(8), 1.0f);
+    mesh_emit_sprite_vert(m, xa, yb, za, 0, 1, 0, su0, TORCH_V(6), 1.0f);
+    mesh_emit_sprite_vert(m, xb, yb, za, 0, 1, 0, su1, TORCH_V(6), 1.0f);
+#undef TORCH_U
+#undef TORCH_V
+    for (size_t i = base; i < m->vertex_count; ++i) {
+        float *v = m->vertices + i * MESHER_FLOATS_PER_VERTEX;
+        v[9] = sky;
+        v[10] = emitted;
+        v[11] = 1.0f;
+        v[12] = 1.0f;
+        v[13] = 1.0f;
+    }
+    (void)tints;
+    unsigned int *ix = m->indices + m->index_count;
+    for (int q = 0; q < 5; ++q) {
+        unsigned int bq = base + (unsigned int)(q * 4);
+        ix[0] = bq + 0;
+        ix[1] = bq + 1;
+        ix[2] = bq + 2;
+        ix[3] = bq + 2;
+        ix[4] = bq + 1;
+        ix[5] = bq + 3;
+        ix += 6;
+    }
+    m->index_count += 30;
+    return 0;
+}
+
 /* Build a mesh for one pass (transparent selects blended blocks only).
  *
  * Args:
@@ -442,6 +517,14 @@ MeshData *mesher_build_lit_mesh(const Chunk *c, const World *w, const VoxelLight
                 /* Cross-sprite decor (plants/flowers/torches) meshes as
                  * crossed quads, never as a cube (a cube turns a flower
                  * into a red box). */
+                if (id == BLOCK_TORCH) {
+                    if (mesh_emit_torch(m, light, x, y, z, wx, wy, wz, &tints) != 0) {
+                        LOG_ERROR("mesher: out of memory emitting torch");
+                        mesher_free(m);
+                        return NULL;
+                    }
+                    continue;
+                }
                 if (block_is_cross(id)) {
                     if (mesh_emit_cross(m, light, x, y, z, wx, wy, wz, id, &tints) != 0) {
                         LOG_ERROR("mesher: out of memory emitting sprite");

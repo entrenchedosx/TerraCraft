@@ -51,6 +51,11 @@ open.
 - Creative flight and Survival health, hunger, mining, tool wear, food,
   crafting, item drops, and death recovery.
 - Pixel-art full/half/empty heart and hunger icons in Survival.
+- Vanilla container screens: the 176x166 inventory and crafting-table panels (slots at their exact Java
+  coordinates) with a live player preview that follows the cursor, slot hover highlights, item-name tooltips
+  and drop-shadowed stack counts, plus a scrollable creative item tab. Short grass, flowers, torches (the
+  2x10x2 pole model), wheat seeds and shears follow the 1.21.11 loot tables, placement rules and flat item
+  sprites.
 - Cows, zombies, and skeletons with real skins, pathfinding, melee, bows,
   and arrows. Living mobs retain their type, position, facing, and health
   when a world is saved and reopened.
@@ -64,7 +69,7 @@ open.
 - Direct LAN play: one player opens a world to LAN, and up to eight other
   players can join by the host computer's local IPv4 address. Player movement,
   chat, and block changes made during the session are shared.
-- 202 registered headless test functions in the custom test runner.
+- 292 registered headless test functions in the custom test runner.
 
 ## Controls
 

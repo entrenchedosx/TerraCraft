@@ -73,6 +73,7 @@ int main(void)
     RUN_TEST(test_mesher_two_adjacent);
     RUN_TEST(test_mesher_hidden_faces);
     RUN_TEST(test_mesher_cross_sprite);
+    RUN_TEST(test_mesher_torch_model);
     RUN_TEST(test_ao_diagonal_chunk_lifecycle);
     RUN_TEST(test_atlas_layout);
     RUN_TEST(test_atlas_tile_mapping);

@@ -24,6 +24,11 @@ typedef struct HitResult HitResult;
  */
 int interaction_break(World *w, const HitResult *hit);
 
+/* True when a small decor block (short grass, flower, torch) may stand at (wx, wy, wz): plants need grass or
+ * dirt below (BushBlock.mayPlaceOn), torches need a block with a full top face below (canSupportCenter; leaves,
+ * water and other decor do not count). Other blocks are always supported. */
+bool interaction_cross_supported(const World *w, int wx, int wy, int wz, uint16_t block);
+
 /* Place the selected hotbar block against the targeted face. Clicking
  * non-solid decor replaces its own cell rather than placing on top of it.
  * Flowers and grass plants additionally require grass, dirt, or snow beneath

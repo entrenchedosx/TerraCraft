@@ -92,7 +92,9 @@ typedef enum AtlasTile {
     TILE_RAW_IRON = 70,
     TILE_RAW_COPPER = 71,
     TILE_LAVA = 72,
-    TILE_GRASS_SIDE_OVERLAY = 73
+    TILE_GRASS_SIDE_OVERLAY = 73,
+    TILE_WHEAT_SEEDS = 74,
+    TILE_SHEARS = 75
 } AtlasTile;
 
 /* Resource-pack tile file names, indexed by tile (NULL entry = no override).

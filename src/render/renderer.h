@@ -339,6 +339,17 @@ void renderer_draw_rects(Renderer *r, int width, int height, const float *verts,
  */
 void renderer_draw_item_icons(Renderer *r, int width, int height, const IconBatch *b);
 
+/* Draw a vanilla container background (kind 0 = player inventory and 1 = crafting table, 176x166 GUI px;
+ * 2 = creative item tab, 195x136 GUI px) with its
+ * top-left at (x, y) canvas units and `scale` canvas units per GUI pixel. Returns false when the converted sheet
+ * is unavailable so the caller can draw a flat fallback. */
+bool renderer_draw_container_panel(Renderer *r, int width, int height, int kind, float x, float y, float scale);
+
+/* Draw the player model (front view, full light) into the canvas-unit rectangle, turning toward the cursor
+ * offsets look_x / look_y (GUI pixels from the preview centre). No-op on bad args. */
+void renderer_draw_player_preview(Renderer *r, float x, float y, float w, float h, const Player *p, float look_x,
+                                  float look_y);
+
 /* Draw a text string with the bitmap font (y-down, top-left origin).
  * Silently truncates past 160 chars. No-op on bad args or missing UI pipe.
  *

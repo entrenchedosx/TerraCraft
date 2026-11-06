@@ -28,6 +28,7 @@ typedef uint16_t ItemId;
 #define ITEM_ROTTEN_FLESH 107u
 #define ITEM_IRON_INGOT 108u
 #define ITEM_DIAMOND 109u
+#define ITEM_WHEAT_SEEDS 110u
 #define ITEM_WOOD_PICKAXE 200u
 #define ITEM_STONE_PICKAXE 201u
 #define ITEM_WOOD_AXE 202u
@@ -45,6 +46,7 @@ typedef uint16_t ItemId;
 #define ITEM_DIAMOND_SHOVEL 214u
 #define ITEM_IRON_SWORD 215u
 #define ITEM_DIAMOND_SWORD 216u
+#define ITEM_SHEARS 217u
 
 /* Tool categories a block may prefer (bows and swords never match a block tool,
  * so they always mine at hand speed — no struct change needed).
@@ -112,6 +114,12 @@ bool item_is_valid(ItemId id);
  * Returns: true when place_block != 0.
  */
 bool item_is_block(ItemId id);
+
+/* True when the item is drawn as a flat generated sprite (held, dropped, in the GUI) rather than as a cube:
+ * every non-block item plus the decor blocks (short grass, flowers, torches), whose item models are
+ * item/generated in Java Edition. Cubes are for full blocks only.
+ */
+bool item_is_flat(ItemId id);
 
 /* Block placed by an item (0 when not placeable).
  *

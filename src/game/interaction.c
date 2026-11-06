@@ -60,23 +60,26 @@ static void mark_saved(World *w, int wx, int wz)
     }
 }
 
-/* Non-solid decor occupies a block cell but yields when a block is placed
- * there. The caller receives the replaced block so Survival can spawn its
- * normal drop and Creative can discard it.
- */
+/* BlockState.canBeReplaced: air, fluids and short grass yield when a block is placed in them. Flowers and
+ * torches do not: a block clicked against them is placed beside them instead. Replaced blocks drop nothing. */
 static bool interaction_replaceable(uint16_t block)
 {
-    return block == BLOCK_AIR || block_is_water(block) || block_is_cross(block);
+    return block == BLOCK_AIR || block_is_water(block) || block == BLOCK_LAVA || block == BLOCK_GRASS_PLANT;
 }
 
-/* Flowers and grass plants need a valid ground surface. A cross-sprite plant
- * is not a support block, so this also prevents vegetation columns. */
-static bool interaction_plant_supported(const World *w, int wx, int wy, int wz)
+bool interaction_cross_supported(const World *w, int wx, int wy, int wz, uint16_t block)
 {
+    if (block != BLOCK_GRASS_PLANT && block != BLOCK_FLOWER && block != BLOCK_TORCH) {
+        return true;
+    }
     if (w == NULL || wy <= 0) {
         return false;
     }
     uint16_t support = world_get_block(w, wx, wy - 1, wz);
+    if (block == BLOCK_TORCH) {
+        return block_is_solid(support) && support != BLOCK_LEAVES && !block_is_cross(support);
+    }
+    /* The engine's snow biome grounds its vegetation on snow blocks, which stand in for snowy grass blocks. */
     return support == BLOCK_GRASS || support == BLOCK_DIRT || support == BLOCK_SNOW;
 }
 /* Write a block by world coords (chunk must be loaded).
@@ -171,9 +174,8 @@ bool interaction_place(World *w, const Player *p, const HitResult *hit, uint16_t
     int tx = hx + hit->normal[0];
     int ty = hy + hit->normal[1];
     int tz = hz + hit->normal[2];
-    /* Small decor is itself the placement surface: replace the clicked
-     * cell instead of treating its top face as a shelf for another plant. */
-    if (block_is_cross(clicked)) {
+    /* A replaceable clicked block (short grass) is replaced instead of placing beside it. */
+    if (interaction_replaceable(clicked) && clicked != BLOCK_AIR) {
         tx = hx;
         ty = hy;
         tz = hz;
@@ -185,8 +187,7 @@ bool interaction_place(World *w, const Player *p, const HitResult *hit, uint16_t
     if (!interaction_replaceable(cur)) {
         return false;
     }
-    if ((block_id == BLOCK_GRASS_PLANT || block_id == BLOCK_FLOWER) &&
-        !interaction_plant_supported(w, tx, ty, tz)) {
+    if (!interaction_cross_supported(w, tx, ty, tz, block_id)) {
         return false;
     }
     if (placement_hits_player(p, tx, ty, tz, block_id)) {

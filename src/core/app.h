@@ -99,6 +99,7 @@ typedef struct LanRemotePlayer {
 typedef struct MenuData {
     UiControls controls;
     float settings_scroll;
+    int creative_scroll; /* First visible row of the creative item catalogue. */
     char profile_buf[PROFILE_NAME_MAX_LEN + 1]; /* First-run account name. */
     char lan_address_buf[64]; /* IPv4 address of the LAN host. */
     int lan_server_idx;   /* Selected discovered server (-1 = none). */
